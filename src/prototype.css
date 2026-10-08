@@ -34,4 +34,14 @@
 .session-fixed-tabs .segmented{height:44px}
 .session-fixed-tabs .segmented button{min-height:36px}
 .has-session-tabs .oops-scroll{top:calc(var(--mobile-status-bar-height,54px) + 119px)!important}
+.task-fixed-tabs{position:absolute;top:calc(var(--mobile-status-bar-height,54px) + 62px);left:0;right:0;height:57px;padding:2px 22px 10px;background:var(--canvas);z-index:10;border-bottom:1px solid var(--line)}
+.task-fixed-tabs .segmented{height:44px}
+.task-fixed-tabs .task-tab-bar{padding:0;background:transparent}
+.task-fixed-tabs .segmented button{min-height:36px}
+.has-task-tabs .oops-scroll{top:calc(var(--mobile-status-bar-height,54px) + 119px)!important}
+.task-fixed-actions{position:absolute;left:16px;right:16px;z-index:16;padding:10px;border-radius:24px;background:#fbfaff;border:1px solid var(--line);box-shadow:0 4px 24px #37226016}
+.task-fixed-actions.keyboard-open{padding:0;border:0;background:transparent;box-shadow:none;pointer-events:none}
+.task-fixed-actions.keyboard-open .task-primary-actions{display:none}
+.has-task-primary .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 212px)}
+.has-task-primary.has-recording-controls .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 378px)}
 .badge.amber{background:#fff0dd;color:#a97630}

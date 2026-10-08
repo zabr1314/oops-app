@@ -2,13 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { MobileScroll, useKeyboard, useKeyboardInsets, useMobileDevice, useScreenPortal } from './mobile';
 import { initialData, OopsContext, useOops, type AppData, type Route } from './store';
 import { Icon, Row, Sheet, isTextEntryTarget } from './ui';
-import { Assistant, Home, homeTitle, Notifications, SearchScreen, Voice, Welcome, taskVisible, sessionVisible, notificationVisible } from './features/Home';
-import Tasks, { taskTitle } from './features/Tasks';
+import { Assistant, Home, homeTitle, homeTaskAttentionQueue, Notifications, SearchScreen, Voice, Welcome, taskVisible, sessionVisible, notificationVisible } from './features/Home';
+import Tasks, { TaskTabBar, TaskPrimaryFooter, taskTitle } from './features/Tasks';
 import Sessions, { SessionTabBar, sessionTitle, useSessionRecorder } from './features/Sessions';
 import { MemoryScreens, SettingsScreens, memoryTitle, settingsTitle } from './features/MemorySettings';
 import { RecordingControls, EndRecordingSheet } from './features/RecordingControls';
 import { clearViewState } from './viewState';
-import { taskNeedsAttention } from './sourceAccess';
 import { migrateStoredData } from './stateMigrations';
 
 const roots=['home','sessions','tasks','memory','settings'];
@@ -171,19 +170,24 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const hasRecordingControls = !!session && !isKeyboardVisible;
   const hasPrepareFooter = route.view === 'session-create' && !session;
   const hasSessionTabs = ['session-detail', 'session-transcript'].includes(route.view) && !!route.id && sessionVisible(data, route.id);
-  const pendingTasks = data.tasks.filter(x => ['我', data.settings.name].includes(x.owner) && taskNeedsAttention(x) && taskVisible(data, x)).length;
+  const visibleTask = data.tasks.find(t => t.id === route.id && taskVisible(data, t));
+  const hasTaskTabs = route.view === 'task-detail' && !!visibleTask;
+  const hasTaskPrimary = hasTaskTabs && !isKeyboardVisible;
+  const pendingTasks = homeTaskAttentionQueue(data).length;
   const content = active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
-  return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''} ${hasSessionTabs ? 'has-session-tabs' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
+  return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''} ${hasSessionTabs ? 'has-session-tabs' : ''} ${hasTaskTabs ? 'has-task-tabs' : ''} ${hasTaskPrimary ? 'has-task-primary' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
     <header className={`app-header ${isHome ? 'home-header' : ''}`}>
       {isHome ? <><img className="wordmark" src="/brand/wordmark.png" alt="Oops" /><div className="header-tools"><button className="space-pill" onClick={() => setSpaceOpen(true)}>{data.settings.space}<Icon name="caret-down" size={13} /></button><button className="icon-button notification-button" aria-label="通知" onClick={() => navigate({ view: 'notifications' })}><Icon name="bell" size={25} />{data.notifications.some(n => !n.read && notificationVisible(data, n.route)) && <i />}</button></div></> : <><button className="icon-button" aria-label={isRoot ? '搜索全部内容' : '返回上一页'} onClick={isRoot ? () => navigate({ view: 'search' }) : back}><Icon name={isRoot ? 'magnifying-glass' : 'caret-left'} size={23} /></button><h1>{title}</h1><button className="icon-button" aria-label={active === 'sessions' ? '新建记录' : active === 'tasks' ? '新建任务' : '回到首页'} onClick={() => navigate({ view: active === 'sessions' ? 'session-mode' : active === 'tasks' ? 'task-edit' : 'home' })}><Icon name={['sessions', 'tasks'].includes(active) ? 'plus' : 'house'} size={22} /></button></>}
     </header>
     {hasSessionTabs && <div className="session-fixed-tabs"><SessionTabBar /></div>}
+    {hasTaskTabs && <div className="task-fixed-tabs"><TaskTabBar /></div>}
     <MobileScroll key={`${data.settings.space}:${route.view}:${route.id || ''}`} className="oops-scroll"><main className={`screen-content ${isHome ? 'home-main' : ''}`} aria-label={title}>{content}</main></MobileScroll>
     {!isKeyboardVisible && <nav className="app-nav" aria-label="主导航">{tabs.map(t => <button key={t.view} aria-label={t.title} aria-current={active === t.view ? 'page' : undefined} className={active === t.view ? 'selected' : ''} onClick={() => navigate({ view: t.view })}><Icon name={t.icon} size={25} /><span>{t.title}</span>{t.view === 'tasks' && pendingTasks > 0 && <b>{pendingTasks}</b>}</button>)}</nav>}
     {hasPrepareFooter && <div className="session-prepare-footer" style={{ bottom: bottomInset + (isKeyboardVisible ? 12 : 78) }}><button className="button primary" type="submit" form="oops-session-prepare-form"><Icon name="play" size={20} /><span>{data.sessions.find(s => s.id === route.id)?.status === '已结束' ? '开始后续示例记录' : '开始示例记录'}</span></button></div>}
+    {hasTaskTabs && <aside className={`task-fixed-actions ${isKeyboardVisible ? 'keyboard-open' : ''}`} aria-label="任务下一步" style={{ bottom: bottomInset + (hasRecordingControls ? 244 : 78) }}><TaskPrimaryFooter /></aside>}
     <RecordingControls />
     <EndRecordingSheet request={endRequest} onClose={onCloseEnd} />
-    {message && <div className="app-toast" style={{ bottom: bottomInset + (isKeyboardVisible ? 20 : hasRecordingControls ? 248 : hasPrepareFooter ? 146 : 88) }} role="status">{message}</div>}
+    {message && <div className="app-toast" style={{ bottom: bottomInset + (isKeyboardVisible ? 20 : hasRecordingControls ? hasTaskPrimary ? 338 : 248 : hasTaskPrimary ? 176 : hasPrepareFooter ? 146 : 88) }} role="status">{message}</div>}
     <Sheet open={spaceOpen} onClose={() => setSpaceOpen(false)} title="选择工作空间">{spaceNames(data).map(space => <Row key={space} title={space} subtitle={space === '我的空间' ? '私人提问、记忆与成长' : '项目共享的会话、资料与行动'} icon={space === '我的空间' ? 'user' : 'users-three'} trailing={data.settings.space === space ? <Icon name="check" /> : undefined} onClick={() => { update(d => ({ ...d, settings: { ...d.settings, space } })); setSpaceOpen(false); }} />)}<Row title="管理工作空间" icon="gear-six" onClick={() => { setSpaceOpen(false); navigate({ view: 'settings-spaces' }); }} /></Sheet>
   </div>;
 }

@@ -1,4 +1,5 @@
-import type { AppData, AssistantMessage, Memory, SourcePointer, SourceReference, Task, TaskArtifact, Transcript } from './store';
+import type { AppData, AssistantMessage, Memory, SourcePointer, SourceReference, Task, TaskArtifact, TaskMaterial, Transcript } from './store';
+import { taskAttentionReason } from './taskAttention';
 
 export const PERSONAL_SPACE = '我的空间';
 const TEAM_SPACE = 'Oops 产品团队';
@@ -32,7 +33,7 @@ export function sourceAvailable(data: AppData, pointer: SourcePointer, options: 
 }
 
 export function taskNeedsAttention(task: Task): boolean {
-  return !!task.needsReview || ['待承接', '待转交', '待验收'].includes(task.status);
+  return taskAttentionReason(task) !== null;
 }
 
 function visibleTask(data: AppData, task: Task, seen: Set<string>): boolean {
@@ -57,6 +58,21 @@ function fingerprint(value: unknown): string {
   const text = JSON.stringify(value); let hash = 2166136261;
   for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
   return (hash >>> 0).toString(36);
+}
+
+export function selectedTaskMaterials(task: Task): TaskMaterial[] {
+  const ids = task.scope?.materialIds;
+  return ids === undefined ? task.materialRefs || [] : (task.materialRefs || []).filter(material => ids.includes(material.id));
+}
+
+export function generationConfigurationFingerprint(task: Task): string {
+  const scope = task.scope;
+  const mode = task.outputMode === '完整框架与PPT' ? '文档与PPT' : task.outputMode === '仅提纲' ? '文档' : task.outputMode;
+  return fingerprint([task.title, task.description, task.owner, task.due, task.version, task.workKind, task.criteria, mode, task.sourceSession, task.sourceId, task.sourceTime, scope ? [scope.sources, scope.destination, scope.space, scope.materialIds === undefined ? null : [...scope.materialIds].sort(), scope.includeSource !== false] : null]);
+}
+
+export function generationMaterialFingerprint(materials: TaskMaterial[]): string {
+  return fingerprint(materials.map(material => [material.id, material.title, material.body, material.note, material.memoryId, material.sourceSession, material.sourceId, material.sourceTime]));
 }
 
 function referenceFingerprint(data: AppData, ref: SourceReference): string | undefined {
@@ -102,13 +118,13 @@ export function provenanceAvailable(data: AppData, sources: SourceReference[] = 
   return sources.every(ref => referenceAvailable(data, ref, new Set()));
 }
 
-export function taskSourceAvailable(data: AppData, task: Task, seen = new Set<string>()): boolean {
+export function taskSourceAvailable(data: AppData, task: Task, seen = new Set<string>(), selectedOnly = false): boolean {
   const publicOnly = data.settings.space !== PERSONAL_SPACE;
   if (task.sourceNeedsReview || !sourceAvailable(data, task, { publicOnly, requireShared: publicOnly })) return false;
   if (seen.has('task:' + task.id)) return false;
   const next = new Set(seen).add('task:' + task.id);
   if (!(task.sources || []).every(ref => referenceAvailable(data, ref, next))) return false;
-  return materialReferencesAvailable(data, task, next);
+  return materialReferencesAvailable(data, selectedOnly ? { ...task, materialRefs: selectedTaskMaterials(task) } : task, next);
 }
 
 function materialReferencesAvailable(data: AppData, task: Task, seen: Set<string>): boolean {
@@ -124,7 +140,13 @@ function materialReferencesAvailable(data: AppData, task: Task, seen: Set<string
 }
 
 export function generationCanComplete(data: AppData, task: Task & { scope?: { sources: string; destination: string }; generationSources?: SourceReference[] }, token: string): boolean {
-  return !!token && task.generationToken === token && task.aiStatus === '准备中' && !!task.authorized && !!task.scope?.sources.trim() && !!task.scope.destination.trim() && ['已承接', '进行中', '待验收'].includes(task.status) && taskSourceAvailable(data, task) && provenanceAvailable(data, task.generationSources);
+  if (!token || task.generationToken !== token || task.aiStatus !== '准备中' || !task.authorized || !task.scope?.sources.trim() || !task.scope.destination.trim() || !['已承接', '进行中', '待验收'].includes(task.status)) return false;
+  const ids = task.scope.materialIds;
+  if (ids?.some(id => !task.materialRefs?.some(material => material.id === id))) return false;
+  if (!taskSourceAvailable(data, task, new Set(), true) || !provenanceAvailable(data, task.generationSources)) return false;
+  const snapshot = task.generationSnapshot;
+  if (!snapshot) return true; // Old callers can validate source availability; completion still requires a snapshot.
+  return snapshot.token === token && snapshot.version === task.version && snapshot.fingerprint === generationConfigurationFingerprint(task) && snapshot.materialFingerprint === generationMaterialFingerprint(selectedTaskMaterials(task)) && Number.isFinite(snapshot.cost) && snapshot.cost > 0 && (task.budget ?? 40) - (task.used ?? 0) >= snapshot.cost && provenanceAvailable(data, snapshot.sourceRefs);
 }
 
 export function messageAvailable(data: AppData, message: AssistantMessage): boolean {
@@ -168,6 +190,7 @@ export function invalidateSessionSources(data: AppData, sessionId: string, sourc
   const taskIds = new Set<string>(), memoryIds = new Set<string>();
   const fromReferences = (refs?: SourceReference[]) => (refs || []).some(ref => ref.kind === 'session' ? affected({ sourceSession: ref.id, sourceId: ref.sourceId, sourceTime: ref.sourceTime }) : ref.kind === 'task' ? taskIds.has(ref.id) : ref.kind === 'memory' && memoryIds.has(ref.id));
   const artifactAffected = (artifact: TaskArtifact, task: Task) => affected({ sourceSession: artifact.sourceSession || task.sourceSession, ...(artifact.sourceId !== undefined ? { sourceId: artifact.sourceId } : task.sourceId !== undefined ? { sourceId: task.sourceId } : {}), sourceTime: artifact.sourceTime || task.sourceTime }) || fromReferences(artifact.sources);
+  const retainedArtifacts = (task: Task): TaskArtifact[] | undefined => task.artifacts?.length ? task.artifacts : task.results.length ? [{ id: `seed-${task.id}`, kind: task.id === 'TASK-032' ? '资料' : '文档', title: task.id === 'TASK-032' ? '蓝色椅子库存摘录' : `${task.title} · 已有内容`, version: task.version, body: [...task.results], created: '已有成果', sourceSession: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime, sources: task.sources }] : task.artifacts;
   let changed = true;
   while (changed) {
     changed = false;
@@ -181,7 +204,7 @@ export function invalidateSessionSources(data: AppData, sessionId: string, sourc
   taskIds.forEach(id => { retention['task-space:' + id] = PERSONAL_SPACE; });
   const activitiesAt = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   return { ...data,
-    tasks: data.tasks.map(task => taskIds.has(task.id) ? { ...task, authorized: false, generationToken: undefined, sourceNeedsReview: true, needsReview: true, version: task.version + 1, aiStatus: task.aiStatus === '未启动' ? '未启动' : '待授权', artifacts: task.artifacts?.map(a => affected(task) || fromReferences(task.sources) || artifactAffected(a, task) ? { ...a, needsReview: true, reviewHistory: a.reviewedAt ? [...(a.reviewHistory || []), { version: a.version, reviewedAt: a.reviewedAt }] : a.reviewHistory, reviewedAt: undefined } : a), materialRefs: task.materialRefs?.map(m => affected(m) || !!m.memoryId && memoryIds.has(m.memoryId) ? { ...m, needsReview: true } : m), activities: [...task.activities, `${activitiesAt} · ${reason}；旧成果保留待复核，助手授权撤回`] } : task),
+    tasks: data.tasks.map(task => taskIds.has(task.id) ? { ...task, authorized: false, generationToken: undefined, generationSnapshot: undefined, generationSources: undefined, sourceNeedsReview: true, needsReview: true, version: task.version + 1, aiStatus: task.aiStatus === '未启动' ? '未启动' : '待授权', artifacts: retainedArtifacts(task)?.map(a => affected(task) || fromReferences(task.sources) || artifactAffected(a, task) || !task.artifacts?.length ? { ...a, needsReview: true, sourceNeedsReview: true, reviewHistory: a.reviewedAt ? [...(a.reviewHistory || []), { version: a.version, reviewedAt: a.reviewedAt }] : a.reviewHistory, reviewedAt: undefined } : a), materialRefs: task.materialRefs?.map(m => affected(m) || !!m.memoryId && memoryIds.has(m.memoryId) ? { ...m, needsReview: true } : m), activities: [...task.activities, `${activitiesAt} · ${reason}；旧成果保留待复核，助手授权撤回`] } : task),
     memories: data.memories.map(memory => memoryIds.has(memory.id) ? { ...memory, confirmed: false, needsReview: true, visibility: '私有', tags: [...new Set([...memory.tags, '待复核'])] } : memory),
     messages: data.messages.map(message => message.role === 'assistant' && (message.sourceSession === sessionId && !message.sources?.length || fromReferences(message.sources)) ? { ...message, invalidated: true, text: '这条回答的来源已变化，请重新核对后提问。' } : message),
     settings: { ...data.settings, retention, toggles: { ...data.settings.toggles, ['review-' + sessionId]: true } },

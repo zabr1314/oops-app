@@ -1,7 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { stripTypeScriptTypes } from 'node:module';
+import { existsSync } from 'node:fs';
+import { registerHooks, stripTypeScriptTypes } from 'node:module';
+
+// Vite resolves extensionless local modules; use the same actual modules in Node.
+registerHooks({ resolve(specifier, context, nextResolve) {
+  if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
+    const target = new URL(specifier, context.parentURL);
+    if (!/\.[a-z]+$/i.test(target.pathname)) {
+      for (const extension of ['.ts', '.tsx', '.js', '.mjs']) {
+        const candidate = new URL(target.href + extension);
+        if (existsSync(candidate)) return nextResolve(candidate.href, context);
+      }
+    }
+  }
+  return nextResolve(specifier, context);
+} });
 
 async function loadModel(path) {
   const text = await readFile(new URL(path, import.meta.url), 'utf8');
@@ -17,7 +32,7 @@ async function loadModel(path) {
     source = dependencies + text.slice(text.indexOf('const uid'), text.indexOf('const DEMO')) + '\n' + text.slice(text.indexOf('export function parseImportedTranscript'), text.indexOf('function ImportSession')) + '\n' + text.slice(text.indexOf('export function buildSessionExport'), text.indexOf('function Sharing'));
   }
   if (path.endsWith('Home.tsx')) {
-    const dependencies = `import { sharedMemoryEligible } from '${new URL('../src/memoryAccess.ts', import.meta.url).href}';\nimport { makeSourceReference, materialVisible, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '${new URL('../src/sourceAccess.ts', import.meta.url).href}';\n`;
+    const dependencies = `import { sharedMemoryEligible } from '${new URL('../src/memoryAccess.ts', import.meta.url).href}';\nimport { makeSourceReference, materialVisible, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '${new URL('../src/sourceAccess.ts', import.meta.url).href}';\nimport { taskAttentionReason, taskBelongsToMe, taskIsMyAttention, taskPrimaryAction } from '${new URL('../src/taskWorkflow.ts', import.meta.url).href}';\n`;
     source = dependencies + text.slice(text.indexOf('export function homeTitle'), text.indexOf('export function Home()')) + '\n' + text.slice(text.indexOf('type LocalAnswer'), text.indexOf('function referenceRoute'));
   }
   const code = stripTypeScriptTypes(source, { mode: 'strip' }).replace(/from (['"])(\.[^'"]+)\1/g, (_match, _quote, relative) => {
@@ -34,6 +49,8 @@ const memoryLogic = await loadModel('../src/features/MemorySettings.tsx');
 const migration = await loadModel('../src/stateMigrations.ts');
 const sessionLogic = await loadModel('../src/features/Sessions.tsx');
 const homeLogic = await loadModel('../src/features/Home.tsx');
+const workflow = await loadModel('../src/taskWorkflow.ts');
+const communication = await loadModel('../src/communicationLogic.ts');
 const team = 'Oops 产品团队';
 function sharedData() {
   const data = initialData();
@@ -224,11 +241,13 @@ test('generation cannot finish from revoked or detached supplemental materials',
 
 test('the actual completion callback stops when its team authorization source is revoked, even after switching space', () => {
   const data = sharedData(), task = data.tasks[0], title = data.sessions[0].attachments[0];
-  Object.assign(task, { sourceId: 'tr4', authorized: true, status: '已承接', aiStatus: '准备中', generationToken: 'run', generationSpace: team, scope: { sources: '所选资料', destination: '本机' }, materialRefs: [{ id: 'material', sourceSession: 'session-001', title }] });
+  Object.assign(task, { sourceId: 'tr4', authorized: true, status: '已承接', aiStatus: '未启动', scope: { sources: '所选资料', destination: '本机', space: team, materialIds: ['material'] }, materialRefs: [{ id: 'material', sourceSession: 'session-001', title }] });
   data.settings.toggles['material-shared:session-001:' + title] = true;
-  data.settings.toggles['material-shared:session-001:' + title] = false;
-  data.settings.space = '我的空间';
-  const next = taskLogic.finishLocalGeneration(data, task.id, 'run', 1);
+  const started = workflow.beginGeneration(data, task.id, { token: 'run' });
+  assert.equal(started.error, undefined);
+  started.data.settings.toggles['material-shared:session-001:' + title] = false;
+  started.data.settings.space = '我的空间';
+  const next = taskLogic.finishLocalGeneration(started.data, task.id, 'run', started.cost);
   const stopped = next.tasks[0];
   assert.equal(stopped.aiStatus, '待授权');
   assert.equal(stopped.authorized, false);
@@ -259,14 +278,16 @@ test('ordinary tasks produce their own requirements, materials and acceptance cr
 
 test('valid completion saves reviewable drafts and preserves earlier results', () => {
   const data = initialData(), task = data.tasks[0];
-  Object.assign(task, { sourceId: 'tr4', authorized: true, status: '已承接', aiStatus: '准备中', generationToken: 'run', generationSpace: '我的空间', scope: { sources: '实际原话', destination: '本机' }, outputMode: '仅提纲' });
-  const next = taskLogic.finishLocalGeneration(data, task.id, 'run', 2);
-  assert.equal(next.tasks[0].status, '待验收');
+  Object.assign(task, { sourceId: 'tr4', authorized: true, status: '已承接', aiStatus: '未启动', scope: { sources: '实际原话', destination: '本机' }, outputMode: '仅提纲' });
+  const started = workflow.beginGeneration(data, task.id, { token: 'run' });
+  assert.equal(started.error, undefined);
+  const next = taskLogic.finishLocalGeneration(started.data, task.id, 'run', started.cost);
+  assert.equal(next.tasks[0].status, '已承接');
   assert.equal(next.tasks[0].aiStatus, '草稿完成');
   assert.equal(next.tasks[0].artifacts.length, 1);
   assert.equal(next.tasks[0].artifacts[0].needsReview, true);
   assert.equal(next.tasks[0].generationToken, undefined);
-  assert.equal(next.tasks[0].used, 2);
+  assert.equal(next.tasks[0].used, started.cost);
   assert.equal(data.tasks[0].artifacts, undefined);
 });
 
@@ -292,9 +313,11 @@ test('saving preferences and actual retention use selected fragment IDs', () => 
 
 test('the attention queue includes handoff, acceptance and source review consistently', () => {
   const task = initialData().tasks[0];
-  for (const status of ['待承接', '待转交', '待验收']) assert.equal(model.taskNeedsAttention({ ...task, status }), true);
-  assert.equal(model.taskNeedsAttention({ ...task, status: '已完成', needsReview: true }), true);
-  assert.equal(model.taskNeedsAttention({ ...task, status: '进行中' }), false);
+  for (const status of ['待承接', '待验收']) assert.equal(model.taskNeedsAttention({ ...task, status }), true);
+  assert.equal(model.taskNeedsAttention({ ...task, status: '待转交', nextFollowUp: '' }), false);
+  assert.equal(model.taskNeedsAttention({ ...task, status: '待转交', nextFollowUp: '2020-01-01T00:00' }), true);
+  assert.equal(model.taskNeedsAttention({ ...task, status: '已完成', needsReview: true }), false);
+  assert.equal(model.taskNeedsAttention({ ...task, status: '进行中', due: '2099-01-01T00:00' }), false);
 });
 
 test('confirming a candidate removes it from the queue and permits local advice', () => {
@@ -432,4 +455,325 @@ test('revoking a shared conversation removes common export content on its next p
   data.settings.toggles['shared-session-001'] = false;
   const text = sessionLogic.buildSessionExport(data, 'session-001', '共同纪要', true);
   assert.doesNotMatch(text, /SHARED-CONCLUSION|PRIVATE|第三季度|首版先按十万元/);
+});
+
+function plainTaskData(kind = '行动') {
+  const data = initialData();
+  data.tasks = [{ id: 'plain', title: '联系两位同事试用', description: '确认开始记录的体验', owner: '我', requester: data.settings.name, due: '无固定期限', priority: '中', status: '已承接', aiStatus: '未启动', workKind: kind, criteria: [], activities: [], results: [], version: 1, authorized: true, scope: { sources: '本人目标与勾选资料', destination: '我的个人成果', space: '我的空间', materialIds: [], includeSource: false }, outputMode: '行动清单', budget: 40 }];
+  return data;
+}
+
+test('ordinary actions can finish with an actual result and no assistant or document', () => {
+  const data = plainTaskData();
+  data.tasks[0].authorized = false;
+  const result = workflow.createManualCompletion(data, 'plain', { summary: '两位同事已试用，记录了三条反馈', remaining: '下周核对改进' });
+  assert.equal(result.error, undefined);
+  const task = result.data.tasks[0];
+  assert.equal(task.status, '已完成');
+  assert.equal(task.completion.kind, '人工完成');
+  assert.match(task.completion.summary, /三条反馈/);
+  assert.equal(task.artifacts, undefined);
+  assert.equal(model.taskNeedsAttention(task), false);
+  assert.equal(data.tasks[0].status, '已承接');
+});
+
+test('manual completion cannot claim another owner or bypass delivery requirements', () => {
+  const delivery = plainTaskData('交付');
+  assert.match(workflow.createManualCompletion(delivery, 'plain', { summary: '完成' }).error, /交付/);
+  const assigned = plainTaskData(); assigned.tasks[0].owner = 'Alex';
+  assert.match(workflow.createManualCompletion(assigned, 'plain', { summary: '完成' }).error, /负责人/);
+  const invalid = plainTaskData(); invalid.tasks[0].sourceNeedsReview = true;
+  assert.match(workflow.createManualCompletion(invalid, 'plain', { summary: '完成' }).error, /来源|资料/);
+});
+
+test('failed preparation needs attention, while cancelled work with old review flags does not', () => {
+  const data = plainTaskData(), task = data.tasks[0];
+  task.status = '进行中'; task.aiStatus = '失败';
+  assert.equal(workflow.taskAttentionReason(task), '补充资料后继续');
+  assert.equal(model.taskNeedsAttention(task), true);
+  assert.deepEqual(homeLogic.homeTaskAttentionQueue(data).map(t => t.id), ['plain']);
+  task.status = '已取消'; task.needsReview = true;
+  assert.equal(workflow.taskAttentionReason(task), null);
+  assert.equal(workflow.taskPrimaryAction(task), null);
+  assert.deepEqual(homeLogic.homeTaskAttentionQueue(data), []);
+});
+
+test('transfer withdrawal and refusal restore every original business state without restoring permission', () => {
+  for (const status of ['待承接', '已承接', '进行中']) {
+    for (const response of ['撤回', '婉拒']) {
+      const data = plainTaskData(); data.tasks[0].status = status;
+      const proposed = workflow.beginTransfer(data, 'plain', { to: 'Alex', reason: '由 Alex 核对研发体验' });
+      assert.equal(proposed.error, undefined);
+      const request = proposed.data.tasks[0].transferRequest;
+      const restored = workflow.resolveTransfer(proposed.data, 'plain', request.id, response);
+      assert.equal(restored.error, undefined);
+      assert.equal(restored.data.tasks[0].status, status);
+      assert.equal(restored.data.tasks[0].owner, '我');
+      assert.equal(restored.data.tasks[0].authorized, false);
+      assert.match(workflow.resolveTransfer(restored.data, 'plain', request.id, response).error, /已处理|失效/);
+    }
+  }
+});
+
+test('accepted handoffs stay followable and appear in attention only at the chosen follow-up time', () => {
+  const data = plainTaskData();
+  const proposed = workflow.beginTransfer(data, 'plain', { to: 'Alex', reason: '研发核对', nextFollowUp: '2026-10-10T10:00' });
+  const pending = proposed.data.tasks[0];
+  assert.equal(workflow.taskIsMyAttention(proposed.data, pending, new Date('2026-10-09T10:00')), false);
+  const accepted = workflow.resolveTransfer(proposed.data, 'plain', pending.transferRequest.id, '同意');
+  const task = accepted.data.tasks[0];
+  assert.equal(task.owner, 'Alex');
+  assert.equal(workflow.taskBelongsToMe(accepted.data, task), false);
+  assert.equal(workflow.taskFollowedByMe(accepted.data, task), true);
+  assert.equal(workflow.taskIsMyAttention(accepted.data, task, new Date('2026-10-09T10:00')), false);
+  assert.equal(workflow.taskIsMyAttention(accepted.data, task, new Date('2026-10-11T10:00')), true);
+  assert.deepEqual(homeLogic.homeTaskAttentionQueue(accepted.data, new Date('2026-10-11T10:00')).map(t => t.id), ['plain']);
+});
+
+test('changing output mode while preparing cannot use an old cost with new output', () => {
+  const data = plainTaskData(); data.tasks[0].outputMode = '文档';
+  const started = workflow.beginGeneration(data, 'plain', { token: 'fixed-output' });
+  assert.equal(started.error, undefined);
+  const changed = structuredClone(started.data); changed.tasks[0].outputMode = '文档与PPT';
+  const next = taskLogic.finishLocalGeneration(changed, 'plain', started.token, 6);
+  assert.equal(next.tasks[0].artifacts?.length || 0, 0);
+  assert.equal(next.tasks[0].used || 0, 0);
+  assert.equal(next.tasks[0].authorized, false);
+  assert.equal(next.tasks[0].generationToken, undefined);
+});
+
+test('lowering the remaining budget stops a pending generation without charging', () => {
+  const data = plainTaskData(); data.tasks[0].outputMode = '文档与PPT';
+  const started = workflow.beginGeneration(data, 'plain', { token: 'fixed-budget' });
+  assert.equal(started.cost, 16);
+  started.data.tasks[0].budget = 6;
+  const next = taskLogic.finishLocalGeneration(started.data, 'plain', started.token, 16);
+  assert.equal(next.tasks[0].artifacts?.length || 0, 0);
+  assert.equal(next.tasks[0].used || 0, 0);
+});
+
+test('real material selection limits what the generated draft consumes', () => {
+  const data = plainTaskData(), task = data.tasks[0];
+  task.materialRefs = [{ id: 'allowed', title: '试用反馈', body: 'SELECTED-MATERIAL' }, { id: 'excluded', title: '另一个资料', body: 'EXCLUDED-MATERIAL' }];
+  task.scope.materialIds = ['allowed'];
+  const started = workflow.beginGeneration(data, 'plain', { token: 'selected-input' });
+  assert.equal(started.error, undefined);
+  const done = taskLogic.finishLocalGeneration(started.data, 'plain', started.token, started.cost).tasks[0];
+  const text = done.artifacts.flatMap(a => a.body).join('\n');
+  assert.match(text, /SELECTED-MATERIAL/);
+  assert.doesNotMatch(text, /EXCLUDED-MATERIAL/);
+  assert.equal(done.status, '已承接');
+  assert.equal(done.needsReview, true);
+  assert.equal(done.used, started.cost);
+});
+
+test('an empty material selection excludes all supplemental material bodies', () => {
+  const data = plainTaskData();
+  data.tasks[0].materialRefs = [{ id: 'excluded', title: '无需读取', body: 'EXCLUDED-EMPTY-SELECTION' }];
+  const started = workflow.beginGeneration(data, 'plain', { token: 'no-extra-input' });
+  assert.equal(started.error, undefined);
+  const done = taskLogic.finishLocalGeneration(started.data, 'plain', started.token, started.cost).tasks[0];
+  assert.doesNotMatch(done.artifacts.flatMap(a => a.body).join('\n'), /EXCLUDED-EMPTY-SELECTION/);
+});
+
+test('new generation rounds save distinct versions and keep the original business stage', () => {
+  const data = plainTaskData(); data.tasks[0].status = '进行中';
+  const first = workflow.beginGeneration(data, 'plain', { token: 'first-round' });
+  const saved = taskLogic.finishLocalGeneration(first.data, 'plain', first.token, first.cost);
+  assert.equal(saved.tasks[0].status, '进行中');
+  const second = workflow.beginGeneration(saved, 'plain', { token: 'second-round' });
+  const again = taskLogic.finishLocalGeneration(second.data, 'plain', second.token, second.cost);
+  assert.equal(again.tasks[0].artifacts.length, 2);
+  assert.equal(again.tasks[0].artifacts[1].version > again.tasks[0].artifacts[0].version, true);
+  assert.equal(again.tasks[0].status, '进行中');
+  assert.equal(workflow.latestTaskArtifacts(again.tasks[0]).length, 1);
+});
+
+test('checking a draft does not complete the business task', () => {
+  const data = plainTaskData('交付');
+  data.tasks[0].outputMode = '文档';
+  const started = workflow.beginGeneration(data, 'plain', { token: 'review-draft' });
+  const saved = taskLogic.finishLocalGeneration(started.data, 'plain', started.token, started.cost);
+  const artifact = saved.tasks[0].artifacts[0];
+  assert.match(workflow.createDeliveryCompletion(saved, 'plain', { artifactIds: [artifact.id], summary: '正式提交' }).error, /核对/);
+  const reviewed = workflow.taskReviewArtifacts(saved, 'plain', [artifact.id]);
+  assert.equal(reviewed.error, undefined);
+  assert.equal(reviewed.data.tasks[0].status, '已承接');
+  assert.equal(reviewed.data.tasks[0].artifacts[0].needsReview, false);
+  const completed = workflow.createDeliveryCompletion(reviewed.data, 'plain', { artifactIds: [artifact.id], summary: '已提交核对后的文档' });
+  assert.equal(completed.error, undefined);
+  assert.equal(completed.data.tasks[0].status, '已完成');
+  assert.deepEqual(completed.data.tasks[0].completion.artifactIds, [artifact.id]);
+});
+
+test('questions require an actual answer before being marked answered or resolved', () => {
+  const data = plainTaskData();
+  assert.match(workflow.setInquiry(data, 'plain', { id: 'q1', question: '何时试用？', status: '已回答' }).error, /答复/);
+  const waiting = workflow.setInquiry(data, 'plain', { id: 'q1', question: '何时试用？', target: 'Alex', status: '待回答', nextFollowUp: '2026-10-09T09:00' });
+  assert.equal(workflow.taskAttentionReason(waiting.data.tasks[0], new Date('2026-10-08T09:00')), null);
+  const answered = workflow.setInquiry(waiting.data, 'plain', { id: 'q1', question: '何时试用？', answer: '明天下午', status: '已回答' });
+  assert.equal(workflow.taskAttentionReason(answered.data.tasks[0]), '核对收到的答复');
+  const resolved = workflow.setInquiry(answered.data, 'plain', { id: 'q1', question: '何时试用？', answer: '明天下午', status: '已解决' });
+  assert.equal(resolved.data.tasks[0].inquiries.length, 1);
+  assert.equal(workflow.taskAttentionReason(resolved.data.tasks[0]), null);
+});
+
+function communicationData() {
+  const data = plainTaskData(); const task = data.tasks[0];
+  task.title = '核实蓝色椅子库存'; task.requester = 'Alex'; task.version = 2;
+  task.results = ['库存24件；预留6件；可售18件。'];
+  task.artifacts = [{ id: 'stock-v1', title: '库存旧稿', kind: '资料', version: 1, body: ['库存24件；预留6件；可售18件。'], created: '昨天', reviewedAt: '昨天', needsReview: false }, { id: 'stock-v2', title: '库存新稿', kind: '资料', version: 2, body: ['库存30件；预留6件；可售24件。'], created: '今天', reviewedAt: '今天', needsReview: false }];
+  return data;
+}
+
+test('communication body and attachment use the same selected actual artifact version', () => {
+  const data = communicationData(), task = data.tasks[0];
+  const draft = communication.buildCommunicationDraft(task, '消息', data.settings.name, ['stock-v2'], { data });
+  assert.match(draft.body, /库存30件；预留6件；可售24件/);
+  assert.doesNotMatch(draft.body, /库存24件；预留6件；可售18件/);
+  assert.deepEqual(draft.artifactRefs.map(ref => ref.id), ['stock-v2']);
+  assert.match(draft.attachments, /库存新稿.*v2/);
+  assert.equal(communication.canSubmitCommunication(data, task, draft).ok, true);
+});
+
+test('a new artifact prompts review while explicitly retaining an unchanged old draft keeps its old version', () => {
+  const data = communicationData(), task = data.tasks[0];
+  const draft = communication.buildCommunicationDraft(task, '消息', data.settings.name, ['stock-v1'], { data });
+  task.version = 3;
+  task.artifacts.push({ ...task.artifacts[1], id: 'stock-v3', version: 3, body: ['库存31件；预留6件；可售25件。'] });
+  assert.equal(communication.communicationDraftStale(task, draft), true);
+  const kept = communication.keepCommunicationDraft(task, draft);
+  assert.equal(kept.error, undefined);
+  assert.equal(communication.canSubmitCommunication(data, task, kept.draft).ok, true);
+  assert.match(kept.draft.body, /库存24件/);
+  assert.deepEqual(kept.draft.artifactRefs.map(ref => ref.id), ['stock-v1']);
+  assert.match(kept.draft.attachments, /库存旧稿.*v1/);
+});
+
+test('a changed or missing bound artifact cannot be kept as if the original version still existed', () => {
+  const data = communicationData(), task = data.tasks[0];
+  const draft = communication.buildCommunicationDraft(task, '消息', data.settings.name, ['stock-v1'], { data });
+  task.artifacts[0].body = ['改写后的内容'];
+  assert.equal(communication.communicationDraftStale(task, draft), true);
+  assert.match(communication.keepCommunicationDraft(task, draft).error, /变化/);
+  assert.equal(communication.canSubmitCommunication(data, task, draft).ok, false);
+});
+
+test('confirmation rejects later edits and repeated submission returns the immutable original receipt', () => {
+  const data = communicationData(), task = data.tasks[0];
+  const draft = communication.buildCommunicationDraft(task, '邮件', data.settings.name, ['stock-v2'], { data });
+  const prepared = communication.buildCommunicationReview(data, task, draft, '邮件');
+  assert.equal(prepared.error, undefined);
+  assert.match(communication.submitCommunication(data, prepared.review, { ...draft, body: draft.body + '改动' }, 'r1', '今天').error, /变化/);
+  const submitted = communication.submitCommunication(data, prepared.review, draft, 'r1', '今天');
+  assert.equal(submitted.error, undefined);
+  assert.deepEqual(submitted.receipt.artifactRefs.map(ref => ref.id), ['stock-v2']);
+  const repeated = communication.submitCommunication(submitted.data, prepared.review, draft, 'r2', '明天');
+  assert.equal(repeated.existing, true);
+  assert.equal(repeated.data.receipts.length, 1);
+  assert.equal(repeated.receipt.id, 'r1');
+  assert.equal(repeated.receipt.date, '今天');
+  assert.equal(data.receipts.length, 0);
+});
+
+test('calendar conflict detection uses only this actor and this space', () => {
+  const data = communicationData(), task = data.tasks[0];
+  const draft = { ...communication.buildCommunicationDraft(task, '日程', data.settings.name, [], { data }), start: '2026-10-10 14:00', end: '2026-10-10 14:30' };
+  data.receipts = [{ id: 'mine', taskId: task.id, kind: '日程', target: 'Alex', body: '', date: '今天', space: '我的空间', actor: '我', start: '2026-10-10 14:15', end: '2026-10-10 14:45' }, { id: 'team', taskId: task.id, kind: '日程', target: 'Alex', body: 'PRIVATE-OTHER-SPACE', date: '今天', space: team, actor: '我', start: '2026-10-10 14:15', end: '2026-10-10 14:45' }, { id: 'other-person', taskId: task.id, kind: '日程', target: 'Alex', body: 'PRIVATE-OTHER-ACTOR', date: '今天', space: '我的空间', actor: 'Alex', start: '2026-10-10 14:15', end: '2026-10-10 14:45' }];
+  assert.deepEqual(communication.visibleCalendarConflicts(data, task, draft).map(receipt => receipt.id), ['mine']);
+});
+
+test('reload migration preserves old questions and safely stops unfinished local generation', () => {
+  const data = plainTaskData();
+  data.tasks[0].questions = ['旧问题']; data.tasks[0].aiStatus = '准备中'; data.tasks[0].generationToken = 'lost-timer';
+  const next = migration.migrateStoredData(data);
+  assert.deepEqual(next.tasks[0].inquiries.map(inquiry => inquiry.question), ['旧问题']);
+  assert.equal(next.tasks[0].inquiries[0].status, '待回答');
+  assert.equal(next.tasks[0].aiStatus, '已停止');
+  assert.equal(next.tasks[0].generationToken, undefined);
+  assert.equal(next.tasks[0].authorized, false);
+  assert.equal(data.tasks[0].generationToken, 'lost-timer');
+});
+
+test('current space cannot mutate a private task through completion, generation, or questions', () => {
+  const data = plainTaskData();
+  data.settings.retention['task-space:plain'] = '我的空间';
+  data.settings.space = team;
+  assert.match(workflow.createManualCompletion(data, 'plain', { summary: '完成' }).error, /当前空间/);
+  assert.match(workflow.beginGeneration(data, 'plain').error, /当前空间/);
+  assert.match(workflow.setInquiry(data, 'plain', { id: 'q1', question: '私有问题', status: '待回答' }).error, /当前空间/);
+  assert.equal(data.tasks[0].status, '已承接');
+});
+
+test('supplemental notes keep the real memory body and both reach the authorized output', () => {
+  const data = plainTaskData();
+  data.memories = [{ id: 'note-memory', title: '库存来源', body: '原始库存：30件', category: '收藏', tags: ['资料'], visibility: '私有', updated: '今天', confirmed: true }];
+  data.tasks[0].materialRefs = [{ id: 'material-note', title: '库存来源', memoryId: 'note-memory', body: '缓存旧正文', note: '本人补充：另外预留6件' }];
+  data.tasks[0].scope.materialIds = ['material-note'];
+  data.tasks[0].outputMode = '资料整理';
+  const started = workflow.beginGeneration(data, 'plain', { token: 'note-output' });
+  assert.equal(started.error, undefined);
+  assert.equal(started.data.tasks[0].materialRefs[0].body, '原始库存：30件');
+  assert.equal(started.data.tasks[0].materialRefs[0].note, '本人补充：另外预留6件');
+  const finished = taskLogic.finishLocalGeneration(started.data, 'plain', started.token);
+  assert.match(finished.tasks[0].artifacts[0].body.join('\n'), /原始库存：30件/);
+  assert.match(finished.tasks[0].artifacts[0].body.join('\n'), /另外预留6件/);
+  assert.equal(data.tasks[0].materialRefs[0].body, '缓存旧正文');
+});
+
+test('changing a supplemental note invalidates a pending immutable generation', () => {
+  const data = plainTaskData();
+  data.tasks[0].materialRefs = [{ id: 'm-note', title: '说明', body: '原正文', note: '原补充' }];
+  data.tasks[0].scope.materialIds = ['m-note'];
+  const started = workflow.beginGeneration(data, 'plain', { token: 'note-change' });
+  started.data.tasks[0].materialRefs[0].note = '新补充';
+  const stopped = taskLogic.finishLocalGeneration(started.data, 'plain', started.token);
+  assert.equal(stopped.tasks[0].aiStatus, '待授权');
+  assert.equal(stopped.tasks[0].artifacts?.length || 0, 0);
+  assert.equal(stopped.tasks[0].used || 0, 0);
+});
+
+test('reselecting a task source cannot wash the provenance of its retained legacy artifact', () => {
+  const data = plainTaskData('交付'), task = data.tasks[0];
+  const turns = data.sessions[0].transcript.filter(turn => !turn.private);
+  const oldTurn = turns[0], newTurn = turns[1];
+  Object.assign(task, { sourceSession: data.sessions[0].id, sourceId: oldTurn.id, sourceTime: oldTurn.time, results: ['原来源中的旧内容'], needsReview: false });
+  const invalidated = model.invalidateSessionSources(data, data.sessions[0].id, [oldTurn.id]);
+  const rebased = invalidated.tasks[0], oldArtifact = rebased.artifacts[0];
+  assert.deepEqual(oldArtifact.body, ['原来源中的旧内容']);
+  assert.equal(oldArtifact.sourceId, oldTurn.id);
+  assert.equal(oldArtifact.sourceNeedsReview, true);
+  Object.assign(rebased, { sourceNeedsReview: false, sourceId: newTurn.id, sourceTime: newTurn.time, sources: [model.makeSourceReference(invalidated, { kind: 'session', id: data.sessions[0].id, sourceId: newTurn.id, sourceTime: newTurn.time })] });
+  assert.equal(model.taskSourceAvailable(invalidated, rebased), true);
+  assert.match(workflow.taskReviewArtifacts(invalidated, 'plain', [oldArtifact.id]).error, /新版本/);
+  const draft = communication.buildCommunicationDraft(rebased, '邮件', data.settings.name, [oldArtifact.id], { data: invalidated });
+  assert.equal(communication.canSubmitCommunication(invalidated, rebased, draft, '邮件').ok, false);
+  const newArtifact = { ...oldArtifact, id: 'explicit-rechecked-new', version: 3, sourceId: newTurn.id, sourceTime: newTurn.time, sources: rebased.sources, body: ['本人按新来源核对后的内容'], sourceNeedsReview: false, needsReview: true };
+  rebased.artifacts.push(newArtifact);
+  const reviewed = workflow.taskReviewArtifacts(invalidated, 'plain', [newArtifact.id]);
+  assert.equal(reviewed.error, undefined);
+  assert.equal(reviewed.data.tasks[0].artifacts[0].sourceNeedsReview, true);
+  assert.equal(reviewed.data.tasks[0].artifacts[1].needsReview, false);
+});
+
+test('an explicitly empty structured question list is preserved on reload', () => {
+  const data = plainTaskData();
+  Object.assign(data.tasks[0], { questions: ['旧显示字段'], inquiries: [] });
+  const migrated = migration.migrateStoredData(data);
+  assert.deepEqual(migrated.tasks[0].inquiries, []);
+});
+
+test('explicitly recomposing the same inquiry saves its new content and preserves the old draft', () => {
+  const data = plainTaskData(), task = data.tasks[0];
+  task.inquiries = [{ id: 'repeat-q', question: '第一版问题', target: 'Alex', status: '待回答' }];
+  const first = communication.initialCommunicationDraft(task, '邮件', data.settings.name, [], { data, replyToInquiryId: 'repeat-q' });
+  const saved = communication.saveCommunicationDraft(data, 'plain', first, '邮件');
+  const changed = workflow.setInquiry(saved, 'plain', { ...task.inquiries[0], question: '重新核对后的问题' });
+  const currentTask = changed.data.tasks[0];
+  const second = communication.initialCommunicationDraft(currentTask, '邮件', data.settings.name, [], { data: changed.data, replyToInquiryId: 'repeat-q' });
+  const resaved = communication.saveCommunicationDraft(changed.data, 'plain', second, '邮件', true, currentTask.drafts['邮件']);
+  assert.match(resaved.tasks[0].drafts['邮件'].body, /重新核对后的问题/);
+  assert.doesNotMatch(resaved.tasks[0].drafts['邮件'].body, /第一版问题/);
+  assert.match(resaved.tasks[0].draftHistory[0].draft.body, /第一版问题/);
+  assert.deepEqual(resaved.tasks[0].drafts['邮件'].artifactRefs, []);
 });

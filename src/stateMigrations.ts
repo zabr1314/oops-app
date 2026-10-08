@@ -13,12 +13,24 @@ export function migrateStoredData(data: AppData): AppData {
   });
   const next = { ...data, memories, settings: { ...data.settings, retention } };
   const tasks = data.tasks.map(task => {
-    if (task.sourceSession || task.sourceMemoryId) return task;
-    const savedId = task.activities.map(activity => activity.match(/^来自已保存片段 (\S+)$/)?.[1]).find(Boolean);
-    const memory = memories.find(item => item.id === savedId && item.tags.includes('Recall'));
-    if (!memory) return task;
-    changed = true;
-    return { ...task, sourceMemoryId: memory.id, sources: [...(task.sources || []), makeSourceReference(next, { kind: 'memory', id: memory.id })] };
+    let updated = task;
+    if (!task.sourceSession && !task.sourceMemoryId) {
+      const savedId = task.activities.map(activity => activity.match(/^来自已保存片段 (\S+)$/)?.[1]).find(Boolean);
+      const memory = memories.find(item => item.id === savedId && item.tags.includes('Recall'));
+      if (memory) {
+        changed = true;
+        updated = { ...updated, sourceMemoryId: memory.id, sources: [...(task.sources || []), makeSourceReference(next, { kind: 'memory', id: memory.id })] };
+      }
+    }
+    if (updated.inquiries === undefined && updated.questions?.length) {
+      changed = true;
+      updated = { ...updated, inquiries: updated.questions.map((question, index) => ({ id: `${task.id}-legacy-question-${index}`, question, status: '待回答' as const, target: task.requester, nextFollowUp: '' })) };
+    }
+    if (updated.aiStatus === '准备中') {
+      changed = true;
+      updated = { ...updated, aiStatus: '已停止', authorized: false, generationToken: undefined, generationSnapshot: undefined, activities: [...updated.activities, '页面重新打开，未完成的本地准备已停止；已有成果保留'] };
+    }
+    return updated;
   });
   return changed ? { ...next, tasks } : data;
 }

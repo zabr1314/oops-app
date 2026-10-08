@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { KeyboardTextarea } from '../mobile';
 import { useOops, type AppData, type Route, type Task, type SourceReference, type AssistantMessage } from '../store';
 import { sharedMemoryEligible } from '../memoryAccess';
-import { makeSourceReference, materialVisible, messageAvailable, provenanceAvailable, sourceAvailable, taskNeedsAttention, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '../sourceAccess';
+import { makeSourceReference, materialVisible, messageAvailable, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '../sourceAccess';
 import { Badge, Button, Card, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, Source, Toggle } from '../ui';
+import { taskAttentionReason, taskBelongsToMe, taskIsMyAttention, taskPrimaryAction } from '../taskWorkflow';
 export function homeTitle(r:Route){return ({home:'首页',assistant:'问 Oops',voice:'说给 Oops 听',search:'搜索',notifications:'通知',welcome:'你好，我是 Oops'} as Record<string,string>)[r.view]||'Oops'}
 export function sessionVisible(d:AppData,id:string){return scopedSessionVisible(d,id)}
 export function memoryVisible(d:AppData,id:string,shared:boolean){if(d.settings.space==='我的空间')return true;const memory=d.memories.find(m=>m.id===id);return !!memory&&shared&&sharedMemoryEligible(d,memory)&&provenanceAvailable(d,memory.sources)&&sourceAvailable(d,memory,{publicOnly:true,requireShared:true})&&(d.settings.retention['memory-space:'+id]||'Oops 产品团队')===d.settings.space}
@@ -17,13 +18,15 @@ function scopeData(d:AppData):AppData {
   });
   return {...d,tasks:d.tasks.filter(t=>taskVisible(d,t)),sessions,memories:d.memories.filter(m=>!m.deleted&&m.confirmed&&!m.needsReview&&!m.tags.some(tag=>['已停用','待复核','待确认','修订历史'].includes(tag))&&provenanceAvailable(d,m.sources)&&sourceAvailable(d,m)&&memoryVisible(d,m.id,m.visibility==='项目共享')),projects:d.projects.filter(p=>personal||(d.settings.retention['project-space:'+p.id]||'Oops 产品团队')===d.settings.space)};
 }
+export function homeTaskAttentionQueue(data:AppData,now:number|Date=Date.now()):Task[] {
+  return data.tasks.filter(task=>taskVisible(data,task)&&taskIsMyAttention(data,task,now));
+}
 export function Home() {
   const {data,navigate}=useOops(); const [prompt,setPrompt]=useState('');
-  const owned=(t:Task)=>['我',data.settings.name].includes(t.owner);
-  const queue=data.tasks.filter(t=>owned(t)&&taskVisible(data,t)&&taskNeedsAttention(t));
+  const queue=homeTaskAttentionQueue(data);
   const submit=()=>{if(prompt.trim()){navigate({view:'assistant',mode:prompt.trim()});setPrompt('')}};
-  const nextRoute=(t:Task):Route=>({view:t.needsReview?'task-detail':t.status==='待转交'?'task-transfer-response':t.status==='待验收'?'task-result':'task-accept',id:t.id});
-  const nextLabel=(t:Task)=>t.needsReview?'重新核对来源与成果':t.status==='待转交'?'查看转交回应':t.status==='待验收'?'核对最新成果':'核对并承接';
+  const nextRoute=(t:Task):Route=>{const action=taskBelongsToMe(data,t)?taskPrimaryAction(t):null;return {...(action||{view:'task-detail'}),id:t.id}};
+  const nextLabel=(t:Task)=>taskBelongsToMe(data,t)?taskAttentionReason(t)||'查看下一步':'到时间跟进这项工作';
   const today=new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',weekday:'long'}).format(new Date());
   return <div className="home-content">
     <div className="home-date">{today}</div><div className="home-hero"><h1>今天想<br/>一起解决什么？</h1><img src="/brand/mascot.png" alt="Oops伙伴"/></div>
