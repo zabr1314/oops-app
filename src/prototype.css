@@ -29,3 +29,9 @@
 .has-recording-controls .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 264px)}
 .has-prepare-footer .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 200px)}
 .session-prepare-footer{position:absolute;left:20px;right:20px;z-index:16;padding:10px;border-radius:24px;background:#fbfaff;box-shadow:0 4px 24px #37226016;border:1px solid var(--line)}
+
+.session-fixed-tabs{position:absolute;top:calc(var(--mobile-status-bar-height,54px) + 62px);left:0;right:0;height:57px;padding:2px 22px 10px;background:var(--canvas);z-index:10;border-bottom:1px solid var(--line)}
+.session-fixed-tabs .segmented{height:44px}
+.session-fixed-tabs .segmented button{min-height:36px}
+.has-session-tabs .oops-scroll{top:calc(var(--mobile-status-bar-height,54px) + 119px)!important}
+.badge.amber{background:#fff0dd;color:#a97630}

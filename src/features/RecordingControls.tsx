@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react';
-import { useOops, type AppData, type Session, type Task } from '../store';
+import { useOops, type AppData, type Session } from '../store';
 import { useKeyboardInsets } from '../mobile';
 import { Badge, Button, Card, Check, Field, Icon, Notice, Row, SelectField, Sheet, Source } from '../ui';
 import { sessionVisible } from './Home';
+import { invalidateSessionSources } from '../sourceAccess';
+import { preferredSaveScope, retainedTranscript, type SaveScope } from '../recordingLogic';
 import './RecordingControls.css';
 
 type RecordMark = { id: string; time: string; note?: string; sourceTime?: string; sourceId?: string };
 type EndRequest = { id: string; resume: boolean };
-type ReviewableArtifact = { id: string; kind: '文档' | 'PPT' | '资料'; title: string; version: number; body: string[]; created: string; needsReview?: boolean; sourceSession?: string; sourceTime?: string; sourceId?: string };
-type ReviewableTask = Task & { needsReview?: boolean; generationToken?: string; sourceId?: string; artifacts?: ReviewableArtifact[] };
 type EndSnapshot = { session: Session; marks: RecordMark[]; space: string };
 const markKey = (id: string) => 'record-marks:' + id;
-const stamp = () => new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 function readMarks(data: AppData, id: string): RecordMark[] {
   try {
     const value: unknown = JSON.parse(data.settings.retention[markKey(id)] || '[]');
@@ -82,7 +81,7 @@ export function RecordingControls() {
       {!!marks.length && <button className="rc-mark-count" onClick={() => setShowMarks(true)}>{marks.length} 个重点<Icon name="caret-right" size={11} /></button>}
     </aside>}
     <Sheet open={!!editing && visible && !!selected} onClose={() => setEditing(null)} title="记下这个重点">
-      <Card><Badge>时间点 · {selected?.time}</Badge><h3>{session?.title}</h3>{source ? <><p>{source.speaker}：{source.text}</p><Source title="对应原话" time={source.time} onClick={() => { setEditing(null); navigate({ view: 'session-transcript', id: session?.id, mode: source.time }); }} /></> : <p className="meta">保留时间点，没有关联转写来源。</p>}</Card>
+      <Card><Badge>时间点 · {selected?.time}</Badge><h3>{session?.title}</h3>{source ? <><p>{source.speaker}：{source.text}</p><Source title="对应原话" time={source.time} onClick={() => { setEditing(null); navigate({ view: 'session-transcript', id: session?.id, mode: source.id }); }} /></> : <p className="meta">保留时间点，没有关联转写来源。</p>}</Card>
       <Field label="备注（可选）" value={editing?.note || ''} onChange={note => setEditing(current => current ? { ...current, note } : null)} placeholder="刚才有什么需要记住？" multiline />
       <Button onClick={saveNote}>保存重点</Button><Button tone="danger" onClick={deleteMark}>删除这个重点</Button><Button tone="quiet" onClick={() => setEditing(null)}>取消修改</Button>
     </Sheet>
@@ -100,15 +99,15 @@ export function EndRecordingSheet({ request, onClose }: { request: EndRequest | 
 function EndRecordingDialog({ request, onClose }: { request: EndRequest; onClose: () => void }) {
   const { data, update, navigate, toast } = useOops();
   const [snapshot] = useState(() => snapshotOf(data, request.id));
-  const [scope, setScope] = useState('完整保存');
-  const [keptIds, setKeptIds] = useState<string[]>(() => snapshot?.session.transcript.map(t => t.id) || []);
+  const [scope, setScope] = useState<SaveScope>(() => preferredSaveScope(data, request.id));
+  const [keptIds, setKeptIds] = useState<string[]>(() => preferredSaveScope(data, request.id) === '手动选择片段' ? [] : snapshot?.session.transcript.map(t => t.id) || []);
   const [keptNotes, setKeptNotes] = useState<number[]>(() => snapshot?.session.privateNotes.map((_, i) => i) || []);
   const [error, setError] = useState('');
   const current = data.sessions.find(s => s.id === request.id);
   const allowed = !!snapshot && !!current && !current.archived && sessionVisible(data, current.id);
   const team = data.settings.space !== '我的空间';
   const transcripts = snapshot?.session.transcript || [];
-  const retained = transcripts.filter(t => scope === '完整保存' || (scope === '仅保存非敏感片段' ? !t.private : keptIds.includes(t.id)));
+  const retained = retainedTranscript(transcripts, scope, keptIds);
   const removed = transcripts.filter(t => !retained.some(k => k.id === t.id));
   function cancel() {
     const willResume = request.resume && allowed && current?.status === '暂停' && data.activeSessionId === request.id;
@@ -129,30 +128,21 @@ function EndRecordingDialog({ request, onClose }: { request: EndRequest; onClose
     if (JSON.stringify(current.transcript) !== JSON.stringify(transcripts) || JSON.stringify(current.privateNotes) !== JSON.stringify(snapshot.session.privateNotes)) { setError('内容发生了变化，请取消后重新检查。'); return; }
     const notes = snapshot.session.privateNotes.filter((_, i) => keptNotes.includes(i));
     const removedTimes = new Set(removed.map(t => t.time)), removedIds = new Set(removed.map(t => t.id));
-    const sourceRemoved = (source: { sourceSession?: string; sourceTime?: string; sourceId?: string }, parentSession?: string) => (source.sourceSession || parentSession) === current.id && (source.sourceId ? removedIds.has(source.sourceId) : source.sourceTime ? removedTimes.has(source.sourceTime) : removed.length > 0);
     const nextKind = data.settings.retention['record-next-kind'];
     const creatingNext = ['会议', '日常', '灵感', '练习'].includes(nextKind);
     update(latest => {
       const live = latest.sessions.find(s => s.id === current.id);
       if (!live || live.status !== '暂停' || latest.activeSessionId !== live.id || !sessionVisible(latest, live.id)) return latest;
-      const tasks = latest.tasks.map(item => {
-        const task = item as ReviewableTask;
-        const artifactAffected = (a: ReviewableArtifact) => sourceRemoved({ sourceSession: a.sourceSession || task.sourceSession, sourceTime: a.sourceTime || task.sourceTime, sourceId: a.sourceId || task.sourceId });
-        const affected = sourceRemoved(task) || !!task.artifacts?.some(artifactAffected);
-        if (!affected) return item;
-        return { ...task, authorized: false, generationToken: undefined, needsReview: true, version: task.version + 1, aiStatus: task.aiStatus === '未启动' ? '未启动' as const : '待授权' as const, artifacts: task.artifacts?.map(a => sourceRemoved(task) || artifactAffected(a) ? { ...a, needsReview: true } : a), activities: [...task.activities, `${stamp()} · 原话片段未保留，要求与已有成果待复核；助手授权已撤回`] };
-      });
+      if (JSON.stringify(live.transcript) !== JSON.stringify(transcripts) || JSON.stringify(live.privateNotes) !== JSON.stringify(snapshot.session.privateNotes)) return latest;
+      const reviewed = removed.length ? invalidateSessionSources(latest, live.id, [...removedIds], '结束时原话未保留') : latest;
       const marks = snapshot.marks.map(m => (m.sourceId ? removedIds.has(m.sourceId) : !!m.sourceTime && removedTimes.has(m.sourceTime)) ? { id: m.id, time: m.time, ...(m.note ? { note: m.note } : {}) } : m);
-      const affectedTasks = tasks.filter((t, index) => t !== latest.tasks[index]);
-      const retention = { ...latest.settings.retention };
+      const affectedTasks = reviewed.tasks.filter((t, index) => t !== latest.tasks[index]);
+      const retention = { ...reviewed.settings.retention };
       delete retention['record-next-kind'];
-      affectedTasks.forEach(task => { retention['task-space:' + task.id] = '我的空间'; });
-      return { ...latest,
+      return { ...reviewed,
         sessions: latest.sessions.map(s => s.id === live.id ? { ...s, status: '已结束', transcript: retained.map(t => ({ ...t })), privateNotes: notes, summary: retained.slice(-5).map(t => `原话摘录 · ${t.time} ${t.speaker}：${t.text}`) } : s),
         activeSessionId: undefined,
-        tasks,
-        memories: latest.memories.map(m => sourceRemoved(m) ? { ...m, confirmed: false, visibility: '私有', tags: [...m.tags.filter(t => t !== '待复核'), '待复核'] } : m),
-        settings: { ...latest.settings, toggles: { ...latest.settings.toggles, ['review-' + live.id]: false }, retention: { ...retention,
+        settings: { ...reviewed.settings, retention: { ...retention,
           [markKey(live.id)]: JSON.stringify(marks),
           ['session-' + live.id]: scope,
           ['record-end:' + live.id]: JSON.stringify({ endedAt: new Date().toISOString(), scope, total: transcripts.length, retained: retained.length, retainedIds: retained.map(t => t.id), notesTotal: snapshot.session.privateNotes.length, notesRetained: notes.length, reviewTaskIds: affectedTasks.map(t => t.id) }),
@@ -164,7 +154,8 @@ function EndRecordingDialog({ request, onClose }: { request: EndRequest; onClose
   if (!allowed || !snapshot) return <Sheet open onClose={cancel} title="结束记录"><Notice>当前空间无法查看这段记录，切回原空间后再检查保存范围。</Notice><Button tone="secondary" onClick={cancel}>返回</Button></Sheet>;
   return <Sheet open onClose={cancel} title="结束前，确认留下什么">
     <div className="rc-end-heading"><div><h3>{snapshot.session.title}</h3><p className="meta">已暂停在 {snapshot.session.duration || '00:00'}</p></div><Badge tone="gray">保存范围</Badge></div>
-    <SelectField label="原话片段" value={scope} onChange={setScope} options={['完整保存', '仅保存非敏感片段', '手动选择片段']} />
+    <SelectField label="原话片段" value={scope} onChange={value => setScope(value as SaveScope)} options={['完整保存', '仅保存非敏感片段', '手动选择片段']} />
+    {scope === '手动选择片段' && <p className="meta">已沿用这段记录的保存偏好，请选择需要留下的原话。</p>}
     <div className="rc-retention-counts"><div><strong>{retained.length}<small> / {transcripts.length}</small></strong><span>保留原话片段</span></div><div><strong>{keptNotes.length}<small> / {snapshot.session.privateNotes.length}</small></strong><span>保留私人便签</span></div></div>
     {scope === '手动选择片段' && <Card className="rc-selection"><h3>勾选需要保留的原话</h3>{transcripts.length ? transcripts.map(t => <Check key={t.id} label={`${t.time} · ${t.private && team ? '私人片段（内容仅自己可见）' : `${t.speaker}：${t.text}`}${t.private ? ' · 私有' : ''}`} value={keptIds.includes(t.id)} onChange={value => setKeptIds(ids => value ? [...new Set([...ids, t.id])] : ids.filter(id => id !== t.id))} />) : <p className="meta">本次还没有转写片段。</p>}</Card>}
     {!!snapshot.session.privateNotes.length && <Card className="rc-selection"><h3>私人便签单独选择</h3>{snapshot.session.privateNotes.map((note, i) => <Check key={i} label={team ? `私人便签 ${i + 1}（仅自己可见）` : note} value={keptNotes.includes(i)} onChange={value => setKeptNotes(ids => value ? [...new Set([...ids, i])] : ids.filter(id => id !== i))} />)}<p className="meta">不会因为只保留非敏感原话而自动删除便签。</p></Card>}

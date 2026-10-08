@@ -4,36 +4,50 @@ import { initialData, OopsContext, useOops, type AppData, type Route } from './s
 import { Icon, Row, Sheet, isTextEntryTarget } from './ui';
 import { Assistant, Home, homeTitle, Notifications, SearchScreen, Voice, Welcome, taskVisible, sessionVisible, notificationVisible } from './features/Home';
 import Tasks, { taskTitle } from './features/Tasks';
-import Sessions, { sessionTitle, useSessionRecorder } from './features/Sessions';
+import Sessions, { SessionTabBar, sessionTitle, useSessionRecorder } from './features/Sessions';
 import { MemoryScreens, SettingsScreens, memoryTitle, settingsTitle } from './features/MemorySettings';
 import { RecordingControls, EndRecordingSheet } from './features/RecordingControls';
+import { clearViewState } from './viewState';
+import { taskNeedsAttention } from './sourceAccess';
+import { migrateStoredData } from './stateMigrations';
 
 const roots=['home','sessions','tasks','memory','settings'];
 const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'我的',icon:'user'}];
 function initialRoute():Route{const p=window.location.hash.slice(1).split('/').map(x=>{try{return decodeURIComponent(x)}catch{return x}});return {view:p[0]||'home',id:p[1]||undefined,mode:p[2]||undefined}}
 function routeHash(r:Route){return '#'+[r.view,r.id||'',r.mode||''].map(encodeURIComponent).join('/').replace(/\/+$/,'')}
 function spaceNames(d:AppData):string[]{try{const rows=JSON.parse(d.settings.retention.spaces||'null');if(Array.isArray(rows))return [...new Set(['我的空间',...rows.map(x=>x.name).filter((x:unknown)=>typeof x==='string')])] as string[]}catch{}return ['我的空间','Oops 产品团队']}
-function readData(){try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return d as AppData}catch{}return initialData()}
+function readData(){try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return migrateStoredData(d as AppData)}catch{}return initialData()}
 type EndRequest = { id: string; resume: boolean };
 
 export default function Prototype() {
   const keyboard = useKeyboard();
+  const { screenRef } = useScreenPortal();
   const [data, setData] = useState<AppData>(readData);
   const [route, setRoute] = useState<Route>(initialRoute);
   const [endRequest, setEndRequest] = useState<EndRequest | null>(null);
   const history = useRef<Route[]>([]);
+  const scrollPositions = useRef(new Map<string, number>());
+  const restorePosition = useRef<number | null>(null);
   const [message, setMessage] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const update = useCallback((change: Partial<AppData> | ((current: AppData) => AppData)) => setData(d => typeof change === 'function' ? change(d) : { ...d, ...change }), []);
   const navigate = (next: Route) => {
     keyboard.hide();
-    if (next.view !== route.view || next.id !== route.id || next.mode !== route.mode) history.current.push(route);
+    if (next.view === route.view && next.id === route.id && next.mode === route.mode) return;
+    const scroll = screenRef.current?.querySelector<HTMLElement>('.oops-scroll .mobile-scroll');
+    scrollPositions.current.set(data.settings.space + routeHash(route), scroll?.scrollTop || 0);
+    history.current.push(route);
+    if (history.current.length > 64) history.current.shift();
+    restorePosition.current = roots.includes(next.view) ? scrollPositions.current.get(data.settings.space + routeHash(next)) || 0 : 0;
     setRoute(next);
     window.history.replaceState(null, '', routeHash(next));
   };
   const back = () => {
     keyboard.hide();
+    const scroll = screenRef.current?.querySelector<HTMLElement>('.oops-scroll .mobile-scroll');
+    scrollPositions.current.set(data.settings.space + routeHash(route), scroll?.scrollTop || 0);
     const prev = history.current.pop() || { view: 'home' };
+    restorePosition.current = scrollPositions.current.get(data.settings.space + routeHash(prev)) || 0;
     setRoute(prev);
     window.history.replaceState(null, '', routeHash(prev));
   };
@@ -60,12 +74,21 @@ export default function Prototype() {
     setData(initialData());
     setRoute({ view: 'home' });
     history.current = [];
+    scrollPositions.current.clear();
+    restorePosition.current = 0;
+    clearViewState();
     window.history.replaceState(null, '', '#home');
   };
   useEffect(() => {
     try { localStorage.setItem('oops-front-v2', JSON.stringify(data)); }
     catch { /* Keep the session usable when the visitor's browser blocks storage. */ }
   }, [data]);
+  useLayoutEffect(() => {
+    if (restorePosition.current === null) return;
+    const scroll = screenRef.current?.querySelector<HTMLElement>('.oops-scroll .mobile-scroll');
+    if (scroll) scroll.scrollTop = restorePosition.current;
+    restorePosition.current = null;
+  }, [route.view, route.id, route.mode, data.settings.space, screenRef]);
   useEffect(() => {
     document.title = 'Oops · 日常陪伴 App';
     const onHash = () => { keyboard.hide(); setRoute(initialRoute()); };
@@ -147,13 +170,15 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const session = data.sessions.find(s => s.id === data.activeSessionId && !s.archived && sessionVisible(data, s.id) && ['进行中', '暂停'].includes(s.status));
   const hasRecordingControls = !!session && !isKeyboardVisible;
   const hasPrepareFooter = route.view === 'session-create' && !session;
-  const pendingTasks = data.tasks.filter(x => x.status === '待承接' && taskVisible(data, x)).length;
+  const hasSessionTabs = ['session-detail', 'session-transcript'].includes(route.view) && !!route.id && sessionVisible(data, route.id);
+  const pendingTasks = data.tasks.filter(x => ['我', data.settings.name].includes(x.owner) && taskNeedsAttention(x) && taskVisible(data, x)).length;
   const content = active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
-  return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
+  return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''} ${hasSessionTabs ? 'has-session-tabs' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
     <header className={`app-header ${isHome ? 'home-header' : ''}`}>
       {isHome ? <><img className="wordmark" src="/brand/wordmark.png" alt="Oops" /><div className="header-tools"><button className="space-pill" onClick={() => setSpaceOpen(true)}>{data.settings.space}<Icon name="caret-down" size={13} /></button><button className="icon-button notification-button" aria-label="通知" onClick={() => navigate({ view: 'notifications' })}><Icon name="bell" size={25} />{data.notifications.some(n => !n.read && notificationVisible(data, n.route)) && <i />}</button></div></> : <><button className="icon-button" aria-label={isRoot ? '搜索全部内容' : '返回上一页'} onClick={isRoot ? () => navigate({ view: 'search' }) : back}><Icon name={isRoot ? 'magnifying-glass' : 'caret-left'} size={23} /></button><h1>{title}</h1><button className="icon-button" aria-label={active === 'sessions' ? '新建记录' : active === 'tasks' ? '新建任务' : '回到首页'} onClick={() => navigate({ view: active === 'sessions' ? 'session-mode' : active === 'tasks' ? 'task-edit' : 'home' })}><Icon name={['sessions', 'tasks'].includes(active) ? 'plus' : 'house'} size={22} /></button></>}
     </header>
-    <MobileScroll key={`${route.view}:${route.id || ''}:${route.mode || ''}`} className="oops-scroll"><main className={`screen-content ${isHome ? 'home-main' : ''}`} aria-label={title}>{content}</main></MobileScroll>
+    {hasSessionTabs && <div className="session-fixed-tabs"><SessionTabBar /></div>}
+    <MobileScroll key={`${data.settings.space}:${route.view}:${route.id || ''}`} className="oops-scroll"><main className={`screen-content ${isHome ? 'home-main' : ''}`} aria-label={title}>{content}</main></MobileScroll>
     {!isKeyboardVisible && <nav className="app-nav" aria-label="主导航">{tabs.map(t => <button key={t.view} aria-label={t.title} aria-current={active === t.view ? 'page' : undefined} className={active === t.view ? 'selected' : ''} onClick={() => navigate({ view: t.view })}><Icon name={t.icon} size={25} /><span>{t.title}</span>{t.view === 'tasks' && pendingTasks > 0 && <b>{pendingTasks}</b>}</button>)}</nav>}
     {hasPrepareFooter && <div className="session-prepare-footer" style={{ bottom: bottomInset + (isKeyboardVisible ? 12 : 78) }}><button className="button primary" type="submit" form="oops-session-prepare-form"><Icon name="play" size={20} /><span>{data.sessions.find(s => s.id === route.id)?.status === '已结束' ? '开始后续示例记录' : '开始示例记录'}</span></button></div>}
     <RecordingControls />
