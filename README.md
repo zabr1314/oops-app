@@ -1,10 +1,10 @@
 # Oops · 日常陪伴 App
 
-这是可连续操作的本地移动 App 原型，包含首页、会话、任务、记忆、我的五个主入口。
+这是可连续操作的移动 App 交互原型，包含首页、会话、任务、记忆、我的五个主入口。完整源码、素材、画板与运行说明都保存在这个仓库中。
 
-- [打开 App](http://127.0.0.1:8796/)
-- [打开记录体验改进画板](http://127.0.0.1:8796/record-improved.html)
-- [打开完整界面画板（首版94页）](http://127.0.0.1:8796/board.html)
+- [在线体验完整 App](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/)
+- [在线查看记录体验改进画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/record-improved.html)
+- [在线查看完整界面画板（首版94页）](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/board.html)
 
 画板收录 **94 个独立界面**：首页 6、会话 20、任务 25、记忆 21、我的 22。一些业务页面已合并为标签页或底部面板，不重复计数。画板支持分组、搜索、缩放，点击截图可进入对应 App 页面；截图来自走查后的状态，首次进入时可通过操作生成自己的成果和回执。
 
@@ -20,18 +20,27 @@
 
 ## 数据与演示范围
 
-操作数据自动保存在当前浏览器的 `localStorage` 中，刷新后保留；不同浏览器或不同地址不共享数据。清除站点数据会回到初始示例。
+操作数据在浏览器允许时保存在当前浏览器的 `localStorage` 中，刷新后保留；不同浏览器或不同地址不共享数据。清除站点数据会回到初始示例。浏览器禁用存储时仍可体验本次页面中的操作，刷新后不能保留。
 
 录音与转写、AI 生成、消息和邮件发送、日历提交、设备配对及外部工具连接均为本地示例，没有接入真实服务。界面可操作的表单校验、任务状态、成果编辑、权限范围与模拟回执用于验证流程；回执不代表真实发送或真实日程创建。
 
 ## 开发与构建
 
-在本目录安装依赖并启动：
+使用 Node.js 22.12 或更新版本及 npm。克隆私有仓库时，需要使用拥有访问权限的 GitHub 账号。
+
+```sh
+git clone https://github.com/zabr1314/oops-app.git
+cd oops-app
+```
+
+在项目目录安装依赖并启动：
 
 ```sh
 npm ci
 npm run dev -- --host 127.0.0.1 --port 8796 --strictPort
 ```
+
+本地 App 位于 `http://127.0.0.1:8796/`；完整画板与新版记录画板分别位于同地址下的 `/board.html` 和 `/record-improved.html`。
 
 生成生产构建并在本地预览：
 
@@ -41,6 +50,18 @@ npx vite preview --host 127.0.0.1 --port 8797 --strictPort
 ```
 
 生产预览使用 `http://127.0.0.1:8797/`，画板位于同地址的 `/board.html`。构建输出在 `dist/client/`，以上命令不会发布到线上。
+
+检查移动运行时与部署资源：
+
+```sh
+npm run check:runtime
+npm run build
+npm run test:sites
+```
+
+当前使用 React、TypeScript 和 Vite。应用页面位于 `src/features/`，导航和状态入口位于 `src/Prototype.tsx`，共享数据与演示种子位于 `src/store.tsx`，品牌素材和画板位于 `public/`。修改页面前请阅读 `AGENTS.md`，保留其规定的移动运行时。
+
+线上体验由 Sites 托管，`.openai/hosting.json` 保存现有站点标识，不含访问密钥。推送代码到 GitHub 不会自动更新线上体验，发布网站需要单独完成。依赖目录、构建输出、测试临时输出和环境变量文件不进入仓库。
 
 ## 实现覆盖文档
 
