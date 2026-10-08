@@ -62,7 +62,10 @@ export default function Prototype() {
     history.current = [];
     window.history.replaceState(null, '', '#home');
   };
-  useEffect(() => { localStorage.setItem('oops-front-v2', JSON.stringify(data)); }, [data]);
+  useEffect(() => {
+    try { localStorage.setItem('oops-front-v2', JSON.stringify(data)); }
+    catch { /* Keep the session usable when the visitor's browser blocks storage. */ }
+  }, [data]);
   useEffect(() => {
     document.title = 'Oops · 日常陪伴 App';
     const onHash = () => { keyboard.hide(); setRoute(initialRoute()); };
