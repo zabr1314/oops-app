@@ -1,0 +1,572 @@
+[
+  {
+    "key": "h01-home",
+    "title": "首页",
+    "route": "home",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "h02-assistant",
+    "title": "问 Oops",
+    "route": "assistant",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "h03-voice",
+    "title": "说给 Oops 听",
+    "route": "voice",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "h04-search",
+    "title": "搜索",
+    "route": "search",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "h05-notifications",
+    "title": "通知",
+    "route": "notifications",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "h06-welcome",
+    "title": "你好，我是 Oops",
+    "route": "welcome",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t01-tasks",
+    "title": "任务",
+    "route": "tasks",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t02-task-detail",
+    "title": "任务详情",
+    "route": "task-detail",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t03-task-accept",
+    "title": "核对承接",
+    "route": "task-accept",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t04-task-reject",
+    "title": "婉拒任务",
+    "route": "task-reject",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t05-task-transfer",
+    "title": "建议转交",
+    "route": "task-transfer",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t06-task-transfer-response",
+    "title": "转交进展",
+    "route": "task-transfer-response",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t07-task-edit",
+    "title": "任务要求",
+    "route": "task-edit",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t08-task-plan",
+    "title": "助手计划",
+    "route": "task-plan",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t09-task-authorize",
+    "title": "允许助手准备",
+    "route": "task-authorize",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t10-task-progress",
+    "title": "助手工作",
+    "route": "task-progress",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t11-task-failure",
+    "title": "处理未完成项",
+    "route": "task-failure",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t12-task-budget",
+    "title": "额度与产出",
+    "route": "task-budget",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t13-task-change",
+    "title": "修改要求",
+    "route": "task-change",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t14-task-result",
+    "title": "成果",
+    "route": "task-result",
+    "empty": false,
+    "size": [
+      393,
+      852
+    ]
+  },
+  {
+    "key": "t15-task-versions",
+    "title": "版本记录",
+    "empty": false
+  },
+  {
+    "key": "t16-task-preview",
+    "title": "成果预览",
+    "empty": false
+  },
+  {
+    "key": "t17-task-artifact-edit",
+    "title": "编辑成果",
+    "empty": false
+  },
+  {
+    "key": "t18-task-send",
+    "title": "跟进消息",
+    "empty": false
+  },
+  {
+    "key": "t19-task-email",
+    "title": "审阅邮件",
+    "empty": false
+  },
+  {
+    "key": "t20-task-calendar",
+    "title": "审阅日程",
+    "empty": false
+  },
+  {
+    "key": "t21-task-receipt",
+    "title": "操作回执",
+    "empty": false
+  },
+  {
+    "key": "t22-task-history",
+    "title": "任务活动",
+    "empty": false
+  },
+  {
+    "key": "t23-task-complete",
+    "title": "检查交付",
+    "empty": false
+  },
+  {
+    "key": "t24-task-ask",
+    "title": "补充问题",
+    "empty": false
+  },
+  {
+    "key": "t25-task-attachment",
+    "title": "补充资料",
+    "empty": false
+  },
+  {
+    "key": "m01-memory",
+    "title": "记忆",
+    "empty": false
+  },
+  {
+    "key": "m02-memory-detail",
+    "title": "记忆详情",
+    "empty": false
+  },
+  {
+    "key": "m03-memory-edit",
+    "title": "编辑内容",
+    "empty": false
+  },
+  {
+    "key": "m04-memory-candidate",
+    "title": "核对新记忆",
+    "empty": false
+  },
+  {
+    "key": "m05-memory-conflict",
+    "title": "核对记忆变化",
+    "empty": false
+  },
+  {
+    "key": "m06-memory-person",
+    "title": "人物详情",
+    "empty": false
+  },
+  {
+    "key": "m07-memory-person-edit",
+    "title": "编辑人物",
+    "empty": false
+  },
+  {
+    "key": "m08-memory-voice",
+    "title": "纠正声音身份",
+    "empty": false
+  },
+  {
+    "key": "m09-memory-exchange",
+    "title": "交换身份",
+    "empty": false
+  },
+  {
+    "key": "m10-memory-project",
+    "title": "项目详情",
+    "empty": false
+  },
+  {
+    "key": "m11-memory-project-edit",
+    "title": "项目背景",
+    "empty": false
+  },
+  {
+    "key": "m12-memory-inspiration",
+    "title": "灵感",
+    "empty": false
+  },
+  {
+    "key": "m13-memory-goals",
+    "title": "成长",
+    "empty": false
+  },
+  {
+    "key": "m14-memory-goal",
+    "title": "成长目标",
+    "empty": false
+  },
+  {
+    "key": "m15-memory-favorites",
+    "title": "收藏与成果",
+    "empty": false
+  },
+  {
+    "key": "m16-memory-templates",
+    "title": "模板与工作流",
+    "empty": false
+  },
+  {
+    "key": "m17-memory-template",
+    "title": "使用模板",
+    "empty": false
+  },
+  {
+    "key": "m18-memory-workflow",
+    "title": "工作流",
+    "empty": false
+  },
+  {
+    "key": "m19-memory-social",
+    "title": "声音动态",
+    "empty": false
+  },
+  {
+    "key": "m20-memory-people",
+    "title": "人物库",
+    "empty": false
+  },
+  {
+    "key": "m21-memory-projects",
+    "title": "项目库",
+    "empty": false
+  },
+  {
+    "key": "u01-settings",
+    "title": "我的",
+    "empty": false
+  },
+  {
+    "key": "u02-settings-identity",
+    "title": "身份与角色",
+    "empty": false
+  },
+  {
+    "key": "u03-settings-preferences",
+    "title": "助理偏好",
+    "empty": false
+  },
+  {
+    "key": "u04-settings-voice",
+    "title": "我的声音身份",
+    "empty": false
+  },
+  {
+    "key": "u05-settings-devices",
+    "title": "设备与声音入口",
+    "empty": false
+  },
+  {
+    "key": "u06-settings-device",
+    "title": "设备详情",
+    "empty": false
+  },
+  {
+    "key": "u07-settings-pair",
+    "title": "添加设备",
+    "empty": false
+  },
+  {
+    "key": "u08-settings-deskpet",
+    "title": "桌面伙伴",
+    "empty": false
+  },
+  {
+    "key": "u09-settings-tools",
+    "title": "工具连接",
+    "empty": false
+  },
+  {
+    "key": "u10-settings-tool",
+    "title": "连接与权限",
+    "empty": false
+  },
+  {
+    "key": "u11-settings-sync",
+    "title": "离线记录",
+    "empty": false
+  },
+  {
+    "key": "u12-settings-sharing",
+    "title": "分享管理",
+    "empty": false
+  },
+  {
+    "key": "u13-settings-retention",
+    "title": "保存期限",
+    "empty": false
+  },
+  {
+    "key": "u14-settings-spaces",
+    "title": "工作空间",
+    "empty": false
+  },
+  {
+    "key": "u15-settings-members",
+    "title": "成员与邀请",
+    "empty": false
+  },
+  {
+    "key": "u16-settings-trash",
+    "title": "回收站",
+    "empty": false
+  },
+  {
+    "key": "u17-settings-privacy",
+    "title": "隐私与数据",
+    "empty": false
+  },
+  {
+    "key": "u18-settings-export",
+    "title": "导出与清理",
+    "empty": false
+  },
+  {
+    "key": "u19-settings-logs",
+    "title": "操作记录",
+    "empty": false
+  },
+  {
+    "key": "u20-settings-notifications",
+    "title": "通知与自主等级",
+    "empty": false
+  },
+  {
+    "key": "u21-settings-account",
+    "title": "账户与安全",
+    "empty": false
+  },
+  {
+    "key": "u22-settings-usage",
+    "title": "用量与方案",
+    "empty": false
+  },
+  {
+    "key": "c01-sessions",
+    "title": "会话",
+    "empty": false
+  },
+  {
+    "key": "c02-session-mode",
+    "title": "开始一段记录",
+    "empty": false
+  },
+  {
+    "key": "c03-session-create",
+    "title": "创建记录",
+    "empty": false
+  },
+  {
+    "key": "c04-session-import",
+    "title": "导入内容",
+    "empty": false
+  },
+  {
+    "key": "c05-session-detail",
+    "title": "会议复盘",
+    "empty": false
+  },
+  {
+    "key": "c06-session-transcript",
+    "title": "转写",
+    "empty": false
+  },
+  {
+    "key": "c07-session-edit",
+    "title": "修订片段",
+    "empty": false
+  },
+  {
+    "key": "c08-session-identity",
+    "title": "确认说话人",
+    "empty": false
+  },
+  {
+    "key": "c09-session-source",
+    "title": "资料详情",
+    "empty": false
+  },
+  {
+    "key": "c10-session-agenda",
+    "title": "议程",
+    "empty": false
+  },
+  {
+    "key": "c11-session-map",
+    "title": "思维导图",
+    "empty": false
+  },
+  {
+    "key": "c12-session-display",
+    "title": "大屏预览",
+    "empty": false
+  },
+  {
+    "key": "c13-session-reminders",
+    "title": "会议提醒",
+    "empty": false
+  },
+  {
+    "key": "c14-session-share",
+    "title": "共享范围",
+    "empty": false
+  },
+  {
+    "key": "c15-session-export",
+    "title": "导出预览",
+    "empty": false
+  },
+  {
+    "key": "c16-session-recall",
+    "title": "Recall · 最近5分钟",
+    "empty": false
+  },
+  {
+    "key": "c17-session-growth",
+    "title": "表达练习",
+    "empty": false
+  },
+  {
+    "key": "c18-session-inspiration",
+    "title": "灵感与联系草稿",
+    "empty": false
+  },
+  {
+    "key": "c19-session-history",
+    "title": "问已有记录",
+    "empty": false
+  },
+  {
+    "key": "c20-session-revisions",
+    "title": "修订历史",
+    "empty": false
+  }
+]

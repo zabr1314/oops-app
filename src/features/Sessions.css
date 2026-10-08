@@ -1,0 +1,89 @@
+.sessions-feature h2 { margin: 0; font-size: 22px; letter-spacing: -.5px; }
+.sessions-feature h3 { margin: 12px 0 7px; font-size: 17px; }
+.session-list-item { position: relative; }
+.session-list-item .card { width: 100%; text-align: left; padding-bottom: 18px; }
+.session-more { position: absolute; top: 13px; right: 13px; border: 0; padding: 6px; background: transparent; }
+.session-card-top { display: flex; align-items: center; gap: 10px; padding-right: 28px; }
+.session-kind,.session-material-icon { display: flex; align-items: center; gap: 8px; }
+.session-kind { width: 38px; height: 38px; border-radius: 13px; background: #f0ebff; justify-content: center; }
+.session-preview { font-size: 13px; line-height: 1.55; color: #6e6880; margin: 8px 0 16px; }
+.session-card-bottom { display: flex; justify-content: space-between; color: #958baf; font-size: 11px; }
+.session-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.session-heading h2 { font-size: 22px; line-height: 1.35; }
+.session-heading .meta { margin-top: 5px; }
+.session-view-switch { display: flex; padding: 3px; gap: 3px; background: #f3f0f8; border-radius: 12px; }
+.session-view-switch button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 5px; padding: 9px 5px; background: transparent; color: #8f869e; border: none; border-radius: 9px; font-size: 12px; }
+.session-view-switch button.selected { background: white; color: #7751d8; box-shadow: 0 2px 8px #40305a0b; }
+.session-recording { display: flex; align-items: center; gap: 10px; padding: 14px; border: 1px solid #e8dcfb; background: #f7f2ff; border-radius: 17px; }
+.session-recording strong { display: block; font-size: 13px; }
+.session-recording small { display: block; color: #9686ae; font-size: 10px; margin-top: 4px; }
+.session-recording .button { margin-left: auto; width: auto; flex-shrink: 0; }
+.recording-dot { width: 9px; height: 9px; background: #8a5fe3; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 5px #8a5fe314; animation: session-pulse 1.8s infinite; }
+.recording-dot.paused { background: #a9a0b8; animation: none; }
+@keyframes session-pulse { 50% { box-shadow: 0 0 0 8px #8a5fe308; } }
+.session-transcript { text-align: left; border: 1px solid #eee8f5; }
+.session-transcript.highlighted { border-color: #9268e8; background: #f4efff; box-shadow: 0 0 0 2px #946ce218; }
+.session-speaker { display: flex; gap: 7px; align-items: center; font-size: 12px; }
+.session-speaker .avatar { width: 25px; height: 25px; font-size: 11px; }
+.session-speaker>span:not(.avatar):not(.badge) { color: #a79bb7; margin-left: auto; font-size: 10px; }
+.session-transcript p { font-size: 14px; line-height: 1.7; margin: 11px 0 0; color: #514760; }
+.session-playback { display: flex; gap: 9px; align-items: center; }
+.session-playback>.button { flex: 1; }
+.session-playback>button:last-child { background: white; border: 1px solid #e5dfee; color: #77668f; border-radius: 10px; height: 40px; padding: 0 10px; font-size: 12px; }
+.session-warning { border: 1px solid #f5e0be!important; background: #fff9ee!important; }
+.session-warning p { font-size: 13px; color: #a88145; }
+.session-task-top { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.session-task-top h3 { margin: 0; font-size: 15px; }
+.session-status-pair { display: flex; gap: 8px; margin-top: 14px; }
+.session-status-pair span { font-size: 10px; color: #806d9b; background: #f4effa; border-radius: 7px; padding: 6px 8px; }
+.session-summary-line { display: flex; gap: 10px; font-size: 13px; line-height: 1.8; color: #5b4d6e; }
+.session-summary-line>span { color: #9f87c9; font-variant-numeric: tabular-nums; }
+.session-preserve { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
+.session-agenda-row { border: 1px solid #eee7f6; background: white; padding: 14px 12px; border-radius: 14px; display: flex; align-items: center; gap: 10px; text-align: left; }
+.session-agenda-row>span { border-radius: 50%; width: 26px; height: 26px; background: #f5f0fc; display: grid; place-items: center; color: #987bc7; flex-shrink: 0; font-size: 12px; }
+.session-agenda-row strong { flex: 1; font-size: 13px; font-weight: 500; }
+.session-agenda-row.current { border-color: #bba1ec; background: #faf7ff; }
+.session-map { display: flex; flex-direction: column; gap: 15px; border-radius: 22px; padding: 24px 16px; background: radial-gradient(#dccfea 1px,transparent 1px) 0 0 / 13px 13px,#fbf8ff; }
+.map-center { align-self: center; background: #8e65da; color: white; padding: 16px; border-radius: 17px; font-weight: 600; max-width: 92%; text-align: center; }
+.map-branch,.map-material { display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid #e0d3f3; border-radius: 12px; padding: 12px; background: white; color: #77618e; font-size: 12px; margin-left: 25px; }
+.map-branch>span { width: 20px; color: #a48bc4; }
+.map-material { background: #f3edf9; margin-left: 45px; }
+.session-recall-hero { text-align: center; padding: 18px 14px; background: linear-gradient(145deg,#f5efff,#fdfbff); border-radius: 24px; }
+.session-recall-hero h2 { font-size: 23px; margin: 13px 0 8px; }
+.session-recall-hero p { font-size: 12px; color: #a18bbd; }
+.session-recall-choice { border: 1px solid #eadff3; border-radius: 16px; padding: 12px 16px; background: white; }
+.session-recall-choice p { font-size: 14px; margin: 8px 0 4px; line-height: 1.7; color: #665774; }
+
+.session-timer { background: linear-gradient(145deg, #faf6ff, #fff); border: 1px solid #ece2fa; }
+.session-timer .section-title { margin: 0; }
+.session-timer-clock { display: block; margin: 12px 0 8px; color: #8460ca; font-size: 35px; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.session-timer.session-warning .session-timer-clock { color: #b5853c; }
+.session-feedback { display: flex; flex-direction: column; gap: 12px; background: #fbf8ff; }
+.session-feedback p { margin: 0; font-size: 13px; line-height: 1.7; }
+
+.session-quickstart { gap: 18px; }
+.session-start-heading { padding: 9px 4px 0; }
+.session-start-heading>.icon { padding: 12px; width: 56px; height: 56px; background: #e9e1fb; border-radius: 20px; margin-bottom: 14px; }
+.session-start-heading h2 { font-size: 25px; line-height: 1.45; }
+.session-start-heading p { font-size: 13px; margin: 7px 0 0; }
+.session-kind-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.session-kind-grid>button { display: flex; flex-direction: column; gap: 8px; padding: 16px 14px; border: 1px solid #e5def4; border-radius: 19px; background: #fff; text-align: left; min-height: 126px; }
+.session-kind-grid>button.selected { border-color: #aa8ddd; background: #f4efff; box-shadow: inset 0 0 0 1px #ceb9ef; }
+.session-kind-grid strong { font-size: 15px; }
+.session-kind-grid small { font-size: 11px; color: #9080a7; }
+.session-start-scope { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #81709b; }
+.session-start-scope>span { display: flex; gap: 5px; align-items: center; }
+.session-active-card { display: flex; flex-direction: column; gap: 10px; background: #f7f3ff; }
+.session-active-card h3 { margin: 0; }
+.session-prepare { margin: 0; }
+.session-live-overview { background: #fff; border: 1px solid #ece4f7; padding: 0 13px; border-radius: 19px; }
+.session-live-overview .list-row { min-height: 66px; padding: 12px 0; }
+.session-live-overview .list-row:last-child { border-bottom: 0; }
+.session-live-overview .row-icon { width: 34px; height: 34px; border-radius: 12px; }
+.session-live-overview .row-copy strong { font-size: 13px; }
+.session-live-overview .row-copy small { font-size: 10px; }
+.session-review { gap: 14px; }
+.session-review-intro h3 { font-size: 17px; margin: 12px 0; }
+.session-review-intro .stat-grid { margin-top: 14px; }
+.session-review .stat { padding: 11px 5px; }
+.session-review .list-row { padding-top: 5px; }
