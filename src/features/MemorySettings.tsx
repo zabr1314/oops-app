@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useOops, type AppData, type Memory, type Person, type Project, type Route, type Session, type Task, type Transcript } from '../store';
 import { sharedMemoryEligible } from '../memoryAccess';
 import { sourceAvailable, sourceTurn, taskVisible, findSourceTask, invalidateSessionSources, makeSourceReference, provenanceAvailable } from '../sourceAccess';
-import { useViewState } from '../viewState';
+import { clearObjectViewState, useViewState } from '../viewState';
 import { Avatar, Badge, Button, Card, Check, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, SelectField, Sheet, Source, Tabs, Toggle } from '../ui';
 import './MemorySettings.css';
 
@@ -20,7 +20,8 @@ export function memoryShareEligible(data: AppData, memory: Memory, targetSpace =
 }
 const protectedMemoryTags = ['修订历史', '待复核', '待确认', '资料', '会中检索', '任务成果'];
 function memoryEditDraft(original: Memory | undefined, fields: Pick<Memory, 'title' | 'body' | 'category' | 'tags' | 'visibility'>, id: string): Memory {
-  return { ...(original || { id, confirmed: true }), ...fields, tags: [...new Set([...fields.tags, ...(original?.tags.filter(tag => protectedMemoryTags.includes(tag)) || [])])], updated: today() };
+  const tags = [...new Set([...fields.tags, ...(original?.tags.filter(tag => protectedMemoryTags.includes(tag)) || [])])];
+  return { ...(original || { id, confirmed: true }), ...fields, tags, updated: today() };
 }
 const sessionVisible = (data: AppData, session: Session) => data.settings.space === PERSONAL || !!data.settings.toggles['shared-' + session.id] && (data.settings.retention['session-space:' + session.id] || TEAM) === data.settings.space;
 const personVisible = (data: AppData, person: Person) => data.settings.space === PERSONAL || person.shared && (data.settings.retention['person-space:' + person.id] || TEAM) === data.settings.space;
@@ -55,22 +56,30 @@ function happenedToday(session: Session, reference = new Date()) {
   return sessionDay.year === current.year && sessionDay.month === current.month && sessionDay.day === current.day;
 }
 type PersonConversation = { session: Session; first: Transcript; turns: Transcript[] };
-function personConversations(data: AppData, person: Person): PersonConversation[] {
+export function personConversations(data: AppData, person: Person): PersonConversation[] {
   if (!personVisible(data, person) || anonymousName(person.name)) return [];
-  const confirmedName = personNameConfirmed(data, person);
   return data.sessions.flatMap(session => {
     if (!sessionVisible(data, session) || session.status === '待开始') return [];
-    const turns = session.transcript.filter(turn => turn.speaker.trim() === person.name.trim() && (data.settings.space === PERSONAL || !turn.private) && (confirmedName || data.settings.toggles['speaker-confirmed:' + session.id + ':' + turn.id] === true));
+    const turns = session.transcript.filter(turn => turn.personId === person.id && (data.settings.space === PERSONAL || !turn.private) && data.settings.toggles['speaker-confirmed:' + session.id + ':' + turn.id] === true);
     return turns.length ? [{ session, first: turns[0], turns }] : [];
   }).sort((a, b) => (sessionDateValue(b.session) || 0) - (sessionDateValue(a.session) || 0));
 }
+export function personFollowUps(data: AppData, person: Person): Task[] {
+  if (!personVisible(data, person)) return [];
+  const verified = (pointer: { sourceSession?: string; sourceId?: string; sourceTime?: string }) => {
+    const turn = sourceTurn(data, pointer);
+    return !!turn && turn.personId === person.id && data.settings.toggles[`speaker-confirmed:${pointer.sourceSession}:${turn.id}`] === true;
+  };
+  return data.tasks.filter(task => taskVisible(data, task) && (!['已完成', '已取消', '已拒绝'].includes(task.status) || task.inquiries?.some(inquiry => inquiry.status !== '已解决')) && (verified(task) || task.sources?.some(ref => ref.kind === 'session' ? verified({ sourceSession: ref.id, sourceId: ref.sourceId, sourceTime: ref.sourceTime }) : ref.kind === 'memory' && !!data.memories.find(memory => memory.id === ref.id && memoryUsable(data, memory) && verified(memory)))));
+}
+const personChoiceLabel = (person: Person) => `${person.name} · ${person.company || person.role || '人物卡'} · ${person.id}`;
 function sessionOptionLabel(session: Session | undefined, sessions: Session[]) {
   if (!session) return '';
   const shortId = (id: string) => id.replace(/^session-/, '').slice(-8);
   const collision = sessions.some(other => other.id !== session.id && other.title === session.title && other.date === session.date && shortId(other.id) === shortId(session.id));
   return session.title + ' · ' + (session.date || '日期未定') + ' · ' + (collision ? session.id : shortId(session.id));
 }
-const roleTarget = (data: AppData) => data.memories.find(x => x.id === 'MEM-001' && visible(data, x));
+const roleTarget = (data: AppData) => data.memories.find(x => x.id === (data.settings.retention['current-role-memory'] || 'MEM-001') && visible(data, x) && !x.tags.includes('修订历史'));
 
 const needsMemoryReview = (memory: Memory, data?: AppData) => !memory.confirmed || !!memory.needsReview || memory.tags.some(tag => ['待确认', '待复核'].includes(tag)) || !!data && (!sourceAvailable(data, memory) || !provenanceAvailable(data, memory.sources));
 export function memoryReviewQueue(data: AppData): Memory[] { return data.memories.filter(memory => visible(data, memory) && needsMemoryReview(memory, data) && !memory.tags.includes('修订历史')); }
@@ -94,7 +103,43 @@ export function taskFromMemory(data: AppData, memoryId: string, forceNew = false
   return { data: { ...data, tasks: [task, ...data.tasks], settings: { ...data.settings, retention: { ...data.settings.retention, ['task-space:' + task.id]: data.settings.space } } }, task };
 }
 type ReviewDraft = { body: string; editing: boolean; sourceSession: string; sourceId: string; sourceTouched: boolean; replace: boolean };
-export function confirmMemoryReview(data: AppData, id: string, draft: ReviewDraft, replaceRole: boolean): { data: AppData; error?: string } {
+/** Keep old work readable to its owner while withdrawing every derived permission. */
+export function invalidateMemoryDerivations(data: AppData, memoryId: string, reason = '记忆来源已变化'): AppData {
+  const memoryIds = new Set([memoryId]), taskIds = new Set<string>();
+  const affected = (sources?: Memory['sources']) => (sources || []).some(ref => ref.kind === 'memory' && memoryIds.has(ref.id) || ref.kind === 'task' && taskIds.has(ref.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    data.memories.forEach(memory => { if (!memoryIds.has(memory.id) && affected(memory.sources)) { memoryIds.add(memory.id); changed = true; } });
+    data.tasks.forEach(task => {
+      if (!taskIds.has(task.id) && (task.sourceMemoryId && memoryIds.has(task.sourceMemoryId) || affected(task.sources) || task.materialRefs?.some(material => material.memoryId && memoryIds.has(material.memoryId)) || task.artifacts?.some(artifact => affected(artifact.sources)) || affected(task.generationSources) || affected(task.generationSnapshot?.sourceRefs))) { taskIds.add(task.id); changed = true; }
+    });
+  }
+  const retention = { ...data.settings.retention };
+  taskIds.forEach(id => { retention['task-space:' + id] = PERSONAL; });
+  return { ...data,
+    tasks: data.tasks.map(task => taskIds.has(task.id) ? { ...task, authorized: false, generationToken: undefined, generationSnapshot: undefined, generationSources: undefined, generationSpace: undefined, sourceNeedsReview: true, needsReview: true, version: task.version + 1, aiStatus: task.aiStatus === '未启动' ? '未启动' : '待授权', artifacts: task.artifacts?.map(artifact => ({ ...artifact, needsReview: true, sourceNeedsReview: true, reviewedAt: undefined })), materialRefs: task.materialRefs?.map(material => material.memoryId && memoryIds.has(material.memoryId) ? { ...material, needsReview: true } : material), activities: [...task.activities, `${today()} · ${reason}；旧成果保留待复核，助手授权撤回`] } : task),
+    memories: data.memories.map(memory => memoryIds.has(memory.id) ? { ...memory, confirmed: false, needsReview: true, visibility: '私有', tags: [...new Set([...memory.tags, '待复核'])] } : memory),
+    messages: data.messages.map(message => message.role === 'assistant' && affected(message.sources) ? { ...message, invalidated: true, text: '这条回答的记忆来源已变化或删除，请重新核对后提问。' } : message),
+    settings: { ...data.settings, retention },
+  };
+}
+export function permanentlyDeleteMemory(data: AppData, id: string): AppData {
+  const memory = data.memories.find(item => item.id === id);
+  const invalidated = invalidateMemoryDerivations(data, id, '记忆已永久删除');
+  const retention = { ...invalidated.settings.retention }, toggles = { ...invalidated.settings.toggles };
+  ['memory-history:', 'reviews:', 'recall-source:', 'memory-space:'].forEach(prefix => { delete retention[prefix + id]; });
+  ['role-setting-candidate', 'current-role-memory'].forEach(key => { if (retention[key] === id) delete retention[key]; });
+  const removeMaterial = memory?.sourceSession && (memory.tags.some(tag => ['资料', '会中检索'].includes(tag)) || data.sessions.find(session => session.id === memory.sourceSession)?.attachments.includes(memory.title)) && !invalidated.memories.some(item => item.id !== id && !item.deleted && item.sourceSession === memory.sourceSession && item.title === memory.title);
+  if (removeMaterial && memory?.sourceSession) {
+    delete toggles[`material-shared:${memory.sourceSession}:${memory.title}`];
+    delete retention[`material-space:${memory.sourceSession}:${memory.title}`];
+    delete retention[`material-query:${memory.sourceSession}:${memory.title}`];
+    if (retention[`material-focus:${memory.sourceSession}`] === memory.title) delete retention[`material-focus:${memory.sourceSession}`];
+  }
+  return { ...invalidated, memories: invalidated.memories.filter(item => item.id !== id), sessions: removeMaterial ? invalidated.sessions.map(session => session.id === memory?.sourceSession ? { ...session, attachments: session.attachments.filter(title => title !== memory.title) } : session) : invalidated.sessions, notifications: invalidated.notifications.filter(notification => notification.route.id !== id), settings: { ...invalidated.settings, retention, toggles } };
+}
+export function confirmMemoryReview(data: AppData, id: string, draft: ReviewDraft, replaceRole: boolean): { data: AppData; confirmedId?: string; error?: string } {
   const candidate = data.memories.find(memory => memory.id === id);
   if (!candidate || !visible(data, candidate)) return { data, error: '这条内容已不可查看。' };
   if (!draft.body.trim()) return { data, error: '请填写核对后的内容。' };
@@ -107,26 +152,40 @@ export function confirmMemoryReview(data: AppData, id: string, draft: ReviewDraf
   if (pointer.sourceSession && !turn) return { data, error: '请选择一段实际原话作为来源。' };
   const sources = (candidate.sources || []).map(ref => draft.sourceTouched && ref.kind === 'session' && ref.id === candidate.sourceSession && pointer.sourceSession ? makeSourceReference(data, { kind: 'session', id: pointer.sourceSession, sourceId: turn?.id, sourceTime: turn?.time }) : makeSourceReference(data, ref));
   if (!provenanceAvailable(data, sources)) return { data, error: '其他引用仍需核对，请先查看对应来源。' };
-  const fields: Partial<Memory> = { body: draft.body.trim(), confirmed: true, needsReview: false, tags: candidate.tags.filter(tag => !['待确认', '待复核'].includes(tag)), updated: today(), sourceSession: pointer.sourceSession, sourceId: turn?.id, sourceTime: turn?.time, sources };
+  const fields: Partial<Memory> = { body: draft.body.trim(), confirmed: true, needsReview: false, visibility: '私有', tags: candidate.tags.filter(tag => !['待确认', '待复核'].includes(tag)), updated: today(), sourceSession: pointer.sourceSession, sourceId: turn?.id, sourceTime: turn?.time, sources };
   const previous = replaceRole ? roleTarget(data) : undefined;
   if (replaceRole && (!previous || candidate.category !== '记忆' || !candidate.tags.some(tag => ['身份', '角色冲突'].includes(tag)))) return { data, error: '这条内容不属于可更新的角色背景。' };
   if (previous?.id === candidate.id) return { data, error: '这条内容已经是当前角色记忆。' };
-  const retention = { ...data.settings.retention };
+  const confirmedId = previous?.id || candidate.id;
+  const base = previous ? invalidateMemoryDerivations(data, previous.id, '角色记忆已更新') : data;
+  const retention = { ...base.settings.retention };
+  delete retention['memory-space:' + confirmedId];
+  delete retention['memory-space:' + candidate.id];
+  if (retention['role-setting-candidate'] === candidate.id) delete retention['role-setting-candidate'];
+  if (previous) retention['current-role-memory'] = previous.id;
   if (previous) retention['memory-history:' + previous.id] = JSON.stringify([{ ...previous, archivedAt: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }), replacedBy: candidate.id }, ...parse<Memory[]>(retention['memory-history:' + previous.id], [])]);
-  return { data: logData({ ...data, memories: data.memories.map(memory => memory.id === candidate.id ? { ...memory, ...fields } : previous && memory.id === previous.id ? { ...memory, ...fields, tags: [...new Set([...memory.tags.filter(tag => !['待确认', '待复核'].includes(tag)), ...candidate.tags.filter(tag => !['待确认', '待复核'].includes(tag))])] } : memory), notifications: data.notifications.map(n => n.route.id === candidate.id ? { ...n, read: true } : n), settings: { ...data.settings, retention } }, '核对记忆：' + candidate.title) };
+  return { confirmedId, data: logData({ ...base, memories: base.memories.filter(memory => !previous || memory.id !== candidate.id).map(memory => memory.id === confirmedId ? { ...memory, ...fields, tags: fields.tags! } : memory), notifications: base.notifications.map(n => n.route.id === candidate.id ? { ...n, route: { ...n.route, id: confirmedId }, read: true } : n), settings: { ...base.settings, retention } }, '核对记忆：' + candidate.title + '；确认内容保持私人') };
 }
-export function confirmPersonSpeaker(data: AppData, selection: { personId?: string; sessionId: string; turnId: string; name: string; voiceConsent: boolean; plannedPersonId?: string }): { data: AppData; personId?: string; error?: string } {
+export function confirmPersonSpeaker(data: AppData, selection: { personId?: string; targetPersonId?: string; sessionId: string; turnId: string; name: string; voiceConsent: boolean; plannedPersonId?: string }): { data: AppData; personId?: string; error?: string } {
+  return confirmPersonSpeakers(data, { ...selection, turnIds: [selection.turnId] });
+}
+export function confirmPersonSpeakers(data: AppData, selection: { personId?: string; targetPersonId?: string; sessionId: string; turnIds: string[]; name: string; voiceConsent: boolean; plannedPersonId?: string }): { data: AppData; personId?: string; error?: string } {
   if (data.settings.space !== PERSONAL) return { data, error: '请在个人空间核对说话人。' };
-  const session = data.sessions.find(item => item.id === selection.sessionId), turn = session?.transcript.find(item => item.id === selection.turnId);
-  if (!session || !turn || !sourceAvailable(data, { sourceSession: session.id, sourceId: turn.id })) return { data, error: '先选择会话和一段现有原话。' };
+  const session = data.sessions.find(item => item.id === selection.sessionId), turnIds = new Set(selection.turnIds);
+  const turns = session?.transcript.filter(item => turnIds.has(item.id)) || [];
+  if (!session || !turns.length || turns.length !== turnIds.size || turns.some(turn => !sourceAvailable(data, { sourceSession: session.id, sourceId: turn.id }))) return { data, error: '先选择会话和现有的实际原话。' };
   const name = selection.name.trim();
   if (anonymousName(name)) return { data, error: '请指定明确姓名，或保持未确认。' };
-  const match = data.people.find(person => person.name === name), current = data.people.find(person => person.id === selection.personId);
+  const matches = data.people.filter(person => person.name === name), current = data.people.find(person => person.id === selection.personId);
+  const match = selection.targetPersonId ? data.people.find(person => person.id === selection.targetPersonId && person.name === name) : matches.length === 1 ? matches[0] : undefined;
+  if (selection.targetPersonId && !match || !selection.targetPersonId && matches.length > 1) return { data, error: '存在同名人物，请明确选择要关联的人物卡。' };
   const id = match?.id || (current && anonymousName(current.name) ? current.id : selection.plannedPersonId || uid('person'));
-  const changed = turn.speaker !== name;
-  const reviewed = changed ? invalidateSessionSources(data, session.id, [turn.id], `说话人由${turn.speaker}改为${name}`) : data;
+  const changedIds = turns.filter(turn => turn.speaker !== name || !!turn.personId && turn.personId !== id).map(turn => turn.id);
+  const reviewed = changedIds.length ? invalidateSessionSources(data, session.id, changedIds, `已选原话的说话人核对为${name}`) : data;
   const person: Person = match ? { ...match, voice: match.voice || selection.voiceConsent } : current && anonymousName(current.name) ? { ...current, name, role: '本次手动确认', voice: current.voice || selection.voiceConsent } : { id, name, role: '本次手动确认', company: '', note: '', voice: selection.voiceConsent, shared: false };
-  return { personId: id, data: logData({ ...reviewed, people: reviewed.people.some(item => item.id === id) ? reviewed.people.map(item => item.id === id ? person : item) : [...reviewed.people, person], sessions: reviewed.sessions.map(item => { if (item.id !== session.id) return item; const transcript = item.transcript.map(source => source.id === turn.id ? { ...source, speaker: name } : source); return { ...item, transcript, participants: [...new Set([...item.participants.filter(label => label !== turn.speaker || transcript.some(source => source.speaker === label)), ...transcript.map(source => source.speaker)])] }; }), notifications: reviewed.notifications.map(n => n.route.view === 'session-identity' && n.route.id === session.id ? { ...n, read: true } : n), settings: { ...reviewed.settings, toggles: { ...reviewed.settings.toggles, ['person-name-confirmed:' + id]: true, ['speaker-confirmed:' + session.id + ':' + turn.id]: true } } }, '人工核对说话人 ' + session.title + ' → ' + name) };
+  const toggles = { ...reviewed.settings.toggles, ['person-name-confirmed:' + id]: true };
+  turns.forEach(turn => { toggles['speaker-confirmed:' + session.id + ':' + turn.id] = true; });
+  return { personId: id, data: logData({ ...reviewed, people: reviewed.people.some(item => item.id === id) ? reviewed.people.map(item => item.id === id ? person : item) : [...reviewed.people, person], sessions: reviewed.sessions.map(item => { if (item.id !== session.id) return item; const transcript = item.transcript.map(source => turnIds.has(source.id) ? { ...source, speaker: name, personId: id } : source); return { ...item, transcript, participants: [...new Set([...item.participants.filter(label => !turns.some(turn => turn.speaker === label) || transcript.some(source => source.speaker === label)), ...transcript.map(source => source.speaker)])] }; }), notifications: reviewed.notifications.map(n => n.route.view === 'session-identity' && n.route.id === session.id ? { ...n, read: true } : n), settings: { ...reviewed.settings, toggles } }, '人工核对说话人 ' + session.title + ' → ' + name) };
 }
 export function saveIdentityBackground(data: AppData, values: { name: string; role: string; roles: string; context: string; plannedCandidateId?: string }): { data: AppData; candidateId?: string; error?: string } {
   const name = values.name.trim(), role = values.role.trim();
@@ -136,6 +195,70 @@ export function saveIdentityBackground(data: AppData, values: { name: string; ro
   const existing = changed ? data.memories.find(memory => !memory.deleted && !memory.confirmed && memory.tags.includes('档案更新') && memory.body === body) : undefined;
   const candidate: Memory | undefined = changed ? existing || { id: values.plannedCandidateId || uid('MEM-role'), title: '个人角色变化待核对', body, category: '记忆', tags: ['待确认', '身份', '角色冲突', '档案更新'], visibility: '私有', confirmed: false, updated: today() } : undefined;
   return { candidateId: candidate?.id, data: saveSetting({ ...data, memories: candidate && !existing ? [candidate, ...data.memories] : data.memories }, { name, avatar: name.slice(0, 1), role, retention: { ...data.settings.retention, roles: values.roles, roleContext: values.context, ...(candidate ? { 'role-setting-candidate': candidate.id } : {}) } }, '保存个人身份' + (candidate ? '；角色背景变化等待核对' : '')) };
+}
+
+type GrowthReview = { id: string; text: string; date: string; visibility: Memory['visibility']; space?: string; sourceSession?: string; sourceId?: string; sources?: Memory['sources'] };
+export function growthReviews(data: AppData, memoryId: string): GrowthReview[] {
+  return parse<(Partial<GrowthReview> & { sourceId?: string })[]>(data.settings.retention['reviews:' + memoryId], []).filter(review => review && typeof review.text === 'string').map((review, index) => {
+    const legacySession = !review.sourceSession && data.sessions.some(session => session.id === review.sourceId);
+    return { ...review, id: review.id || `legacy-review:${memoryId}:${index}`, text: review.text!, date: review.date || '', visibility: review.visibility === '项目共享' && !!review.space ? '项目共享' : '私有', sourceSession: legacySession ? review.sourceId : review.sourceSession, sourceId: legacySession ? undefined : review.sourceId };
+  });
+}
+export function growthReviewShareEligible(data: AppData, review: GrowthReview, space = data.settings.space === PERSONAL ? TEAM : data.settings.space): boolean {
+  if (review.sourceSession && !review.sourceId) return false;
+  const scoped = { ...data, settings: { ...data.settings, space } };
+  return sourceAvailable(scoped, review, { publicOnly: true, requireShared: true }) && provenanceAvailable(scoped, review.sources);
+}
+export function visibleGrowthReviews(data: AppData, memoryId: string): GrowthReview[] {
+  return growthReviews(data, memoryId).filter(review => data.settings.space === PERSONAL || review.visibility === '项目共享' && review.space === data.settings.space && growthReviewShareEligible(data, review, review.space));
+}
+export function saveGrowthReview(data: AppData, memoryId: string, values: { text: string; sourceSession?: string; sourceId?: string; id?: string }): { data: AppData; error?: string } {
+  const memory = data.memories.find(item => item.id === memoryId);
+  if (data.settings.space !== PERSONAL || !memory || !visible(data, memory)) return { data, error: '请在个人空间记录自己的复盘。' };
+  if (!values.text.trim()) return { data, error: '填写本次进步与下一步。' };
+  const turn = values.sourceSession ? sourceTurn(data, { sourceSession: values.sourceSession, sourceId: values.sourceId || '' }) : undefined;
+  if (values.sourceSession && !turn) return { data, error: '选择一段实际原话，或取消会话关联。' };
+  const review: GrowthReview = { id: values.id || uid('review'), text: values.text.trim(), date: today(), visibility: '私有', ...(turn ? { sourceSession: values.sourceSession, sourceId: turn.id, sources: [makeSourceReference(data, { kind: 'session', id: values.sourceSession!, sourceId: turn.id, sourceTime: turn.time })] } : {}) };
+  return { data: saveSetting(data, { retention: { ...data.settings.retention, ['reviews:' + memoryId]: JSON.stringify([review, ...growthReviews(data, memoryId)]) } }, '保存私人成长复盘') };
+}
+export function setGrowthReviewSharing(data: AppData, memoryId: string, reviewId: string, shared: boolean): { data: AppData; error?: string } {
+  const memory = data.memories.find(item => item.id === memoryId), reviews = growthReviews(data, memoryId), review = reviews.find(item => item.id === reviewId);
+  if (data.settings.space !== PERSONAL || !memory || !visible(data, memory) || !review) return { data, error: '请在个人空间管理自己的复盘范围。' };
+  const space = data.settings.retention['memory-space:' + memoryId] || TEAM;
+  if (shared && (memory.visibility !== '项目共享' || !growthReviewShareEligible(data, review, space))) return { data, error: '先共享目标，并核对这条复盘的有效、非敏感原话。' };
+  return { data: saveSetting(data, { retention: { ...data.settings.retention, ['reviews:' + memoryId]: JSON.stringify(reviews.map(item => item.id === reviewId ? { ...item, visibility: shared ? '项目共享' : '私有', space: shared ? space : undefined } : item)) } }, shared ? '明确共享一条成长复盘' : '撤回一条成长复盘共享') };
+}
+
+/** Export a public projection, never the live object with private draft/history caches. */
+export function exportTaskRecord(data: AppData, task: Task, includePrivate: boolean): Task | Partial<Task> | undefined {
+  if (includePrivate && data.settings.space === PERSONAL) return taskVisible(data, task) ? task : undefined;
+  const sourceSessionId = task.sourceSession || task.relatedSessionId;
+  const space = data.settings.space === PERSONAL ? data.settings.retention['task-space:' + task.id] || (sourceSessionId ? data.settings.retention['session-space:' + sourceSessionId] || TEAM : PERSONAL) : data.settings.space;
+  if (space === PERSONAL) return undefined;
+  const scoped = { ...data, settings: { ...data.settings, space } };
+  if (!taskVisible(scoped, { ...task, materialRefs: [] })) return undefined;
+  const materialRefs = (task.materialRefs || []).flatMap(material => {
+    if (material.needsReview || !sourceAvailable(scoped, material, { publicOnly: true, requireShared: true })) return [];
+    const memory = material.memoryId ? data.memories.find(item => item.id === material.memoryId) : undefined;
+    if (!memory || !memoryShareEligible(data, memory, space) || memory.visibility !== '项目共享' || (data.settings.retention['memory-space:' + memory.id] || TEAM) !== space) return [];
+    if (material.sourceSession && !exportMaterialAllowedForScope(data, material.sourceSession, material.title, space)) return [];
+    return [{ id: material.id, title: memory.title, memoryId: memory.id, body: memory.body, sourceSession: memory.sourceSession, sourceId: memory.sourceId, sourceTime: memory.sourceTime }];
+  });
+  const allMaterialsPublic = materialRefs.length === (task.materialRefs || []).length && !(task.materialRefs || []).some(material => !!material.note?.trim());
+  const artifacts = allMaterialsPublic ? (task.artifacts || []).filter(artifact => !artifact.needsReview && !artifact.sourceNeedsReview && !!artifact.reviewedAt && !!(artifact.sourceSession || artifact.sources?.length) && sourceAvailable(scoped, artifact, { publicOnly: true, requireShared: true }) && provenanceAvailable(scoped, artifact.sources)).map(artifact => ({ id: artifact.id, kind: artifact.kind, title: artifact.title, version: artifact.version, body: artifact.body, created: artifact.created, reviewedAt: artifact.reviewedAt, sourceSession: artifact.sourceSession, sourceId: artifact.sourceId, sourceTime: artifact.sourceTime, sources: artifact.sources })) : [];
+  const drafts: Task['drafts'] = {};
+  if (allMaterialsPublic) Object.entries(task.drafts || {}).forEach(([kind, draft]) => {
+    if (draft.snapshotSpace !== space || !draft.sourceSnapshots?.length || !provenanceAvailable(scoped, draft.sourceSnapshots)) return;
+    const bindings = draft.artifactRefs || [];
+    if (bindings.some(binding => !artifacts.some(artifact => artifact.id === binding.id && artifact.version === binding.version) || !sourceAvailable(scoped, binding, { publicOnly: true, requireShared: true }) || !provenanceAvailable(scoped, binding.sources))) return;
+    drafts[kind] = { target: draft.target, body: draft.body, attachments: bindings.map(binding => binding.title || '').filter(Boolean).join('、'), subject: draft.subject, cc: draft.cc, account: draft.account, start: draft.start, end: draft.end, calendar: draft.calendar, snapshotSpace: space, sourceSnapshots: draft.sourceSnapshots, artifactRefs: bindings.map(binding => ({ id: binding.id, version: binding.version, fingerprint: binding.fingerprint, title: binding.title, kind: binding.kind, sourceSession: binding.sourceSession, sourceId: binding.sourceId, sourceTime: binding.sourceTime, sources: binding.sources })) };
+  });
+  return { id: task.id, title: task.title, description: task.description, owner: task.owner, requester: task.requester, due: task.due, priority: task.priority, status: task.status, aiStatus: task.aiStatus, workKind: task.workKind, origin: task.origin, relatedSessionId: task.relatedSessionId, sourceSession: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime, sources: task.sources, version: task.version, nextFollowUp: task.nextFollowUp, materialRefs, materials: materialRefs.map(material => material.title), artifacts, deliveryArtifactIds: task.deliveryArtifactIds?.filter(id => artifacts.some(artifact => artifact.id === id)), ...(Object.keys(drafts).length ? { drafts } : {}) };
+}
+function exportMaterialAllowedForScope(data: AppData, sessionId: string, title: string, space: string): boolean {
+  const session = data.sessions.find(item => item.id === sessionId);
+  if (!session?.attachments.includes(title) || !data.settings.toggles['shared-' + sessionId] || !data.settings.toggles[`material-shared:${sessionId}:${title}`]) return false;
+  return (data.settings.retention[`material-space:${sessionId}:${title}`] || data.settings.retention['session-space:' + sessionId] || TEAM) === space;
 }
 
 type Log = { id: string; action: string; time: string };
@@ -217,7 +340,8 @@ function MemoryDetail() {
       const current = d.memories.find(x => x.id === m.id);
       if (!current || !visible(d, current)) return d;
       if (fields.visibility === '项目共享' && (!memoryShareEligible(d, current) || !memoryShareEligible(d, { ...current, ...fields }))) return d;
-      return logData({ ...d, memories: d.memories.map(x => x.id === m.id ? { ...x, ...fields, updated: today() } : x), settings: { ...d.settings, retention: { ...d.settings.retention, ...(fields.visibility === '项目共享' ? { ['memory-space:' + m.id]: d.settings.space === PERSONAL ? TEAM : d.settings.space } : {}) } } }, message);
+      const base = fields.deleted || fields.visibility === '私有' && current.visibility === '项目共享' ? invalidateMemoryDerivations(d, current.id, fields.deleted ? '记忆已移入回收站' : '记忆共享已撤回') : d;
+      return logData({ ...base, memories: base.memories.map(x => x.id === m.id ? { ...current, ...fields, ...(fields.deleted ? { visibility: '私有' as const } : {}), updated: today() } : x), settings: { ...base.settings, retention: { ...base.settings.retention, ...(fields.visibility === '项目共享' ? { ['memory-space:' + m.id]: d.settings.space === PERSONAL ? TEAM : d.settings.space } : {}) } } }, message);
     });
     toast(message);
   };
@@ -254,7 +378,9 @@ function MemoryEditor() {
       if (existing && (!current || !visible(d, current))) return d;
       const latest = memoryEditDraft(current, fields, id);
       if (visibility === '项目共享' && (current && !memoryShareEligible(d, current, d.settings.space === PERSONAL ? d.settings.retention['memory-space:' + current.id] || TEAM : d.settings.space) || !memoryShareEligible(d, latest, d.settings.space === PERSONAL && current ? d.settings.retention['memory-space:' + current.id] || TEAM : d.settings.space === PERSONAL ? TEAM : d.settings.space))) return d;
-      return logData({ ...d, memories: existing ? d.memories.map(x => x.id === id ? latest : x) : [latest, ...d.memories], settings: { ...d.settings, retention: { ...d.settings.retention, ...(visibility === '项目共享' ? { ['memory-space:' + id]: existing ? d.settings.retention['memory-space:' + id] || TEAM : d.settings.space === PERSONAL ? TEAM : d.settings.space } : {}) } } }, existing ? '编辑内容：' + title : '新建内容：' + title);
+      const changed = current && (current.title !== latest.title || current.body !== latest.body || current.category !== latest.category || JSON.stringify(current.tags) !== JSON.stringify(latest.tags) || current.visibility === '项目共享' && visibility === '私有');
+      const base = changed ? invalidateMemoryDerivations(d, id, '记忆正文或共享范围已变化') : d;
+      return logData({ ...base, memories: existing ? base.memories.map(x => x.id === id ? latest : x) : [latest, ...base.memories], settings: { ...base.settings, retention: { ...base.settings.retention, ...(visibility === '项目共享' ? { ['memory-space:' + id]: existing ? d.settings.retention['memory-space:' + id] || TEAM : d.settings.space === PERSONAL ? TEAM : d.settings.space } : {}) } } }, existing ? '编辑内容：' + title : '新建内容：' + title);
     });
     setError(''); if (!existing) { setTitle(''); setBody(''); setTags(''); } toast('已保存'); navigate({ view: category === '目标' ? 'memory-goal' : category === '模板' ? 'memory-template' : category === '工作流' ? 'memory-workflow' : 'memory-detail', id });
   };
@@ -284,7 +410,8 @@ function MemoryReview() {
     const result = confirmMemoryReview(data, candidate!.id, draft, !!canReplaceRole && draft.replace);
     if (result.error) { setError(result.error); return; }
     update(current => confirmMemoryReview(current, candidate!.id, draft, !!canReplaceRole && draft.replace).data);
-    setDeferred(ids => ids.filter(id => id !== candidate!.id)); setLastId(candidate!.id); setError(''); toast(canReplaceRole && draft.replace ? '角色记忆已更新，原版本保留' : '已确认这条内容'); advance(candidate!.id, deferred.filter(id => id !== candidate!.id), result.data);
+    setDeferred(ids => ids.filter(id => id !== candidate!.id)); setLastId(result.confirmedId || candidate!.id); setError(''); toast(canReplaceRole && draft.replace ? '角色记忆已更新并保持私人，原版本保留' : '已确认并保留为私人内容'); advance(candidate!.id, deferred.filter(id => id !== candidate!.id), result.data);
+    if (result.confirmedId && result.confirmedId !== candidate!.id) { const consumedId = candidate!.id; setTimeout(() => clearObjectViewState(consumedId), 0); }
   }
   const originalValid = sourceAvailable(data, candidate, { publicOnly: data.settings.space !== PERSONAL, requireShared: data.settings.space !== PERSONAL });
   return <div className="stack memory-settings"><div className="ms-review-progress"><Badge>待核对{queue.length}条</Badge><span className="meta">本轮剩余{remaining.length}条 · 稍后{postponed.length}条</span></div><Notice>这条内容尚未参与助理建议。可以确认、改写，或先放一放。</Notice>{canReplaceRole && old && <Card><Badge tone="gray">目前已确认的角色背景</Badge><h3>{old.title}</h3><p>{old.body}</p><MemorySource memory={old} /></Card>}<Card><div className="ms-card-heading"><Badge>{candidate.category}</Badge><Badge tone="orange">尚未参与建议</Badge></div><h2>{candidate.title}</h2><p className="ms-full-copy">{draft.body}</p><MemorySource memory={candidate} />{roleCandidate && <Button tone="quiet" onClick={() => navigate({ view: route.view === 'memory-conflict' ? 'memory-candidate' : 'memory-conflict', id: candidate.id })}>{route.view === 'memory-conflict' ? '单独保留，不更新旧背景' : '比较与已确认角色背景的变化'}</Button>}</Card><Button tone="secondary" icon="pencil-simple" onClick={() => setDraft(current => ({ ...current, editing: !current.editing }))}>{draft.editing ? '收起修改，继续核对' : '修改这条内容'}</Button>{(draft.editing || !originalValid) && <Card><Field label="核对后的内容" value={draft.body} onChange={body => setDraft(current => ({ ...current, body }))} multiline /><SelectField label="原话来源" value={sessionOptionLabel(selectedSession, sessions) || '不引用会话原话'} options={['不引用会话原话', ...sessions.map(session => sessionOptionLabel(session, sessions))]} onChange={label => { setError(''); setDraft(current => ({ ...current, sourceTouched: true, sourceSession: sessions.find(session => sessionOptionLabel(session, sessions) === label)?.id || '', sourceId: '' })); }} />{selectedSession && <SelectField label="选择实际片段" value={selectedTurn ? turnOptionLabel(selectedTurn, turns.indexOf(selectedTurn)) : '请选择一段原话'} options={['请选择一段原话', ...turns.map(turnOptionLabel)]} onChange={label => { setError(''); setDraft(current => ({ ...current, sourceTouched: true, sourceId: turns.find((turn, index) => turnOptionLabel(turn, index) === label)?.id || '' })); }} />}{selectedTurn && <div className="ms-source-quote"><p>“{selectedTurn.text}”</p><Source title={selectedSession?.title || '原话'} time={selectedTurn.time} onClick={() => navigate({ view: 'session-transcript', id: selectedSession?.id, mode: selectedTurn.id })} /></div>}<p className="meta">既有来源不自动换成别的时间；手工新信息可以不引用会话。</p></Card>}{canReplaceRole && old && <Check label={`确认只更新「${old.title}」，并保留旧版本`} value={draft.replace} onChange={replace => setDraft(current => ({ ...current, replace }))} />}{error && <p className="error-text" role="alert">{error}</p>}<Button onClick={confirm}>确认并看下一条</Button><Button tone="secondary" onClick={() => { const nextDeferred = [...new Set([...deferred, candidate.id])]; setDeferred(nextDeferred); toast('已放到稍后处理，仍未参与建议'); advance(candidate.id, nextDeferred); }}>稍后处理，继续下一条</Button><Button tone="quiet" onClick={() => { update(current => logData({ ...current, memories: current.memories.map(memory => memory.id === candidate.id ? { ...memory, deleted: true, visibility: '私有' } : memory) }, '不保留候选：' + candidate.title)); setDeferred(ids => ids.filter(id => id !== candidate.id)); toast('已移入回收站'); advance(candidate.id, deferred.filter(id => id !== candidate.id)); }}>不保留，继续下一条</Button></div>;
@@ -297,7 +424,7 @@ function PersonDetail() {
 }
 function PersonConversationPanel({ person }: { person: Person }) {
   const { data, navigate } = useOops(); const [allOpen, setAllOpen] = useState(false);
-  const links = personConversations(data, person); const latest = links[0];
+  const links = personConversations(data, person); const latest = links[0]; const followUps = personFollowUps(data, person);
   const projects = data.projects.filter(project => links.some(link => link.session.project === project.name) && (data.settings.space === PERSONAL || (data.settings.retention['project-space:' + project.id] || TEAM) === data.settings.space));
   const openSource = (link: PersonConversation) => { setAllOpen(false); navigate({ view: 'session-transcript', id: link.session.id, mode: link.first.id }); };
   return <div className="stack ms-person-context">
@@ -305,6 +432,7 @@ function PersonConversationPanel({ person }: { person: Person }) {
     <SectionTitle action={links.length > 3 ? '全部 ' + links.length + ' 个' : undefined} onAction={() => setAllOpen(true)}>最近可见会话</SectionTitle>
     {links.length ? <Card>{links.slice(0, 3).map(link => <Row key={link.session.id} title={link.session.title} subtitle={link.session.date + ' · 首段 ' + link.first.time} icon="chat-circle-text" onClick={() => openSource(link)} />)}</Card> : <Card><p className="meta">{personNameConfirmed(data, person) ? '还没有对应此姓名的可见发言。' : '先人工确认姓名，再关联实际发言。'}</p></Card>}
     <SectionTitle>相关项目</SectionTitle>{projects.length ? <Card>{projects.map(project => <Row key={project.id} title={project.name} subtitle="来自已确认的相关对话" icon="folder-simple" onClick={() => navigate({ view: 'memory-project', id: project.id })} />)}</Card> : <p className="meta">暂无可见的关联项目</p>}
+    {followUps.length > 0 && <><SectionTitle>对话里的行动与跟进</SectionTitle><Card>{followUps.slice(0, 3).map(task => <Row key={task.id} title={task.title} subtitle={`${task.owner}负责 · ${task.status}${task.nextFollowUp ? ' · 下次跟进 ' + task.nextFollowUp.replace('T', ' ') : task.inquiries?.some(inquiry => inquiry.status !== '已解决') ? ' · 还有问题待确认' : ''}`} icon="list-checks" onClick={() => navigate({ view: 'task-detail', id: task.id })} />)}</Card></>}
     {latest && <><SectionTitle>本次话题</SectionTitle><p className="meta">{latest.session.title} · {latest.session.date}</p>{latest.turns.slice(0, 2).map(turn => <Card key={turn.id} className="ms-person-topic"><Badge>原话</Badge><p className="ms-topic-quote">“{turn.text}”</p><Source title={latest.session.title} time={turn.time} onClick={() => navigate({ view: 'session-transcript', id: latest.session.id, mode: turn.id })} /></Card>)}</>}
     <Sheet open={allOpen && personVisible(data, person)} onClose={() => setAllOpen(false)} title="全部关联会话"><p className="meta">只包含当前可见且身份已确认的发言。</p><Card>{links.map(link => <Row key={link.session.id} title={link.session.title} subtitle={link.session.date + ' · 首段 ' + link.first.time} icon="chat-circle-text" onClick={() => openSource(link)} />)}</Card></Sheet>
   </div>;
@@ -319,10 +447,10 @@ function VoiceCorrection() {
   const { data, route, update, navigate, toast } = useOops(); const person = data.people.find(item => item.id === route.id);
   const key = 'person-speaker:' + data.settings.space + ':' + (person?.id || 'choose') + ':' + (route.mode || 'none');
   const sessions = data.sessions.filter(session => sessionVisible(data, session) && session.status !== '待开始' && session.transcript.length);
-  const [sessionId, setSessionId] = useViewState(key + ':session', sessions.some(session => session.id === route.mode) ? route.mode! : ''); const [turnId, setTurnId] = useViewState(key + ':turn', ''); const [target, setTarget] = useViewState(key + ':target', person && !anonymousName(person.name) ? person.name : '保持未确认'); const [newName, setNewName] = useViewState(key + ':name', ''); const [checked, setChecked] = useState(false); const [voiceConsent, setVoiceConsent] = useState(false); const [error, setError] = useState('');
-  const session = sessions.find(item => item.id === sessionId); const turns = session?.transcript.filter(turn => data.settings.space === PERSONAL || !turn.private) || []; const turn = turns.find(item => item.id === turnId); const choices = ['保持未确认', ...data.people.filter(item => !anonymousName(item.name)).map(item => item.name), '新增人物'];
+  const [sessionId, setSessionId] = useViewState(key + ':session', sessions.some(session => session.id === route.mode) ? route.mode! : ''); const [turnId, setTurnId] = useViewState(key + ':turn', ''); const [target, setTarget] = useViewState(key + ':target', person && !anonymousName(person.name) ? personChoiceLabel(person) : '保持未确认'); const [newName, setNewName] = useViewState(key + ':name', ''); const [checked, setChecked] = useState(false); const [voiceConsent, setVoiceConsent] = useState(false); const [error, setError] = useState('');
+  const session = sessions.find(item => item.id === sessionId); const turns = session?.transcript.filter(turn => data.settings.space === PERSONAL || !turn.private) || []; const turn = turns.find(item => item.id === turnId); const choices = ['保持未确认', ...data.people.filter(item => !anonymousName(item.name)).map(personChoiceLabel), '新增人物']; const selectedPerson = data.people.find(item => personChoiceLabel(item) === target);
   if (data.settings.space !== PERSONAL) return <Empty title="请在个人空间核对说话人" body="姓名对应、原话核对与声音身份范围分别处理。" action="切换空间" onAction={() => navigate({ view: 'settings-spaces' })} icon="lock-key" />;
-  return <div className="stack memory-settings">{person && <Card><div className="ms-person-head"><Avatar name={person.name} /><div><h3>{person.name}</h3><p className="meta">当前人物，原话来源由你选择</p></div></div></Card>}<SelectField label="选择会话" value={sessionOptionLabel(session, sessions) || '请选择一段会话'} options={['请选择一段会话', ...sessions.map(item => sessionOptionLabel(item, sessions))]} onChange={label => { setSessionId(sessions.find(item => sessionOptionLabel(item, sessions) === label)?.id || ''); setTurnId(''); setChecked(false); setError(''); }} />{session && <SelectField label="选择实际原话" value={turn ? turnOptionLabel(turn, turns.indexOf(turn)) : '请选择一段原话'} options={['请选择一段原话', ...turns.map(turnOptionLabel)]} onChange={label => { setTurnId(turns.find((item, index) => turnOptionLabel(item, index) === label)?.id || ''); setChecked(false); setError(''); }} />}{turn && <Card><Badge tone="gray">原话 · 当前标记{turn.speaker}</Badge><p className="ms-full-copy">{turn.text}</p><Source title={session?.title || '查看上下文'} time={turn.time} onClick={() => navigate({ view: 'session-transcript', id: session?.id, mode: turn.id })} /></Card>}{!sessions.length && <Empty title="还没有可核对的片段" body="记录一段对话，或导入文字后再来核对。" />}<SelectField label="这段话的说话人" value={target} onChange={value => { setTarget(value); setChecked(false); setError(''); }} options={choices} />{target === '新增人物' && <Field label="人物姓名" value={newName} onChange={setNewName} />}<Check label="我已查看原话，确认这段话的说话人" value={checked} onChange={setChecked} /><Toggle label="另外允许个人声音身份示例" value={voiceConsent} onChange={setVoiceConsent} hint="姓名核对不自动开启声音身份，也不开放项目使用。此项不录音、不生成真实声纹。" />{error && <p className="error-text" role="alert">{error}</p>}<Button onClick={() => { if (target === '保持未确认') { toast('保留未确认状态'); navigate({ view: 'memory', mode: '人物' }); return; } if (!checked) { setError('先选择会话原话并勾选核对结果。'); return; } const selection = { personId: person?.id, sessionId, turnId, name: target === '新增人物' ? newName : target, voiceConsent }; const result = confirmPersonSpeaker(data, selection); if (result.error) { setError(result.error); return; } update(current => confirmPersonSpeaker(current, { ...selection, plannedPersonId: result.personId }).data); toast('姓名对应已核对；相关旧内容保留待复核'); navigate({ view: 'memory-person', id: result.personId }); }}>保存这段姓名对应</Button><Button tone="secondary" onClick={() => { toast('这段身份继续保持匿名'); navigate({ view: 'memory', mode: '人物' }); }}>本次保持未确认</Button>{person?.voice && <Button tone="quiet" onClick={() => { update(current => logData({ ...current, people: current.people.map(item => item.id === person.id ? { ...item, voice: false } : item), settings: { ...current.settings, toggles: { ...current.settings.toggles, ['voiceShare:' + person.id]: false } } }, '关闭个人声音身份示例：' + person.name)); toast('声音身份示例已关闭，姓名核对保留'); }}>关闭现有声音身份示例</Button>}<Notice>本页核对文字片段的姓名对应，不执行真实声音识别。修改对应关系后，旧任务与记忆需复核，工作负责人保持原归属。</Notice></div>;
+  return <div className="stack memory-settings">{person && <Card><div className="ms-person-head"><Avatar name={person.name} /><div><h3>{person.name}</h3><p className="meta">当前人物，原话来源由你选择</p></div></div></Card>}<SelectField label="选择会话" value={sessionOptionLabel(session, sessions) || '请选择一段会话'} options={['请选择一段会话', ...sessions.map(item => sessionOptionLabel(item, sessions))]} onChange={label => { setSessionId(sessions.find(item => sessionOptionLabel(item, sessions) === label)?.id || ''); setTurnId(''); setChecked(false); setError(''); }} />{session && <SelectField label="选择实际原话" value={turn ? turnOptionLabel(turn, turns.indexOf(turn)) : '请选择一段原话'} options={['请选择一段原话', ...turns.map(turnOptionLabel)]} onChange={label => { setTurnId(turns.find((item, index) => turnOptionLabel(item, index) === label)?.id || ''); setChecked(false); setError(''); }} />}{turn && <Card><Badge tone="gray">原话 · 当前标记{turn.speaker}</Badge><p className="ms-full-copy">{turn.text}</p><Source title={session?.title || '查看上下文'} time={turn.time} onClick={() => navigate({ view: 'session-transcript', id: session?.id, mode: turn.id })} /></Card>}{!sessions.length && <Empty title="还没有可核对的片段" body="记录一段对话，或导入文字后再来核对。" />}<SelectField label="这段话的说话人" value={target} onChange={value => { setTarget(value); setChecked(false); setError(''); }} options={choices} />{target === '新增人物' && <Field label="人物姓名" value={newName} onChange={setNewName} />}<Check label="我已查看原话，确认这段话的说话人" value={checked} onChange={setChecked} /><Toggle label="另外允许个人声音身份示例" value={voiceConsent} onChange={setVoiceConsent} hint="姓名核对不自动开启声音身份，也不开放项目使用。此项不录音、不生成真实声纹。" />{error && <p className="error-text" role="alert">{error}</p>}<Button onClick={() => { if (target === '保持未确认') { toast('保留未确认状态'); navigate({ view: 'memory', mode: '人物' }); return; } if (!checked) { setError('先选择会话原话并勾选核对结果。'); return; } if (target !== '新增人物' && !selectedPerson) { setError('请重新选择明确的人物卡。'); return; } const selection = { personId: person?.id, targetPersonId: selectedPerson?.id, sessionId, turnId, name: target === '新增人物' ? newName : selectedPerson?.name || target, voiceConsent }; const result = confirmPersonSpeaker(data, selection); if (result.error) { setError(result.error); return; } update(current => confirmPersonSpeaker(current, { ...selection, plannedPersonId: result.personId }).data); toast('姓名对应已核对；相关旧内容保留待复核'); navigate({ view: 'memory-person', id: result.personId }); }}>保存这段姓名对应</Button><Button tone="secondary" onClick={() => { toast('这段身份继续保持匿名'); navigate({ view: 'memory', mode: '人物' }); }}>本次保持未确认</Button>{person?.voice && <Button tone="quiet" onClick={() => { update(current => logData({ ...current, people: current.people.map(item => item.id === person.id ? { ...item, voice: false } : item), settings: { ...current.settings, toggles: { ...current.settings.toggles, ['voiceShare:' + person.id]: false } } }, '关闭个人声音身份示例：' + person.name)); toast('声音身份示例已关闭，姓名核对保留'); }}>关闭现有声音身份示例</Button>}<Notice>本页核对文字片段的姓名对应，不执行真实声音识别。修改对应关系后，旧任务与记忆需复核，工作负责人保持原归属。</Notice></div>;
 }
 
 function IdentityExchange() {
@@ -363,11 +491,29 @@ function Workflow() {
 }
 
 function GrowthDetail() {
-  const { data, route, update, navigate, toast } = useOops(); const m = data.memories.find(x => x.id === route.id); const [review, setReview] = useViewState('growth-review:' + data.settings.space + ':' + route.id, ''); const [sourceId, setSourceId] = useViewState('growth-source:' + data.settings.space + ':' + route.id, '');
+  const { data, route, update, navigate, toast } = useOops(); const m = data.memories.find(x => x.id === route.id);
+  const personal = data.settings.space === PERSONAL;
+  const [review, setReview] = useViewState('growth-review:' + data.settings.space + ':' + route.id, '');
+  const [sessionId, setSessionId] = useViewState('growth-source:' + data.settings.space + ':' + route.id, '');
+  const [turnId, setTurnId] = useViewState('growth-source-turn:' + data.settings.space + ':' + route.id, '');
+  const [error, setError] = useState('');
   if (!m || !visible(data, m)) return <Missing />;
-  const sourceSessions = data.sessions.filter(s => sessionVisible(data, s));
-  const reviews = parse<{ text: string; date: string; sourceId: string }[]>(data.settings.retention['reviews:' + m.id], []); const state = m.tags.includes('已完成') ? '已完成' : m.tags.includes('已暂停') ? '已暂停' : '进行中';
-  return <div className="stack"><Card><Badge>{state}</Badge><h2>{m.title}</h2><p>{m.body}</p><MemorySource memory={m} /></Card><Button tone="secondary" onClick={() => navigate({ view: 'memory-edit', id: m.id })}>编辑目标</Button><SelectField label="目标状态" value={state} options={['进行中', '已暂停', '已完成']} onChange={v => { update(d => ({ ...d, memories: d.memories.map(x => x.id === m.id ? { ...x, tags: [...x.tags.filter(t => t !== '已完成' && t !== '已暂停'), ...(v === '进行中' ? [] : [v])], updated: today() } : x) })); toast('已更新目标状态'); }} /><SectionTitle>本次复盘</SectionTitle><Field label="进步与下一步" value={review} onChange={setReview} multiline placeholder="哪一段表达更清楚？下次尝试什么？" /><SelectField label="关联会话" value={sessionOptionLabel(sourceSessions.find(x => x.id === sourceId), sourceSessions) || '不关联'} options={['不关联', ...sourceSessions.map(s => sessionOptionLabel(s, sourceSessions))]} onChange={v => setSourceId(sourceSessions.find(s => sessionOptionLabel(s, sourceSessions) === v)?.id || '')} /><Button disabled={!review.trim()} onClick={() => { update(d => saveSetting(d, { retention: { ...d.settings.retention, ['reviews:' + m.id]: JSON.stringify([{ text: review.trim(), date: today(), sourceId }, ...reviews]) } }, '添加成长复盘')); setReview(''); toast('已保存复盘'); }}>保存复盘</Button><SectionTitle>复盘记录</SectionTitle>{reviews.map((r, i) => <Card key={i}><p>{r.text}</p><p className="meta">{r.date}</p>{sourceSessions.some(s => s.id === r.sourceId) && <Source title={sourceSessions.find(s => s.id === r.sourceId)?.title || '会话'} onClick={() => navigate({ view: 'session-detail', id: r.sourceId })} />}</Card>)}</div>;
+  const sourceSessions = data.sessions.filter(session => sessionVisible(data, session) && session.status !== '待开始' && session.transcript.length);
+  const selectedSession = sourceSessions.find(session => session.id === sessionId), turns = selectedSession?.transcript || [], selectedTurn = turns.find(turn => turn.id === turnId);
+  const reviews = visibleGrowthReviews(data, m.id), state = m.tags.includes('已完成') ? '已完成' : m.tags.includes('已暂停') ? '已暂停' : '进行中';
+  function saveReview() {
+    const values = { text: review, sourceSession: sessionId || undefined, sourceId: turnId || undefined, id: uid('review') };
+    const result = saveGrowthReview(data, m!.id, values);
+    if (result.error) { setError(result.error); return; }
+    update(current => saveGrowthReview(current, m!.id, values).data); setReview(''); setError(''); toast('复盘已保存，仅你可见');
+  }
+  return <div className="stack"><Card><Badge>{state}</Badge><h2>{m.title}</h2><p>{m.body}</p><MemorySource memory={m} /></Card><Button tone="secondary" onClick={() => navigate({ view: 'memory-edit', id: m.id })}>编辑目标</Button><SelectField label="目标状态" value={state} options={['进行中', '已暂停', '已完成']} onChange={value => { update(current => ({ ...current, memories: current.memories.map(memory => memory.id === m.id ? { ...memory, tags: [...memory.tags.filter(tag => !['已完成', '已暂停'].includes(tag)), ...(value === '进行中' ? [] : [value])], updated: today() } : memory) })); toast('已更新目标状态'); }} />
+    {personal && <><SectionTitle>本次私人复盘</SectionTitle><Field label="进步与下一步" value={review} onChange={setReview} multiline placeholder="哪一段表达更清楚？下次尝试什么？" /><SelectField label="关联会话" value={sessionOptionLabel(selectedSession, sourceSessions) || '不关联'} options={['不关联', ...sourceSessions.map(session => sessionOptionLabel(session, sourceSessions))]} onChange={value => { setSessionId(sourceSessions.find(session => sessionOptionLabel(session, sourceSessions) === value)?.id || ''); setTurnId(''); setError(''); }} />{selectedSession && <SelectField label="实际原话" value={selectedTurn ? turnOptionLabel(selectedTurn, turns.indexOf(selectedTurn)) : '请选择一段原话'} options={['请选择一段原话', ...turns.map(turnOptionLabel)]} onChange={value => { setTurnId(turns.find((turn, index) => turnOptionLabel(turn, index) === value)?.id || ''); setError(''); }} />}{selectedTurn && <Card><Badge tone="gray">复盘依据</Badge><p>{selectedTurn.text}</p></Card>}{error && <p className="error-text" role="alert">{error}</p>}<Button disabled={!review.trim()} onClick={saveReview}>保存私人复盘</Button></>}
+    <SectionTitle>{personal ? '我的复盘记录' : '已明确共享的复盘'}</SectionTitle>{!reviews.length && <p className="meta">{personal ? '还没有复盘记录。' : '暂无获准共享且来源有效的复盘。'}</p>}{reviews.map(item => {
+      const readable = sourceAvailable(data, item, { publicOnly: !personal, requireShared: !personal }) && provenanceAvailable(data, item.sources);
+      const sourceSession = sourceSessions.find(session => session.id === item.sourceSession);
+      return <Card key={item.id}><Badge tone={item.visibility === '私有' ? 'gray' : 'purple'}>{item.visibility === '私有' ? '仅我可见' : '已单独共享'}</Badge><p>{item.text}</p><p className="meta">{item.date}</p>{readable && sourceSession ? <Source title={sourceSession.title} time={sourceTurn(data, item)?.time} onClick={() => navigate({ view: 'session-transcript', id: sourceSession.id, mode: item.sourceId })} /> : item.sourceSession && <p className="meta">原话来源已变化或不可查看；保持私人，需重新核对。</p>}{personal && <Toggle label="共享这条复盘" value={item.visibility === '项目共享'} hint="与目标正文分别选择；私人或失效的原话不共享。" onChange={shared => { const result = setGrowthReviewSharing(data, m.id, item.id, shared); if (result.error) { toast(result.error); return; } update(current => setGrowthReviewSharing(current, m.id, item.id, shared).data); toast(shared ? '已明确共享这条复盘' : '这条复盘已撤回到个人空间'); }} />}</Card>;
+    })}</div>;
 }
 function Social() {
   const { data, update, toast } = useOops(); const [text, setText] = useState(''); const [confirm, setConfirm] = useState(false); const posts = parse<{ id: string; text: string; date: string }[]>(data.settings.retention.voicePosts, []);
@@ -431,7 +577,7 @@ function OfflineSync() {
 }
 function Sharing() {
   const { data, update, navigate, toast } = useOops(); const shared = data.memories.filter(m => visible(data, m) && m.visibility === '项目共享'); const [pending, setPending] = useState<Memory>();
-  return <div className="stack"><Notice>当前团队仅可见你主动共享的内容，私人备注不共享。</Notice><SectionTitle>已共享内容</SectionTitle>{shared.map(m => <Card key={m.id}><h3>{m.title}</h3><p className="meta">{m.category} · 项目共享</p><div className="action-grid"><Button tone="secondary" onClick={() => navigate({ view: 'memory-detail', id: m.id })}>查看内容</Button><Button tone="secondary" onClick={() => setPending(m)}>撤销共享</Button></div></Card>)}{!shared.length && <Empty title="还没有共享内容" body="从记忆详情选择共享范围。" />}<SectionTitle>公开人物身份</SectionTitle><Card>{data.people.filter(p => p.shared && (data.settings.space === PERSONAL || (data.settings.retention['person-space:' + p.id] || TEAM) === data.settings.space)).map(p => <Row key={p.id} title={p.name} subtitle="仅公开身份 · 无私人备注" icon="user-circle" onClick={() => navigate({ view: 'memory-person', id: p.id })} />)}</Card><Sheet open={!!pending} onClose={() => setPending(undefined)} title="撤销共享？"><p>「{pending?.title}」会回到个人空间。</p><Button tone="danger" onClick={() => { update(d => logData({ ...d, memories: d.memories.map(m => m.id === pending?.id ? { ...m, visibility: '私有' } : m) }, '撤销共享内容')); setPending(undefined); toast('已撤销共享'); }}>确认撤销</Button></Sheet></div>;
+  return <div className="stack"><Notice>当前团队仅可见你主动共享的内容，私人备注不共享。</Notice><SectionTitle>已共享内容</SectionTitle>{shared.map(m => <Card key={m.id}><h3>{m.title}</h3><p className="meta">{m.category} · 项目共享</p><div className="action-grid"><Button tone="secondary" onClick={() => navigate({ view: 'memory-detail', id: m.id })}>查看内容</Button><Button tone="secondary" onClick={() => setPending(m)}>撤销共享</Button></div></Card>)}{!shared.length && <Empty title="还没有共享内容" body="从记忆详情选择共享范围。" />}<SectionTitle>公开人物身份</SectionTitle><Card>{data.people.filter(p => p.shared && (data.settings.space === PERSONAL || (data.settings.retention['person-space:' + p.id] || TEAM) === data.settings.space)).map(p => <Row key={p.id} title={p.name} subtitle="仅公开身份 · 无私人备注" icon="user-circle" onClick={() => navigate({ view: 'memory-person', id: p.id })} />)}</Card><Sheet open={!!pending} onClose={() => setPending(undefined)} title="撤销共享？"><p>「{pending?.title}」会回到个人空间。</p><Button tone="danger" onClick={() => { update(current => { const original = current.memories.find(memory => memory.id === pending?.id); if (!original) return current; const base = invalidateMemoryDerivations(current, original.id, '记忆共享已撤回'); return logData({ ...base, memories: base.memories.map(memory => memory.id === original.id ? { ...original, visibility: '私有' } : memory) }, '撤销共享内容'); }); setPending(undefined); toast('已撤销共享'); }}>确认撤销</Button></Sheet></div>;
 }
 function Retention() {
   const { data, update, toast } = useOops(); const [recording, setRecording] = useState(data.settings.retention.录音); const [transcript, setTranscript] = useState(data.settings.retention.转写); const [recall, setRecall] = useState(data.settings.retention.Recall);
@@ -448,7 +594,16 @@ function Members() {
 }
 function Trash() {
   const { data, update, toast } = useOops(); const memories = data.memories.filter(m => m.deleted && (data.settings.space === PERSONAL || m.visibility === '项目共享' && (data.settings.retention['memory-space:' + m.id] || TEAM) === data.settings.space)); const people = parse<Person[]>(data.settings.retention.personTrash, []).filter(p => data.settings.space === PERSONAL || p.shared && (data.settings.retention['person-space:' + p.id] || TEAM) === data.settings.space); const projects = parse<Project[]>(data.settings.retention.projectTrash, []).filter(p => data.settings.space === PERSONAL || (data.settings.retention['project-space:' + p.id] || TEAM) === data.settings.space); const [purge, setPurge] = useState<{ kind: string; id: string; title: string }>();
-  const permanent = (kind: string, id: string) => update(d => logData({ ...d, memories: kind === '记忆' ? d.memories.filter(m => m.id !== id) : d.memories, settings: { ...d.settings, retention: { ...d.settings.retention, ...(kind === '人物' ? { personTrash: JSON.stringify(parse<Person[]>(d.settings.retention.personTrash, []).filter(p => p.id !== id)) } : {}), ...(kind === '项目' ? { projectTrash: JSON.stringify(parse<Project[]>(d.settings.retention.projectTrash, []).filter(p => p.id !== id)) } : {}) } } }, '永久删除' + kind));
+  const permanent = (kind: string, id: string) => {
+    clearObjectViewState(id);
+    update(current => {
+      const base = kind === '记忆' ? permanentlyDeleteMemory(current, id) : current;
+      const retention = { ...base.settings.retention }, toggles = { ...base.settings.toggles };
+      if (kind === '人物') { retention.personTrash = JSON.stringify(parse<Person[]>(retention.personTrash, []).filter(person => person.id !== id)); delete retention['person-space:' + id]; delete toggles['person-name-confirmed:' + id]; delete toggles['voiceShare:' + id]; }
+      if (kind === '项目') { retention.projectTrash = JSON.stringify(parse<Project[]>(retention.projectTrash, []).filter(project => project.id !== id)); delete retention['project-space:' + id]; delete retention['project-docs:' + id]; }
+      return logData({ ...base, settings: { ...base.settings, retention, toggles } }, '永久删除' + kind);
+    });
+  };
   return <div className="stack"><Notice>移入回收站的内容可恢复。永久删除需要再次确认。</Notice>{!memories.length && !people.length && !projects.length && <Empty title="回收站是空的" body="删除的记忆、人物和项目会出现在这里。" />}{memories.map(m => <Card key={m.id}><h3>{m.title}</h3><p className="meta">{m.category}</p><div className="action-grid"><Button tone="secondary" onClick={() => { update(d => logData({ ...d, memories: d.memories.map(x => x.id === m.id ? { ...x, deleted: false } : x) }, '恢复记忆')); toast('已恢复'); }}>恢复</Button><Button tone="danger" onClick={() => setPurge({ kind: '记忆', id: m.id, title: m.title })}>永久删除</Button></div></Card>)}{people.map(p => <Card key={p.id}><h3>{p.name}</h3><p className="meta">人物</p><div className="action-grid"><Button tone="secondary" onClick={() => { update(d => logData({ ...d, people: [...d.people.filter(x => x.id !== p.id), p], settings: { ...d.settings, retention: { ...d.settings.retention, personTrash: JSON.stringify(parse<Person[]>(d.settings.retention.personTrash, []).filter(x => x.id !== p.id)) } } }, '恢复人物')); toast('已恢复人物'); }}>恢复</Button><Button tone="danger" onClick={() => setPurge({ kind: '人物', id: p.id, title: p.name })}>永久删除</Button></div></Card>)}{projects.map(p => <Card key={p.id}><h3>{p.name}</h3><p className="meta">项目</p><div className="action-grid"><Button tone="secondary" onClick={() => { update(d => logData({ ...d, projects: [...d.projects.filter(x => x.id !== p.id), p], settings: { ...d.settings, retention: { ...d.settings.retention, projectTrash: JSON.stringify(parse<Project[]>(d.settings.retention.projectTrash, []).filter(x => x.id !== p.id)) } } }, '恢复项目')); toast('已恢复项目'); }}>恢复</Button><Button tone="danger" onClick={() => setPurge({ kind: '项目', id: p.id, title: p.name })}>永久删除</Button></div></Card>)}<Sheet open={!!purge} onClose={() => setPurge(undefined)} title="永久删除？"><p>「{purge?.title}」无法恢复。</p><Button tone="danger" onClick={() => { if (purge) permanent(purge.kind, purge.id); setPurge(undefined); toast('已永久删除'); }}>确认永久删除</Button><Button tone="secondary" onClick={() => setPurge(undefined)}>取消</Button></Sheet></div>;
 }
 function Privacy() {
@@ -476,8 +631,8 @@ function exportMemoryAllowed(data: AppData, memory: Memory, includePrivate: bool
 }
 function ExportData() {
   const { data, update, toast } = useOops(); const [includeSessions, setIncludeSessions] = useState(true); const [includeMemories, setIncludeMemories] = useState(true); const [includeTasks, setIncludeTasks] = useState(true); const [includePrivate, setIncludePrivate] = useState(data.settings.space === PERSONAL); const [clear, setClear] = useState(false); const [typed, setTyped] = useState('');
-  const exported = { exportedAt: new Date().toISOString(), space: data.settings.space, ...(includeSessions ? { sessions: data.sessions.filter(s => sessionVisible(data, s)).map(s => exportSessionRecord(data, s, includePrivate)) } : {}), ...(includeMemories ? { memories: data.memories.filter(m => exportMemoryAllowed(data, m, includePrivate)) } : {}), ...(includeTasks ? { tasks: data.tasks.filter(t => taskVisible(data, t)) } : {}) };
-  return <div className="stack"><SectionTitle>选择导出内容</SectionTitle><Card><Check label="会话与转写" value={includeSessions} onChange={setIncludeSessions} /><Check label="长期记忆" value={includeMemories} onChange={setIncludeMemories} /><Check label="任务与成果" value={includeTasks} onChange={setIncludeTasks} />{data.settings.space === PERSONAL && <Check label="包含我的私有内容与笔记" value={includePrivate} onChange={setIncludePrivate} />}</Card><Download filename={'Oops-数据-' + today().replace(/\//g, '-') + '.json'} value={JSON.stringify(exported, null, 2)} label="下载所选数据" /><SectionTitle>清理</SectionTitle><Card><h3>清理可用长期记忆</h3><p className="meta">将当前空间可见的记忆移入回收站，会话与任务保留。</p><Button tone="danger" onClick={() => setClear(true)}>清理记忆</Button></Card><Sheet open={clear} onClose={() => { setClear(false); setTyped(''); }} title="确认清理长期记忆"><Field label="输入「清理」确认" value={typed} onChange={setTyped} /><Button tone="danger" disabled={typed !== '清理'} onClick={() => { update(d => logData({ ...d, memories: d.memories.map(m => visible(d, m) ? { ...m, deleted: true } : m) }, '批量清理当前空间记忆')); setClear(false); setTyped(''); toast('已移入回收站'); }}>确认清理</Button></Sheet></div>;
+  const exported = { exportedAt: new Date().toISOString(), space: data.settings.space, ...(includeSessions ? { sessions: data.sessions.filter(s => sessionVisible(data, s)).map(s => exportSessionRecord(data, s, includePrivate)) } : {}), ...(includeMemories ? { memories: data.memories.filter(m => exportMemoryAllowed(data, m, includePrivate)) } : {}), ...(includeTasks ? { tasks: data.tasks.flatMap(task => { const record = exportTaskRecord(data, task, includePrivate); return record ? [record] : []; }) } : {}) };
+  return <div className="stack"><SectionTitle>选择导出内容</SectionTitle><Card><Check label="会话与转写" value={includeSessions} onChange={setIncludeSessions} /><Check label="长期记忆" value={includeMemories} onChange={setIncludeMemories} /><Check label="任务与成果" value={includeTasks} onChange={setIncludeTasks} />{data.settings.space === PERSONAL && <Check label="包含我的私有内容与笔记" value={includePrivate} onChange={setIncludePrivate} />}</Card><Download filename={'Oops-数据-' + today().replace(/\//g, '-') + '.json'} value={JSON.stringify(exported, null, 2)} label="下载所选数据" />{!includePrivate && <p className="meta">任务只导出当前已共享且来源有效的内容，私人补充与历史草稿不加入。</p>}<SectionTitle>清理</SectionTitle><Card><h3>清理可用长期记忆</h3><p className="meta">将当前空间可见的记忆移入回收站，会话与任务保留。</p><Button tone="danger" onClick={() => setClear(true)}>清理记忆</Button></Card><Sheet open={clear} onClose={() => { setClear(false); setTyped(''); }} title="确认清理长期记忆"><Field label="输入「清理」确认" value={typed} onChange={setTyped} /><Button tone="danger" disabled={typed !== '清理'} onClick={() => { update(d => logData({ ...d, memories: d.memories.map(m => visible(d, m) ? { ...m, deleted: true } : m) }, '批量清理当前空间记忆')); setClear(false); setTyped(''); toast('已移入回收站'); }}>确认清理</Button></Sheet></div>;
 }
 function Logs() {
   const { data } = useOops(); const [query, setQuery] = useState(''); const logs = parse<Log[]>(data.settings.retention.operationLog, []).filter(x => !query || x.action.includes(query));

@@ -1,6 +1,7 @@
 import type { AppData, SourceReference, Task, TaskArtifact, TaskCompletion, TaskInquiry, TaskOutputMode, TaskScope, TaskWorkKind } from './store';
-import { generationConfigurationFingerprint, generationMaterialFingerprint, makeSourceReference, provenanceAvailable, selectedTaskMaterials, sourceAvailable, taskSourceAvailable, taskVisible } from './sourceAccess';
+import { generationConfigurationFingerprint, generationMaterialFingerprint, makeSourceReference, PERSONAL_SPACE, provenanceAvailable, selectedTaskMaterials, sourceAvailable, taskSourceAvailable, taskVisible } from './sourceAccess';
 import { taskAttentionReason, taskClosed, taskInquiries } from './taskAttention';
+import { normalizeMoment, parseLocalMoment } from './dateLogic';
 export { taskAttentionReason, taskClosed, taskInquiries, selectedTaskMaterials };
 
 const stamp = () => new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date());
@@ -17,9 +18,10 @@ export function taskIsMyAttention(data: AppData, task: Task, now: number | Date 
   if (!taskFollowedByMe(data, task)) return false;
   if (taskInquiries(task).some(inquiry => inquiry.status === '已回答')) return true;
   const at = now instanceof Date ? now.getTime() : now;
+  if (taskInquiries(task).some(inquiry => inquiry.status === '待回答' && (parseLocalMoment(inquiry.nextFollowUp || task.nextFollowUp, at) ?? Infinity) <= at)) return true;
   const followUp = task.transferRequest?.nextFollowUp || task.nextFollowUp;
-  const due = followUp ? Date.parse(followUp.replace(' ', 'T')) : NaN;
-  return Number.isFinite(due) && due <= at;
+  const due = parseLocalMoment(followUp, at);
+  return due !== undefined && due <= at;
 }
 
 export function taskWorkKind(task: Task): TaskWorkKind {
@@ -70,6 +72,37 @@ function workError(data: AppData, task: Task | undefined): string | undefined {
   if (!taskBelongsToMe(data, task)) return '请由当前负责人处理这项工作';
   return undefined;
 }
+export function archiveTaskCompletion(task: Task): Pick<Task, 'completion' | 'completionHistory'> {
+  const history = task.completionHistory || [];
+  return { completion: undefined, completionHistory: task.completion && !history.some(item => item.id === task.completion!.id) ? [...history, task.completion] : history };
+}
+export function taskArtifactExportAccess(data: AppData, task: Task, artifact: TaskArtifact): { mode: 'normal' | 'history' | 'blocked'; error?: string } {
+  const personal = data.settings.space === PERSONAL_SPACE;
+  const available = taskVisible(data, task) && taskSourceAvailable(data, task) && !artifact.sourceNeedsReview && sourceAvailable(data, artifact, { publicOnly: !personal, requireShared: !personal }) && provenanceAvailable(data, artifact.sources);
+  if (available && (personal || !artifact.needsReview && !!artifact.reviewedAt)) return { mode: 'normal' };
+  if (personal) return { mode: 'history' };
+  return { mode: 'blocked', error: '这版成果尚未核对有效的团队来源，不能复制或下载。可回个人空间查看历史。' };
+}
+export function acceptTask(data: AppData, id: string, input: { due?: string }): TaskMutation {
+  const task = data.tasks.find(current => current.id === id), error = workError(data, task);
+  if (error || !task) return { data, error };
+  if (task.status !== '待承接' || task.transferRequest?.status === '待回应') return { data, error: '只有待承接的工作可以确认承接；转交请求需先处理回应' };
+  const due = normalizeMoment(input.due || '');
+  if (input.due?.trim() && input.due.trim() !== '无固定期限' && !due) return { data, error: '期限需为有效的本地日期时间，或留空' };
+  if (!taskSourceAvailable(data, task)) return { data, error: '先核对当前任务来源与资料' };
+  return { data: changeTask(data, task, { owner: '我', due: due || '无固定期限', status: '已承接' }, '本人确认承接工作') };
+}
+export function saveTaskProgress(data: AppData, id: string, input: { note: string; nextFollowUp?: string }): TaskMutation {
+  const task = data.tasks.find(current => current.id === id), error = workError(data, task);
+  if (error || !task) return { data, error };
+  if (!['已承接', '进行中', '待验收', '待转交'].includes(task.status)) return { data, error: '先确认承接这项工作' };
+  if (!input.note.trim()) return { data, error: '填写实际进展' };
+  const nextFollowUp = normalizeMoment(input.nextFollowUp || '');
+  if (input.nextFollowUp?.trim() && !nextFollowUp) return { data, error: '填写有效的本地跟进时间' };
+  if (!taskSourceAvailable(data, task)) return { data, error: '先核对当前任务来源与资料' };
+  const waiting = task.status === '待转交';
+  return { data: changeTask(data, task, { status: waiting ? '待转交' : '进行中', nextFollowUp, ...(waiting && task.transferRequest?.status === '待回应' ? { transferRequest: { ...task.transferRequest, nextFollowUp } } : {}) }, `实际进展：${input.note.trim()}${nextFollowUp ? `；下次跟进${nextFollowUp.replace('T', ' ')}` : ''}`) };
+}
 function withCurrentSelectedMaterials(data: AppData, task: Task): Task {
   const selected = new Set(selectedTaskMaterials(task).map(material => material.id));
   return { ...task, materialRefs: task.materialRefs?.map(material => {
@@ -114,8 +147,10 @@ export function beginTransfer(data: AppData, id: string, input: { to: string; re
   if (task.status === '待转交' || task.transferRequest?.status === '待回应') return { data, error: '已有转交请求，先等待回应或撤回' };
   if (!input.to.trim() || me(data, input.to.trim()) || input.to.trim() === task.owner || /待确认|待选择|请选择/.test(input.to)) return { data, error: '选择另一位明确的接收人' };
   if (!input.reason.trim()) return { data, error: '补充转交说明' };
-  const request = { id: uid(), fromOwner: task.owner, fromStatus: task.status, to: input.to.trim(), status: '待回应' as const, reason: input.reason.trim(), created: stamp(), nextFollowUp: input.nextFollowUp };
-  return { data: changeTask(data, task, { status: '待转交', transferRequest: request, transferTo: request.to, nextFollowUp: input.nextFollowUp, authorized: false, generationToken: undefined, generationSnapshot: undefined, aiStatus: task.aiStatus === '未启动' ? '未启动' : '已停止' }, '建议转交给' + request.to + '，收到确认前保留原责任') };
+  const nextFollowUp = normalizeMoment(input.nextFollowUp || '');
+  if (input.nextFollowUp?.trim() && !nextFollowUp) return { data, error: '填写有效的本地跟进时间' };
+  const request = { id: uid(), fromOwner: task.owner, fromStatus: task.status, to: input.to.trim(), status: '待回应' as const, reason: input.reason.trim(), created: stamp(), nextFollowUp };
+  return { data: changeTask(data, task, { status: '待转交', transferRequest: request, transferTo: request.to, nextFollowUp, authorized: false, generationToken: undefined, generationSnapshot: undefined, aiStatus: task.aiStatus === '未启动' ? '未启动' : '已停止' }, '建议转交给' + request.to + '，收到确认前保留原责任') };
 }
 export function resolveTransfer(data: AppData, id: string, requestId: string, response: '同意'|'婉拒'|'撤回'): TaskMutation {
   const task = data.tasks.find(current => current.id === id), request = task?.transferRequest;
@@ -131,6 +166,9 @@ export function setInquiry(data: AppData, id: string, inquiry: TaskInquiry): Tas
   if (!taskVisible(data, task)) return { data, error: '这项工作不在当前空间' };
   if (!taskBelongsToMe(data, task) && !taskFollowedByMe(data, task)) return { data, error: '当前工作不由本人负责或跟进' };
   if (!inquiry.question.trim() || inquiry.status !== '待回答' && !inquiry.answer?.trim()) return { data, error: '填写具体问题与已收到的答复' };
+  const nextFollowUp = normalizeMoment(inquiry.nextFollowUp || '');
+  if (inquiry.nextFollowUp?.trim() && !nextFollowUp) return { data, error: '填写有效的本地跟进时间' };
+  inquiry = { ...inquiry, nextFollowUp };
   const inquiries = taskInquiries(task); const existing = inquiries.find(current => current.id === inquiry.id);
   return { data: changeTask(data, task, { inquiries: existing ? inquiries.map(current => current.id === inquiry.id ? { ...current, ...inquiry } : current) : [...inquiries, inquiry] }, inquiry.status === '已解决' ? '本人确认问题已解决' : inquiry.status === '已回答' ? '收到答复，等待本人核对' : '记录问题与下一次跟进') };
 }

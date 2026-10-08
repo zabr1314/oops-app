@@ -5,7 +5,8 @@
     "group": "首页",
     "route": {
       "view": "home"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "h02-assistant",
@@ -13,7 +14,8 @@
     "group": "首页",
     "route": {
       "view": "assistant"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "h03-voice",
@@ -21,7 +23,8 @@
     "group": "首页",
     "route": {
       "view": "voice"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "h04-search",
@@ -29,7 +32,8 @@
     "group": "首页",
     "route": {
       "view": "search"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "h05-notifications",
@@ -37,7 +41,8 @@
     "group": "首页",
     "route": {
       "view": "notifications"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "h06-welcome",
@@ -45,7 +50,8 @@
     "group": "首页",
     "route": {
       "view": "welcome"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c01-sessions",
@@ -53,7 +59,8 @@
     "group": "会话",
     "route": {
       "view": "sessions"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c02-session-mode",
@@ -61,7 +68,8 @@
     "group": "会话",
     "route": {
       "view": "session-mode"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c03-session-create",
@@ -70,7 +78,8 @@
     "route": {
       "view": "session-create",
       "mode": "会议"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c04-session-import",
@@ -78,7 +87,8 @@
     "group": "会话",
     "route": {
       "view": "session-import"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c05-session-detail",
@@ -88,7 +98,8 @@
       "view": "session-detail",
       "id": "session-001",
       "mode": "复盘"
-    }
+    },
+    "scene": "review"
   },
   {
     "key": "c06-session-transcript",
@@ -97,7 +108,8 @@
     "route": {
       "view": "session-transcript",
       "id": "session-001"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c07-session-edit",
@@ -106,8 +118,9 @@
     "route": {
       "view": "session-edit",
       "id": "session-001",
-      "mode": "00:18:02"
-    }
+      "mode": "tr4"
+    },
+    "scene": "revisions"
   },
   {
     "key": "c08-session-identity",
@@ -115,8 +128,10 @@
     "group": "会话",
     "route": {
       "view": "session-identity",
-      "id": "session-001"
-    }
+      "id": "session-001",
+      "mode": "tr3"
+    },
+    "scene": "default"
   },
   {
     "key": "c09-session-source",
@@ -126,7 +141,8 @@
       "view": "session-source",
       "id": "session-001",
       "mode": "产品指标.xlsx"
-    }
+    },
+    "scene": "sharing"
   },
   {
     "key": "c10-session-agenda",
@@ -135,7 +151,8 @@
     "route": {
       "view": "session-agenda",
       "id": "session-001"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c11-session-map",
@@ -144,7 +161,8 @@
     "route": {
       "view": "session-map",
       "id": "session-001"
-    }
+    },
+    "scene": "sharing"
   },
   {
     "key": "c12-session-display",
@@ -153,7 +171,8 @@
     "route": {
       "view": "session-display",
       "id": "session-001"
-    }
+    },
+    "scene": "sharing"
   },
   {
     "key": "c13-session-reminders",
@@ -162,7 +181,8 @@
     "route": {
       "view": "session-reminders",
       "id": "session-001"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c14-session-share",
@@ -171,7 +191,8 @@
     "route": {
       "view": "session-share",
       "id": "session-001"
-    }
+    },
+    "scene": "sharing"
   },
   {
     "key": "c15-session-export",
@@ -180,7 +201,8 @@
     "route": {
       "view": "session-export",
       "id": "session-001"
-    }
+    },
+    "scene": "sharing"
   },
   {
     "key": "c16-session-recall",
@@ -188,7 +210,8 @@
     "group": "会话",
     "route": {
       "view": "session-recall"
-    }
+    },
+    "scene": "recall"
   },
   {
     "key": "c17-session-growth",
@@ -197,7 +220,8 @@
     "route": {
       "view": "session-growth",
       "id": "session-001"
-    }
+    },
+    "scene": "growth"
   },
   {
     "key": "c18-session-inspiration",
@@ -206,7 +230,8 @@
     "route": {
       "view": "session-inspiration",
       "id": "session-002"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c19-session-history",
@@ -214,7 +239,8 @@
     "group": "会话",
     "route": {
       "view": "session-history"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "c20-session-revisions",
@@ -223,7 +249,8 @@
     "route": {
       "view": "session-revisions",
       "id": "session-001"
-    }
+    },
+    "scene": "revisions"
   },
   {
     "key": "t01-tasks",
@@ -231,7 +258,8 @@
     "group": "任务",
     "route": {
       "view": "tasks"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "t02-task-detail",
@@ -240,7 +268,8 @@
     "route": {
       "view": "task-detail",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-plan"
   },
   {
     "key": "t03-task-accept",
@@ -249,7 +278,8 @@
     "route": {
       "view": "task-accept",
       "id": "TASK-033"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "t04-task-reject",
@@ -258,7 +288,8 @@
     "route": {
       "view": "task-reject",
       "id": "TASK-033"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "t05-task-transfer",
@@ -267,7 +298,8 @@
     "route": {
       "view": "task-transfer",
       "id": "TASK-033"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "t06-task-transfer-response",
@@ -276,7 +308,8 @@
     "route": {
       "view": "task-transfer-response",
       "id": "TASK-033"
-    }
+    },
+    "scene": "tasks-transfer"
   },
   {
     "key": "t07-task-edit",
@@ -285,16 +318,18 @@
     "route": {
       "view": "task-edit",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-plan"
   },
   {
     "key": "t08-task-plan",
-    "title": "助手计划",
+    "title": "助手准备 · 资料与产出",
     "group": "任务",
     "route": {
       "view": "task-plan",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-plan"
   },
   {
     "key": "t09-task-authorize",
@@ -303,16 +338,18 @@
     "route": {
       "view": "task-authorize",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-plan"
   },
   {
     "key": "t10-task-progress",
-    "title": "助手工作",
+    "title": "助手正在准备",
     "group": "任务",
     "route": {
       "view": "task-progress",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-in-progress"
   },
   {
     "key": "t11-task-failure",
@@ -321,7 +358,8 @@
     "route": {
       "view": "task-failure",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-failure"
   },
   {
     "key": "t12-task-budget",
@@ -330,7 +368,8 @@
     "route": {
       "view": "task-budget",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-plan"
   },
   {
     "key": "t13-task-change",
@@ -339,7 +378,8 @@
     "route": {
       "view": "task-change",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t14-task-result",
@@ -348,7 +388,8 @@
     "route": {
       "view": "task-result",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t15-task-versions",
@@ -357,7 +398,8 @@
     "route": {
       "view": "task-versions",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t16-task-preview",
@@ -365,8 +407,10 @@
     "group": "任务",
     "route": {
       "view": "task-preview",
-      "id": "TASK-021"
-    }
+      "id": "TASK-021",
+      "mode": "board-kpi-doc-v2"
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t17-task-artifact-edit",
@@ -374,8 +418,10 @@
     "group": "任务",
     "route": {
       "view": "task-artifact-edit",
-      "id": "TASK-021"
-    }
+      "id": "TASK-021",
+      "mode": "board-kpi-doc-v2"
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t18-task-send",
@@ -383,8 +429,10 @@
     "group": "任务",
     "route": {
       "view": "task-send",
-      "id": "TASK-032"
-    }
+      "id": "TASK-032",
+      "mode": "board-stock-v2"
+    },
+    "scene": "default"
   },
   {
     "key": "t19-task-email",
@@ -392,8 +440,10 @@
     "group": "任务",
     "route": {
       "view": "task-email",
-      "id": "TASK-021"
-    }
+      "id": "TASK-021",
+      "mode": "board-kpi-doc-v2"
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t20-task-calendar",
@@ -402,16 +452,19 @@
     "route": {
       "view": "task-calendar",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t21-task-receipt",
-    "title": "操作回执",
+    "title": "本地模拟操作回执",
     "group": "任务",
     "route": {
       "view": "task-receipt",
-      "id": "TASK-032"
-    }
+      "id": "TASK-032",
+      "mode": "board-simulated-receipt"
+    },
+    "scene": "tasks-receipt"
   },
   {
     "key": "t22-task-history",
@@ -420,7 +473,8 @@
     "route": {
       "view": "task-history",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-results"
   },
   {
     "key": "t23-task-complete",
@@ -428,8 +482,10 @@
     "group": "任务",
     "route": {
       "view": "task-complete",
-      "id": "TASK-021"
-    }
+      "id": "TASK-021",
+      "mode": "交付验收"
+    },
+    "scene": "tasks-complete"
   },
   {
     "key": "t24-task-ask",
@@ -438,7 +494,8 @@
     "route": {
       "view": "task-ask",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-questions"
   },
   {
     "key": "t25-task-attachment",
@@ -447,7 +504,8 @@
     "route": {
       "view": "task-attachment",
       "id": "TASK-021"
-    }
+    },
+    "scene": "tasks-plan"
   },
   {
     "key": "m01-memory",
@@ -455,7 +513,8 @@
     "group": "记忆",
     "route": {
       "view": "memory"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m02-memory-detail",
@@ -464,7 +523,8 @@
     "route": {
       "view": "memory-detail",
       "id": "MEM-001"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m03-memory-edit",
@@ -473,7 +533,8 @@
     "route": {
       "view": "memory-edit",
       "id": "MEM-001"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m04-memory-candidate",
@@ -482,7 +543,8 @@
     "route": {
       "view": "memory-candidate",
       "id": "MEM-003"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m05-memory-conflict",
@@ -491,7 +553,8 @@
     "route": {
       "view": "memory-conflict",
       "id": "MEM-003"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m06-memory-person",
@@ -500,7 +563,8 @@
     "route": {
       "view": "memory-person",
       "id": "p1"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m07-memory-person-edit",
@@ -509,7 +573,8 @@
     "route": {
       "view": "memory-person-edit",
       "id": "p1"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m08-memory-voice",
@@ -519,7 +584,8 @@
       "view": "memory-voice",
       "id": "p3",
       "mode": "session-001"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m09-memory-exchange",
@@ -527,7 +593,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-exchange"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m10-memory-project",
@@ -536,7 +603,8 @@
     "route": {
       "view": "memory-project",
       "id": "project-1"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m11-memory-project-edit",
@@ -545,7 +613,8 @@
     "route": {
       "view": "memory-project-edit",
       "id": "project-1"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m12-memory-inspiration",
@@ -553,7 +622,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-inspiration"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m13-memory-goals",
@@ -561,7 +631,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-goals"
-    }
+    },
+    "scene": "growth"
   },
   {
     "key": "m14-memory-goal",
@@ -570,7 +641,8 @@
     "route": {
       "view": "memory-goal",
       "id": "MEM-004"
-    }
+    },
+    "scene": "growth"
   },
   {
     "key": "m15-memory-favorites",
@@ -578,7 +650,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-favorites"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m16-memory-templates",
@@ -586,7 +659,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-templates"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m17-memory-template",
@@ -595,7 +669,8 @@
     "route": {
       "view": "memory-template",
       "id": "MEM-005"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m18-memory-workflow",
@@ -604,7 +679,8 @@
     "route": {
       "view": "memory-workflow",
       "id": "MEM-muyvilowp3e"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m19-memory-social",
@@ -612,7 +688,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-social"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m20-memory-people",
@@ -620,7 +697,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-people"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "m21-memory-projects",
@@ -628,7 +706,8 @@
     "group": "记忆",
     "route": {
       "view": "memory-projects"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u01-settings",
@@ -636,7 +715,8 @@
     "group": "我的",
     "route": {
       "view": "settings"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u02-settings-identity",
@@ -644,7 +724,8 @@
     "group": "我的",
     "route": {
       "view": "settings-identity"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u03-settings-preferences",
@@ -652,7 +733,8 @@
     "group": "我的",
     "route": {
       "view": "settings-preferences"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u04-settings-voice",
@@ -660,7 +742,8 @@
     "group": "我的",
     "route": {
       "view": "settings-voice"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u05-settings-devices",
@@ -668,7 +751,8 @@
     "group": "我的",
     "route": {
       "view": "settings-devices"
-    }
+    },
+    "scene": "devices"
   },
   {
     "key": "u06-settings-device",
@@ -677,7 +761,8 @@
     "route": {
       "view": "settings-device",
       "id": "录音豆"
-    }
+    },
+    "scene": "devices"
   },
   {
     "key": "u07-settings-pair",
@@ -686,7 +771,8 @@
     "route": {
       "view": "settings-pair",
       "id": "录音豆"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u08-settings-deskpet",
@@ -694,7 +780,8 @@
     "group": "我的",
     "route": {
       "view": "settings-deskpet"
-    }
+    },
+    "scene": "devices"
   },
   {
     "key": "u09-settings-tools",
@@ -702,7 +789,8 @@
     "group": "我的",
     "route": {
       "view": "settings-tools"
-    }
+    },
+    "scene": "connect"
   },
   {
     "key": "u10-settings-tool",
@@ -711,7 +799,8 @@
     "route": {
       "view": "settings-tool",
       "id": "电脑助手"
-    }
+    },
+    "scene": "connect"
   },
   {
     "key": "u11-settings-sync",
@@ -719,7 +808,8 @@
     "group": "我的",
     "route": {
       "view": "settings-sync"
-    }
+    },
+    "scene": "devices"
   },
   {
     "key": "u12-settings-sharing",
@@ -727,7 +817,8 @@
     "group": "我的",
     "route": {
       "view": "settings-sharing"
-    }
+    },
+    "scene": "sharing"
   },
   {
     "key": "u13-settings-retention",
@@ -735,7 +826,8 @@
     "group": "我的",
     "route": {
       "view": "settings-retention"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u14-settings-spaces",
@@ -743,15 +835,17 @@
     "group": "我的",
     "route": {
       "view": "settings-spaces"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u15-settings-members",
-    "title": "成员与邀请",
+    "title": "团队成员与邀请",
     "group": "我的",
     "route": {
       "view": "settings-members"
-    }
+    },
+    "scene": "members"
   },
   {
     "key": "u16-settings-trash",
@@ -759,7 +853,8 @@
     "group": "我的",
     "route": {
       "view": "settings-trash"
-    }
+    },
+    "scene": "trash"
   },
   {
     "key": "u17-settings-privacy",
@@ -767,7 +862,8 @@
     "group": "我的",
     "route": {
       "view": "settings-privacy"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u18-settings-export",
@@ -775,7 +871,8 @@
     "group": "我的",
     "route": {
       "view": "settings-export"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u19-settings-logs",
@@ -783,7 +880,8 @@
     "group": "我的",
     "route": {
       "view": "settings-logs"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u20-settings-notifications",
@@ -791,7 +889,8 @@
     "group": "我的",
     "route": {
       "view": "settings-notifications"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u21-settings-account",
@@ -799,7 +898,8 @@
     "group": "我的",
     "route": {
       "view": "settings-account"
-    }
+    },
+    "scene": "default"
   },
   {
     "key": "u22-settings-usage",
@@ -807,6 +907,196 @@
     "group": "我的",
     "route": {
       "view": "settings-usage"
+    },
+    "scene": "default"
+  },
+  {
+    "key": "c21-session-live",
+    "title": "记录现场 · 会话概览",
+    "group": "会话",
+    "scene": "recording",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "现场"
+    }
+  },
+  {
+    "key": "c22-session-live-transcript",
+    "title": "记录现场 · 原文",
+    "group": "会话",
+    "scene": "recording",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "原文"
+    }
+  },
+  {
+    "key": "c23-session-live-materials",
+    "title": "记录现场 · 资料",
+    "group": "会话",
+    "scene": "recording",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "资料"
+    }
+  },
+  {
+    "key": "c24-session-live-actions",
+    "title": "记录现场 · 行动",
+    "group": "会话",
+    "scene": "recording",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "行动"
+    }
+  },
+  {
+    "key": "c25-session-paused",
+    "title": "记录已暂停",
+    "group": "会话",
+    "scene": "paused",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "现场"
+    }
+  },
+  {
+    "key": "c26-session-review-queue",
+    "title": "会后逐项核对队列",
+    "group": "会话",
+    "scene": "review",
+    "route": {
+      "view": "session-review",
+      "id": "session-001"
+    }
+  },
+  {
+    "key": "t26-task-materials-tab",
+    "title": "任务详情 · 资料",
+    "group": "任务",
+    "scene": "tasks-results",
+    "route": {
+      "view": "task-detail",
+      "id": "TASK-021",
+      "mode": "资料"
+    },
+    "actions": [
+      {
+        "kind": "click",
+        "name": "资料",
+        "exact": true,
+        "role": "tab"
+      }
+    ]
+  },
+  {
+    "key": "t27-task-results-tab",
+    "title": "任务详情 · 成果",
+    "group": "任务",
+    "scene": "tasks-results",
+    "route": {
+      "view": "task-detail",
+      "id": "TASK-021",
+      "mode": "成果"
+    },
+    "actions": [
+      {
+        "kind": "click",
+        "name": "成果",
+        "exact": true,
+        "role": "tab"
+      }
+    ]
+  },
+  {
+    "key": "t28-task-history-tab",
+    "title": "任务详情 · 记录与历史完成",
+    "group": "任务",
+    "scene": "tasks-reopened",
+    "route": {
+      "view": "task-detail",
+      "id": "TASK-021",
+      "mode": "记录"
+    },
+    "actions": [
+      {
+        "kind": "click",
+        "name": "记录",
+        "exact": true,
+        "role": "tab"
+      }
+    ]
+  },
+  {
+    "key": "t29-task-answer",
+    "title": "已回答问题 · 答复与下一次跟进",
+    "group": "任务",
+    "scene": "tasks-questions",
+    "route": {
+      "view": "task-ask",
+      "id": "TASK-021"
+    },
+    "actions": [
+      {
+        "kind": "click",
+        "name": "演示指标表采用哪个统计时点？",
+        "exact": false
+      }
+    ]
+  },
+  {
+    "key": "t30-task-review-draft",
+    "title": "核对助手草稿 · 工作尚未完成",
+    "group": "任务",
+    "scene": "tasks-results",
+    "route": {
+      "view": "task-complete",
+      "id": "TASK-021",
+      "mode": "草稿核对"
+    }
+  },
+  {
+    "key": "t31-task-history-backup",
+    "title": "旧版正文 · 历史备份确认",
+    "group": "任务",
+    "scene": "tasks-history",
+    "route": {
+      "view": "task-preview",
+      "id": "TASK-021",
+      "mode": "board-kpi-doc-v2"
+    },
+    "actions": [
+      {
+        "kind": "click",
+        "name": "下载历史备份",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "t32-task-manual-complete",
+    "title": "普通行动 · 记录实际完成结果",
+    "group": "任务",
+    "scene": "tasks-manual-complete",
+    "route": {
+      "view": "task-complete",
+      "id": "TASK-032",
+      "mode": "人工完成"
+    }
+  },
+  {
+    "key": "t33-task-transfer-progress",
+    "title": "转交待回应 · 继续记录实际进展",
+    "group": "任务",
+    "scene": "tasks-transfer",
+    "route": {
+      "view": "task-progress-note",
+      "id": "TASK-033"
     }
   }
 ]

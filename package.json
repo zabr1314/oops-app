@@ -8,11 +8,13 @@
     "update:runtime-lock": "node scripts/update-mobile-runtime-lock.mjs",
     "test:runtime": "playwright test",
     "test:sites": "node --test tests/sites-worker.test.mjs",
-    "test:logic": "node --test tests/domain-workflows.test.mjs",
+    "test:logic": "node --test tests/domain-workflows.test.mjs tests/session-regressions.test.mjs tests/task-flow-regressions.test.mjs tests/memory-privacy.test.mjs tests/home-regressions.test.mjs",
     "predev": "npm run check:runtime",
     "dev": "vite",
     "prebuild": "npm run check:runtime",
-    "build": "tsc && vite build && node scripts/prepare-sites-build.mjs"
+    "build": "tsc && vite build && node scripts/prepare-sites-build.mjs",
+    "test:boards": "node --test tests/boards-integrity.test.mjs",
+    "build:boards": "node scripts/build-boards.mjs"
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.10",

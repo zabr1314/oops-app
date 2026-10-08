@@ -9,13 +9,15 @@ import { MemoryScreens, SettingsScreens, memoryTitle, settingsTitle } from './fe
 import { RecordingControls, EndRecordingSheet } from './features/RecordingControls';
 import { clearViewState } from './viewState';
 import { migrateStoredData } from './stateMigrations';
+import { boardPreviewData } from './boardPreview';
 
 const roots=['home','sessions','tasks','memory','settings'];
 const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'我的',icon:'user'}];
 function initialRoute():Route{const p=window.location.hash.slice(1).split('/').map(x=>{try{return decodeURIComponent(x)}catch{return x}});return {view:p[0]||'home',id:p[1]||undefined,mode:p[2]||undefined}}
 function routeHash(r:Route){return '#'+[r.view,r.id||'',r.mode||''].map(encodeURIComponent).join('/').replace(/\/+$/,'')}
 function spaceNames(d:AppData):string[]{try{const rows=JSON.parse(d.settings.retention.spaces||'null');if(Array.isArray(rows))return [...new Set(['我的空间',...rows.map(x=>x.name).filter((x:unknown)=>typeof x==='string')])] as string[]}catch{}return ['我的空间','Oops 产品团队']}
-function readData(){try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return migrateStoredData(d as AppData)}catch{}return initialData()}
+const previewScene=new URLSearchParams(window.location.search).get('board-preview');
+function readData(){if(previewScene!==null)return boardPreviewData(previewScene||'default');try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return migrateStoredData(d as AppData)}catch{}return initialData()}
 type EndRequest = { id: string; resume: boolean };
 
 export default function Prototype() {
@@ -70,7 +72,7 @@ export default function Prototype() {
   const reset = () => {
     keyboard.hide();
     setEndRequest(null);
-    setData(initialData());
+    setData(previewScene===null?initialData():boardPreviewData(previewScene||'default'));
     setRoute({ view: 'home' });
     history.current = [];
     scrollPositions.current.clear();
@@ -79,7 +81,7 @@ export default function Prototype() {
     window.history.replaceState(null, '', '#home');
   };
   useEffect(() => {
-    try { localStorage.setItem('oops-front-v2', JSON.stringify(data)); }
+    try { if(previewScene===null)localStorage.setItem('oops-front-v2', JSON.stringify(data)); }
     catch { /* Keep the session usable when the visitor's browser blocks storage. */ }
   }, [data]);
   useLayoutEffect(() => {
@@ -160,6 +162,8 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const { bottomInset, isKeyboardVisible } = useKeyboardInsets();
   const { device } = useMobileDevice();
   const [spaceOpen, setSpaceOpen] = useState(false);
+  const [attentionTime,setAttentionTime]=useState(Date.now);
+  useEffect(()=>{const refresh=()=>setAttentionTime(Date.now());const timer=setInterval(refresh,30000);window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh)}},[]);
   useAppFocusGuard(route);
   useSessionRecorder();
   const active = route.view.startsWith('task') ? 'tasks' : route.view.startsWith('session') ? 'sessions' : route.view.startsWith('memory') ? 'memory' : route.view.startsWith('settings') ? 'settings' : 'home';
@@ -173,7 +177,7 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const visibleTask = data.tasks.find(t => t.id === route.id && taskVisible(data, t));
   const hasTaskTabs = route.view === 'task-detail' && !!visibleTask;
   const hasTaskPrimary = hasTaskTabs && !isKeyboardVisible;
-  const pendingTasks = homeTaskAttentionQueue(data).length;
+  const pendingTasks = homeTaskAttentionQueue(data,attentionTime).length;
   const content = active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
   return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''} ${hasSessionTabs ? 'has-session-tabs' : ''} ${hasTaskTabs ? 'has-task-tabs' : ''} ${hasTaskPrimary ? 'has-task-primary' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
     <header className={`app-header ${isHome ? 'home-header' : ''}`}>

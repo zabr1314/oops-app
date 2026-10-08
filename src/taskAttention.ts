@@ -1,4 +1,5 @@
 import type { Task, TaskInquiry } from './store';
+import { parseLocalMoment } from './dateLogic';
 
 export const taskClosed = (task: Task) => ['已完成', '已取消', '已拒绝'].includes(task.status);
 export function taskInquiries(task: Task): TaskInquiry[] {
@@ -6,8 +7,8 @@ export function taskInquiries(task: Task): TaskInquiry[] {
 }
 function reached(value: string | undefined, now: number): boolean {
   if (!value || value === '无固定期限') return false;
-  const parsed = Date.parse(value.replace(' ', 'T'));
-  return Number.isFinite(parsed) && parsed <= now;
+  const parsed = parseLocalMoment(value, now);
+  return parsed !== undefined && parsed <= now;
 }
 export function taskAttentionReason(task: Task, now: number | Date = Date.now()): string | null {
   const at = now instanceof Date ? now.getTime() : now;
