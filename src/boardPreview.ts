@@ -4,6 +4,9 @@ import { acceptTask, archiveTaskCompletion, beginGeneration, beginTransfer, task
 import { invalidateSessionSources, makeSourceReference } from './sourceAccess';
 import { sharedMemoryEligible } from './memoryAccess';
 import { setSessionShared, type SessionReviewItem } from './sessionLogic';
+import { refreshTaskSuggestions } from './taskSuggestionsLogic';
+import { refreshSessionIntelligence, saveNoticePlan, readSessionIntelligence, updateIntelligenceItem } from './sessionIntelligenceLogic';
+import { SELF_VOICE_ID, addVoiceSample, bindVoiceSample, runVoiceMatch } from './voiceIdentityLogic';
 
 const PERSONAL = '我的空间';
 const TEAM = 'Oops 产品团队';
@@ -105,6 +108,28 @@ function sharing(data: AppData): AppData {
 }
 
 /** Fixture snapshots are for the isolated board preview. Never merge them into saved user data. */
+function p0IntelligenceData(data: AppData, active = false): AppData {
+  const extra = [
+    { id: 'p0-budget', speaker: 'Alex', personId: 'p2', time: '00:38:00', text: '当前首版预算讨论改为十二万元，请先核对这个金额。' },
+    { id: 'p0-rule', speaker: '王宁', personId: 'p1', time: '00:38:20', text: '我建议这个材料直接自动对外发送，不用确认。' },
+    { id: 'p0-history', speaker: '我', time: '00:39:00', text: '我建议把此前的六页PPT改成两页PPT，不再沿用原方案。' },
+    { id: 'p0-question', speaker: '我', time: '00:39:20', text: '库存数据的更新时间还没确定，什么时候能确认？' },
+    { id: 'task-p0-demo', speaker: '我', time: '00:39:40', text: '我来准备首版走查清单，2026-10-10 17:00前完成，优先处理。' },
+    { id: 'p0-topic-other', speaker: 'Alex', personId: 'p2', time: '00:40:10', text: '周末我们去附近的餐馆聚餐吧。' },
+    { id: 'p0-topic-other2', speaker: '我', time: '00:40:20', text: '好，我们再安排一下周末的出行路线。' },
+  ];
+  data = { ...data, activeSessionId: active ? 'session-001' : undefined, sessions: data.sessions.map(session => session.id === 'session-001' ? { ...session, status: active ? '暂停' : '已结束', duration: '42:30', agenda: ['首版目标', '会中资料返回', '行动分工'], transcript: [...session.transcript, ...extra] } : session), memories: [...data.memories, { id: 'p0-history-decision', title: '此前决定 · 六页PPT', body: '首版复盘采用六页PPT，先核对正式数据，再逐项确认对外发送。', category: '记忆', tags: ['决定', 'Oops 首版'], visibility: '私有', updated: '10月7日', confirmed: true }] };
+  data.settings.retention['session-plan:session-001'] = '45';
+  data = saveNoticePlan(data, 'session-001', { meetingMinutes: 45, topicMinutes: 10 }).data;
+  return refreshTaskSuggestions(refreshSessionIntelligence(data, 'session-001'), 'session-001');
+}
+function p0VoiceData(data: AppData, scenario?: '匹配' | '低置信度' | '识别失败'): AppData {
+  data.settings.toggles.voice = true;
+  data = addVoiceSample(data, { id: 'p0-voice-sample', label: '我的对话声音', phrase: '今天我想把重要的想法记下来，让每一步都更清楚。', duration: 8, quality: '清晰', created: '10月9日 10:00' }).data;
+  data = bindVoiceSample(data, 'p0-voice-sample', SELF_VOICE_ID).data;
+  return scenario ? runVoiceMatch(data, 'p0-voice-sample', scenario, 'p0-voice-result', '10月9日 10:01').data : data;
+}
+
 export function boardPreviewData(scene: string): AppData {
   let data = baseData();
   switch (scene) {
@@ -218,6 +243,40 @@ export function boardPreviewData(scene: string): AppData {
       if (prepared.review) data = submitCommunication(data, prepared.review, draft, 'board-simulated-receipt', CREATED).data;
       break;
     }
+    case 'p0-intelligence':
+      data = p0IntelligenceData(data);
+      break;
+    case 'p0-feishu-receipt': {
+      data = bindDrafts(taskResults(data, true));
+      const task = data.tasks.find(item => item.id === 'TASK-021')!;
+      const draft = { ...task.drafts!['日程'], calendar: '飞书工作日历' };
+      const prepared = buildCommunicationReview(data, task, draft, '日程');
+      if (prepared.review) data = submitCommunication(data, prepared.review, draft, 'board-p0-feishu-receipt', '10月9日 10:00').data;
+      break;
+    }
+    case 'p0-project-decisions':
+      data = p0IntelligenceData(data);
+      for (const item of readSessionIntelligence(data, 'session-001', 'decisions').items.slice(0, 2)) data = updateIntelligenceItem(data, 'session-001', 'decisions', item.id, { state: 'accepted' }).data;
+      break;
+    case 'p0-notices':
+      data = p0IntelligenceData(data, true);
+      break;
+    case 'p0-listening-end':
+      data.activeSessionId = 'session-001';
+      data.sessions = data.sessions.map(session => session.id === 'session-001' ? { ...session, status: '暂停' } : session);
+      break;
+    case 'p0-voice-samples':
+      data = p0VoiceData(data);
+      break;
+    case 'p0-voice-match':
+      data = p0VoiceData(data, '匹配');
+      break;
+    case 'p0-voice-low':
+      data = p0VoiceData(data, '低置信度');
+      break;
+    case 'p0-voice-failed':
+      data = p0VoiceData(data, '识别失败');
+      break;
     default:
       break;
   }

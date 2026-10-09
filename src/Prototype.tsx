@@ -10,6 +10,8 @@ import { RecordingControls, EndRecordingSheet } from './features/RecordingContro
 import { clearViewState } from './viewState';
 import { migrateStoredData } from './stateMigrations';
 import { boardPreviewData } from './boardPreview';
+import { ListeningScreen } from './features/Listening';
+
 
 const roots=['home','sessions','tasks','memory','settings'];
 const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'我的',icon:'user'}];
@@ -169,7 +171,7 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const active = route.view.startsWith('task') ? 'tasks' : route.view.startsWith('session') ? 'sessions' : route.view.startsWith('memory') ? 'memory' : route.view.startsWith('settings') ? 'settings' : 'home';
   const isRoot = roots.includes(route.view);
   const isHome = route.view === 'home';
-  const title = active === 'tasks' ? taskTitle(route) : active === 'sessions' ? sessionTitle(route) : active === 'memory' ? memoryTitle(route) : active === 'settings' ? settingsTitle(route) : homeTitle(route);
+  const title = route.view === 'settings-listening' ? '聆听设置' : active === 'tasks' ? taskTitle(route) : active === 'sessions' ? sessionTitle(route) : active === 'memory' ? memoryTitle(route) : active === 'settings' ? settingsTitle(route) : homeTitle(route);
   const session = data.sessions.find(s => s.id === data.activeSessionId && !s.archived && sessionVisible(data, s.id) && ['进行中', '暂停'].includes(s.status));
   const hasRecordingControls = !!session && !isKeyboardVisible;
   const hasPrepareFooter = route.view === 'session-create' && !session;
@@ -178,7 +180,7 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const hasTaskTabs = route.view === 'task-detail' && !!visibleTask;
   const hasTaskPrimary = hasTaskTabs && !isKeyboardVisible;
   const pendingTasks = homeTaskAttentionQueue(data,attentionTime).length;
-  const content = active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
+  const content = route.view === 'settings-listening' ? <ListeningScreen /> : active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
   return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''} ${hasSessionTabs ? 'has-session-tabs' : ''} ${hasTaskTabs ? 'has-task-tabs' : ''} ${hasTaskPrimary ? 'has-task-primary' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
     <header className={`app-header ${isHome ? 'home-header' : ''}`}>
       {isHome ? <><img className="wordmark" src="/brand/wordmark.png" alt="Oops" /><div className="header-tools"><button className="space-pill" onClick={() => setSpaceOpen(true)}>{data.settings.space}<Icon name="caret-down" size={13} /></button><button className="icon-button notification-button" aria-label="通知" onClick={() => navigate({ view: 'notifications' })}><Icon name="bell" size={25} />{data.notifications.some(n => !n.read && notificationVisible(data, n.route)) && <i />}</button></div></> : <><button className="icon-button" aria-label={isRoot ? '搜索全部内容' : '返回上一页'} onClick={isRoot ? () => navigate({ view: 'search' }) : back}><Icon name={isRoot ? 'magnifying-glass' : 'caret-left'} size={23} /></button><h1>{title}</h1><button className="icon-button" aria-label={active === 'sessions' ? '新建记录' : active === 'tasks' ? '新建任务' : '回到首页'} onClick={() => navigate({ view: active === 'sessions' ? 'session-mode' : active === 'tasks' ? 'task-edit' : 'home' })}><Icon name={['sessions', 'tasks'].includes(active) ? 'plus' : 'house'} size={22} /></button></>}

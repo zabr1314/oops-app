@@ -32,7 +32,7 @@ export function TaskCommunication({ task, kind }: { task: CommunicationTask; kin
   const conflicts = kind === '日程' ? visibleCalendarConflicts(data, task, draft) : [], conflictSignature = communicationFingerprint(conflicts.map(receipt => [receipt.id, receipt.body]));
   const selectionChanged = selectedIds.join('|') !== (draft.artifactRefs || []).map(ref => ref.id).join('|');
   const history = (task.draftHistory || []).filter(item => item.kind === kind && (item.draft.snapshotSpace || PERSONAL) === data.settings.space);
-  const connection = kind === '消息' ? '飞书' : kind === '邮件' ? '邮箱' : '日历';
+  const connection = kind === '消息' ? '飞书' : kind === '邮件' ? '邮箱' : draft.calendar?.startsWith('飞书') ? '飞书日程' : 'Calendar';
   function resetCheck() { setCheckedSignature(''); setConflictChecked(''); setReview(null); setError(''); }
   function edit(key: 'target' | 'body' | 'subject' | 'cc' | 'account' | 'start' | 'end' | 'calendar', value: string) { setDraft(current => ({ ...current, [key]: value })); resetCheck(); }
   function save() {
@@ -86,7 +86,7 @@ export function TaskCommunication({ task, kind }: { task: CommunicationTask; kin
     <Field label={kind === '日程' ? '参与人' : '收件对象'} value={draft.target} onChange={value => edit('target', value)} placeholder="明确填写本次对象" hint={`当前负责人：${task.owner}；提出人：${task.requester}${task.transferTo ? '；待转交给：' + task.transferTo : ''}`} />
     {kind === '邮件' && <Field label="抄送" value={draft.cc || ''} onChange={value => edit('cc', value)} />}
     {kind !== '消息' && <Field label={kind === '日程' ? '日程标题' : '邮件主题'} value={draft.subject || ''} onChange={value => edit('subject', value)} />}
-    {kind === '日程' && <><Field label="开始时间" value={draft.start || ''} onChange={value => edit('start', value)} placeholder="2026-10-09 14:00" /><Field label="结束时间" value={draft.end || ''} onChange={value => edit('end', value)} placeholder="2026-10-09 14:30" /><SelectField label="目标日历" value={draft.calendar || '我的工作日历'} onChange={value => edit('calendar', value)} options={['我的工作日历', '个人日历']} /></>}
+    {kind === '日程' && <><Field label="开始时间" value={draft.start || ''} onChange={value => edit('start', value)} placeholder="2026-10-09 14:00" /><Field label="结束时间" value={draft.end || ''} onChange={value => edit('end', value)} placeholder="2026-10-09 14:30" /><SelectField label="目标日历" value={draft.calendar || '我的工作日历'} onChange={value => edit('calendar', value)} options={['我的工作日历', '个人日历', '飞书工作日历']} /></>}
     <Field label={kind === '日程' ? '议程' : '完整正文'} value={draft.body} onChange={value => edit('body', value)} multiline />
     <SectionTitle>已绑定的附件</SectionTitle>
     <Card>{(draft.artifactRefs || []).length ? draft.artifactRefs!.map(ref => { const current = all.find(artifact => artifact.id === ref.id && artifact.version === ref.version), unchanged = !!current && ref.fingerprint === artifactFingerprint(current); return <div className="communication-bound" key={ref.id + ':' + ref.version}><div className="section-title"><strong>{ref.title || current?.title || '原成果'} · v{ref.version}</strong><Badge tone={unchanged ? 'gray' : 'orange'}>{unchanged ? '准确绑定' : '版本已变化'}</Badge></div><details><summary>查看绑定正文快照</summary><p className="communication-copy">{ref.body?.join('\n\n') || '旧草稿没有保存正文快照'}</p></details>{unchanged && <Button tone="quiet" onClick={() => go('task-preview', ref.id)}>打开这个成果版本</Button>}</div>; }) : <p className="meta">未附成果。可以只核对手工填写的正文。</p>}<p className="meta">{attachmentText || '无附件'}</p></Card>

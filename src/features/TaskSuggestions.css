@@ -1,0 +1,24 @@
+.task-suggestions-page { gap: 14px; }
+.task-suggestions-hero { background: linear-gradient(135deg, #f0eaff, #faf8ff); border-color: #e6dcfa; padding: 20px; }
+.task-suggestions-hero-top, .task-suggestions-hero-meta, .task-suggestion-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.task-suggestions-symbol { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: #e2d5fb; }
+.task-suggestions-hero h2 { margin: 15px 0 6px; font-size: 22px; letter-spacing: -.5px; }
+.task-suggestions-hero p { margin: 0; font-size: 12px; line-height: 1.65; color: var(--muted); }
+.task-suggestions-hero-meta { margin-top: 15px; color: var(--brand); font-size: 11px; }
+.task-suggestions-hero-meta > span { min-width: 0; white-space: nowrap; }
+.task-suggestions-hero-meta .button { width: auto; flex: 0 0 auto; min-height: 30px; padding: 4px 0 4px 8px; font-size: 11px; }
+.task-suggestions-hero-meta .button .icon { width: 15px; height: 15px; }
+.task-suggestion-card { padding: 17px; }
+.task-suggestion-card-top > span:last-child:not(.badge) { color: var(--muted); font-size: 11px; }
+.task-suggestion-card h3 { margin: 13px 0; line-height: 1.6; font-size: 16px; color: var(--ink); overflow-wrap: anywhere; }
+.task-suggestion-fields { margin: 0 0 13px; display: flex; flex-direction: column; gap: 9px; }
+.task-suggestion-fields > div { display: flex; gap: 13px; align-items: baseline; }
+.task-suggestion-fields dt { width: 42px; flex: none; font-size: 11px; color: var(--muted); }
+.task-suggestion-fields dd { margin: 0; min-width: 0; font-size: 12px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.task-suggestion-original { border-left: 2px solid #d8c8f3; padding-left: 12px; }
+.task-suggestion-original > small { font-size: 10px; color: var(--brand); }
+.task-suggestion-original > p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-suggestion-original .source-link { margin: 7px 0; }
+.task-suggestion-actions { display: flex; gap: 8px; margin-top: 14px; }
+.task-suggestion-actions .button { flex: 1; width: auto; min-width: 0; min-height: 38px; padding: 8px 10px; font-size: 12px; }
+.task-suggestion-actions .button.quiet { flex: 0 0 auto; }

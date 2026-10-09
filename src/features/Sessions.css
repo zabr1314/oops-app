@@ -128,3 +128,7 @@
 .session-queue-item p { margin: 0; }
 .session-speaker>span:not(.avatar):not(.badge) { font-size: 12px; }
 .session-recording small { font-size: 12px; }
+
+.session-p0-entry { padding: 8px; }
+.session-p0-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+.session-p0-grid button { display: flex; gap: 8px; align-items: center; justify-content: flex-start; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 12px; background: #f5f1fe; color: #6951ba; font-size: 13px; font-weight: 650; }

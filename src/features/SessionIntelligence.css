@@ -1,0 +1,37 @@
+.intelligence-page { gap: 14px; }
+.intelligence-hero { background: linear-gradient(135deg, #f0eaff, #faf8ff); border-color: #e6dcfa; padding: 20px; }
+.intelligence-hero-top, .intelligence-hero-meta, .intelligence-result-head, .intelligence-card-source { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.intelligence-hero-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: #e2d5fb; }
+.intelligence-hero h2 { margin: 15px 0 6px; font-size: 22px; letter-spacing: -.5px; }
+.intelligence-hero p { margin: 0; font-size: 12px; line-height: 1.65; color: var(--muted); }
+.intelligence-hero-meta { margin-top: 15px; font-size: 11px; color: var(--brand); }
+.intelligence-hero-meta .button { min-height: 30px; padding: 4px 0 4px 8px; font-size: 11px; }
+.intelligence-hero-meta .button, .intelligence-card-source .button, .intelligence-personal-context .button { width: auto; flex: 0 0 auto; }
+.intelligence-hero-meta > span, .intelligence-card-source > span { min-width: 0; white-space: nowrap; }
+.intelligence-hero-meta .button .icon { width: 15px; height: 15px; }
+.intelligence-caption { display: flex; align-items: center; gap: 6px; margin: 0 2px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.intelligence-result { padding: 17px; }
+.intelligence-result.processed { border-color: #e4ddee; }
+.intelligence-result-head { justify-content: flex-start; }
+.intelligence-result-head strong { flex: 1; font-size: 13px; }
+.intelligence-result-symbol { flex: none; width: 30px; height: 30px; display: grid; place-items: center; background: var(--soft); border-radius: 10px; }
+.intelligence-result h3 { margin: 12px 0 8px; font-size: 16px; line-height: 1.5; }
+.intelligence-result .intelligence-body { margin: 12px 0; color: var(--ink); font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.intelligence-card-source { padding-top: 5px; color: var(--muted); font-size: 10px; }
+.intelligence-card-source .button { min-height: 25px; padding: 3px 0 3px 8px; font-size: 11px; }
+.intelligence-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 13px; }
+.intelligence-actions .button { flex: 1; width: auto; min-width: 0; min-height: 38px; padding: 8px 10px; font-size: 12px; }
+.intelligence-actions .button.quiet { flex: 0 0 auto; }
+.intelligence-personal-context { display: flex; align-items: center; gap: 11px; padding: 2px 0; }
+.intelligence-personal-context > span { flex: 1; min-width: 0; }
+.intelligence-personal-context > span.avatar { flex: none; }
+.intelligence-personal-context strong { display: block; font-size: 13px; }
+.intelligence-personal-context small { display: block; font-size: 10px; color: var(--muted); margin-top: 5px; }
+.intelligence-personal-context .button { font-size: 11px; padding: 8px; }
+.intelligence-sheet-text { white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: var(--ink); margin: 6px 0; }
+.intelligence-evidence { background: #faf8ff; padding: 13px 15px; }
+.intelligence-evidence small { font-size: 10px; color: var(--brand); }
+.intelligence-evidence p { margin: 6px 0 0; white-space: pre-wrap; line-height: 1.7; font-size: 13px; color: var(--ink); }
+.intelligence-quote { border-left: 2px solid #d8c8f3; padding: 0 0 0 12px; }
+.intelligence-quote p { margin: 0 0 6px; white-space: pre-wrap; line-height: 1.7; color: var(--muted); font-size: 12px; }
+.intelligence-quote .source-link { margin: 4px 0; }
