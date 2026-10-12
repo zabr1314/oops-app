@@ -460,10 +460,10 @@
     const spacer = '<span class="icon-button" aria-hidden="true"></span>';
     if (r === 'home') {
       const unread = [...S.notices.values()].some((n) => !n.dismissed);
-      return `<img class="wordmark" alt="Oops" src="brand/wordmark.png"><div class="header-tools">
+      return `<img class="wordmark" alt="Oops" src="brand/wordmark.png"><div class="header-tools"><span class="space-pill">团队空间</span>
         <button class="icon-button notification-button" data-act="notices-open" aria-label="提醒">${icon('bell', 25)}${unread ? '<i></i>' : ''}</button></div>`;
     }
-    const title = { sessions: '会话', live: '会话', meeting: '会话', tasks: '任务', memory: '记忆', project: '项目', me: '我的', settings: '收音与服务' }[r];
+    const title = { sessions: '会话', live: '会话', meeting: '会话', tasks: '任务', memory: '记忆', project: '项目', me: '我的', settings: '聆听设置' }[r];
     const left = ['live', 'meeting', 'project', 'settings'].includes(r) ? button('back', '返回上一页', 'caret-left', 23)
       : button('ask-open', '搜索全部内容', 'magnifying-glass', 23);
     const right = r === 'sessions' || r === 'live' || r === 'meeting' ? (S.state.capturing ? spacer : button('capture-start', '新建记录', 'plus'))
@@ -531,7 +531,7 @@
         : `<button class="button primary" type="button" data-act="capture-start">${icon('microphone')}<span>开始记录</span></button>`}
       <div class="record-under"><span>会议 · ${esc(SOURCE_TEXT[S.state.source] || '手机麦克风')}</span>
         <button data-act="saved-list">${icon('bookmark-simple', 18)}已保存 ${S.state.savedCount ?? 0} 段</button></div>
-      ${listRow({ act: 'go', data: 'data-route="settings"', ic: 'waveform', title: '收音与唤醒', sub: `${SOURCE_TEXT[S.state.source] || '手机麦克风'} · ${S.state.voiceTrigger !== false ? '说「Oops」找回刚才' : '语音唤醒已关闭'}` })}
+      ${listRow({ act: 'go', data: 'data-route="settings"', ic: 'waveform', title: '智能聆听', sub: `${SOURCE_TEXT[S.state.source] || '手机麦克风'} · ${S.state.voiceTrigger !== false ? '说「Oops」找回刚才' : '语音唤醒已关闭'}` })}
       ${sectionTitle('接着聊', '全部', 'go', 'data-route="sessions"')}
       <div class="home-recent">
         ${live ? listRow({ act: 'go', data: 'data-route="live"', ic: 'waveform', title: liveTitle(), sub: `${S.state.capturing ? '正在收音' : '本场已停止'} · ${S.commitments.length}项待办` }) : ''}
@@ -670,7 +670,7 @@
     return `<div class="stack sessions-feature">${heading}${stage}
       ${listRow({ act: 'commitments-open', ic: 'sparkle', title: '识别到的任务建议', sub: '按原话核对负责人、期限，确认后才建飞书任务' })}
       ${open.length ? `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
-      ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
+      ${created.length ? `<section class="session-list-group">${sectionTitle('执行中')}${created.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
       ${!rows.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>还没有识别到待办</strong><p>有人说"我来做""你周五前给我"这类话时，会出现在这里。</p></div>` : ''}
       <button class="button primary" type="button" data-act="recall">${icon('clock-counter-clockwise')}<span>从刚才的话整理行动</span></button>
       <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button>
@@ -705,7 +705,7 @@
         ${sectionTitle('下一步行动')}
         ${todos.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
           sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'} · ${u.task_status === 'created' ? '已建飞书任务' : u.review?.verdict === 'confirmed' ? '人工已确认' : '待核对'}`,
-          badge: `<span class="badge ${u.task_status === 'created' ? 'green' : 'purple'}">${u.task_status === 'created' ? '已建任务' : '待承接'}</span>` })).join('') || '<p class="meta">没有识别到待办。</p>'}
+          badge: `<span class="badge ${u.task_status === 'created' ? 'green' : 'purple'}">${u.task_status === 'created' ? '执行中' : '待承接'}</span>` })).join('') || '<p class="meta">没有识别到待办。</p>'}
         ${(h.digest?.idea || []).length ? `${sectionTitle('想法')}${(h.digest.idea || []).slice(0, 5).map((u) => `<p class="meta">· ${esc(u.text)}</p>`).join('')}` : ''}
         ${pending ? `<section class="card session-review-entry"><div><h3>${pending}项可以逐项核对</h3><p class="meta">待办、决定与不知道谁说的话分别处理，也可以稍后再说。</p></div>
           <button class="button primary" type="button" data-act="review-start" data-id="${esc(h.session_id)}"><span>开始 / 继续核对</span></button></section>` : ''}
@@ -744,7 +744,7 @@
     return `<div class="stack sessions-feature">${heading}${stage}
       ${listRow({ act: 'review-start', data: `data-id="${esc(h.session_id)}"`, ic: 'sparkle', title: '识别到的任务建议', sub: '会后核对：是否是待办、谁负责' })}
       ${open.length ? `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'history-quote')).join('')}</section>` : ''}
-      ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'history-quote')).join('')}</section>` : ''}
+      ${created.length ? `<section class="session-list-group">${sectionTitle('执行中')}${created.map((u) => commitmentCard(u, 'history-quote')).join('')}</section>` : ''}
       ${!todos.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>这场会议没有识别到待办</strong></div>` : ''}
       <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button>
     </div>`;
@@ -793,7 +793,7 @@
 
   function memoryHtml() {
     const tab = S.memoryTab;
-    const seg = `<div class="segmented" role="tablist">${[['projects', '项目'], ['people', '人物']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
+    const seg = `<div class="segmented" role="tablist">${[['people', '人物'], ['projects', '项目']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
     if (tab === 'people') {
       const v = S.state.voiceprint || {};
       const people = v.catalog?.people || [];
@@ -845,10 +845,10 @@
         listRow({ act: 'self-pick', ic: 'user-circle', title: '身份与角色', sub: s.selfName || '未选择' }),
         listRow({ act: 'vp-open', ic: 'waveform', title: '我的声音身份', sub: '声纹录入与匹配测试' })])}
       ${group('连接', [
-        listRow({ act: 'go', data: 'data-route="settings"', ic: 'microphone', title: '收音与唤醒', sub: `${SOURCE_TEXT[s.source] || s.source || ''} · ${s.voiceTrigger !== false ? '语音唤醒开' : '语音唤醒关'}` }),
+        listRow({ act: 'go', data: 'data-route="settings"', ic: 'microphone', title: '聆听设置', sub: `${SOURCE_TEXT[s.source] || s.source || ''} · ${s.voiceTrigger !== false ? '语音唤醒开' : '语音唤醒关'}` }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'plugs-connected', title: '团队服务器', sub: s.backend === 'mock' ? 'Mock 后端（不连服务器）' : s.backendUrl || '未配置' })])}
       ${group('数据与运行', [
-        listRow({ act: 'go', data: 'data-route="settings"', ic: 'shield-check', title: '会议文字与录音', sub: `${s.memorySync !== false ? '文字自动同步' : '文字同步已关'} · ${s.recordSession ? '保存原始录音' : '不保存录音'}` }),
+        listRow({ act: 'go', data: 'data-route="settings"', ic: 'shield-check', title: '隐私与数据', sub: `${s.memorySync !== false ? '文字自动同步' : '文字同步已关'} · ${s.recordSession ? '保存原始录音' : '不保存录音'}` }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'chart-bar', title: '诊断与召回耗时', sub: S.latency?.recentMs?.length ? `召回中位数 ${(S.latency.medianMs / 1000).toFixed(1)} 秒` : '还没有召回记录' })])}
       <p class="meta ms-center">Oops · 会议文字保存在团队服务器</p>
     </div>`;
