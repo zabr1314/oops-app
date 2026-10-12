@@ -15,6 +15,7 @@ interface OopsApi {
     suspend fun historyMinutes(id: String): org.json.JSONObject? = null
     /** GET /v1/meetings/{id}/board: the running task list, ranked P0–P3 by the server. */
     suspend fun meetingBoard(id: String): org.json.JSONObject? = null
+    suspend fun retainMeeting(request: org.json.JSONObject): org.json.JSONObject? = null
     suspend fun historyDelete(id: String): org.json.JSONObject? = null
     suspend fun historySearch(query: String): org.json.JSONObject? = null
     /** A person's correction of one sentence; null when the server does not have that meeting (yet). */

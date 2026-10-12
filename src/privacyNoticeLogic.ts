@@ -20,8 +20,9 @@ export function confirmPrivacyNotice(data: AppData, checked: boolean, now = new 
     [versionKey]: PRIVACY_NOTICE_VERSION, [acceptedAtKey]: now.toISOString()}}};
 }
 
-export function saveWelcomeChoices(data: AppData, choices: {name: string; role: string; cloud: boolean; memory: boolean}): AppData {
-  if (!privacyNoticeAccepted(data) || !choices.name.trim()) return data;
+export function saveWelcomeChoices(data: AppData, choices: {name: string; role: string; cloud: boolean; memory: boolean}, now = new Date()): AppData {
+  if (!privacyNoticeAccepted(data) || !choices.name.trim() || !Number.isFinite(now.getTime())) return data;
   return {...data, settings: {...data.settings, name: choices.name.trim(), role: choices.role.trim(),
+    retention: {...data.settings.retention, 'identity-updated-at': now.toISOString()},
     toggles: {...data.settings.toggles, cloud: choices.cloud, memory: choices.memory}}};
 }

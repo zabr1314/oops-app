@@ -57,7 +57,18 @@ class SessionIndex(
         return true
     }
 
+    @Synchronized fun discardAudio() { clips.values.forEach { java.util.Arrays.fill(it.pcm, 0) }; clips.clear(); bytes = 0 }
     @Synchronized fun get(id: String): Utterance? = items[id]
+    /** Daily mode must not keep a second full-session index beside the five-minute ring. */
+    @Synchronized fun prune(nowMs: Long, retentionMs: Long): List<String> {
+        val expired = items.values.filter { it.endMs < nowMs - retentionMs }.map { it.id }
+        expired.forEach { id ->
+            items.remove(id)?.let { removeTime(timeline, it); digestTimeline.values.forEach { index -> removeTime(index, it) } }
+            pending.remove(id); counted.remove(id)
+            clips.remove(id)?.let { bytes -= it.pcm.size }
+        }
+        return expired
+    }
     private fun removeTime(index: TreeMap<Long, LinkedHashSet<String>>, u: Utterance) {
         index[u.startMs]?.let { ids -> if (ids.remove(u.id) && ids.isEmpty()) index.remove(u.startMs) }
     }

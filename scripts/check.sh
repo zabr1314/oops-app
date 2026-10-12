@@ -42,6 +42,9 @@ python3 scripts/test_question_watch.py
 python3 scripts/test_minutes_vote.py
 python3 scripts/test_task_board.py
 python3 scripts/test_review_queue.py
+python3 scripts/test_archive_policy.py
+python3 scripts/test_backend_read_routes.py
+python3 scripts/test_minutes_review_invalidation.py
 python3 scripts/test_review_truth.py
 VOICE_PYTHON=${OOPS_VOICE_PYTHON:-"$ROOT/.venv-voice/bin/python"}
 if [ ! -x "$VOICE_PYTHON" ]; then VOICE_PYTHON=python3; fi

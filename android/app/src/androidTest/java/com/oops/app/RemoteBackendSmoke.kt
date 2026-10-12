@@ -38,6 +38,10 @@ class RemoteBackendSmoke : Instrumentation() {
 
     override fun onStart() {
         val report = Bundle()
+        if (arguments.getString("releaseReadOnly") == "true") {
+            checkReleaseReadOnly(report)
+            return
+        }
         if (arguments.getString("meetingHttp") == "true") {
             checkMeetingHttp(report)
             return
@@ -125,6 +129,37 @@ class RemoteBackendSmoke : Instrumentation() {
             finish(Activity.RESULT_CANCELED, report)
         }
     }
+    /** Installed-APK acceptance of existing cached data; no generation, capture, sync, or external writes. */
+    private fun checkReleaseReadOnly(report: Bundle) {
+        try {
+            val settings = Settings(targetContext)
+            val base = settings.backendBaseUrl.trimEnd('/')
+            check(base == "https://giftedprofessor.xyz/oops-meeting" && !settings.mockBackend)
+            val session = requireNotNull(arguments.getString("session"))
+            val http = OkHttpClient.Builder().callTimeout(25, TimeUnit.SECONDS).build()
+            val api = HttpOopsApi(http, base, settings.backendTokenFor(base))
+            runBlocking {
+                api.requireArchivePolicy()
+                val detail = requireNotNull(api.historyOpen(session))
+                check(detail.getString("session_id") == session)
+                check(detail.getString("display_title").isNotBlank())
+                val minutes = requireNotNull(api.historyMinutes(session))
+                check(minutes.getString("status") in setOf("ready", "pending", "unavailable"))
+                val board = requireNotNull(api.meetingBoard(session))
+                check(board.getString("session_id") == session && board.optJSONArray("tasks") != null)
+                report.putString("title_source", detail.getString("title_source"))
+                report.putString("minutes_status", minutes.getString("status"))
+                report.putBoolean("archive_policy_supported", true)
+                report.putBoolean("board_read", true)
+            }
+            report.putBoolean("passed", true)
+        } catch (error: Exception) {
+            report.putBoolean("passed", false)
+            report.putString("error", error.message ?: error.javaClass.simpleName)
+        }
+        finish(if (report.getBoolean("passed")) Activity.RESULT_OK else Activity.RESULT_CANCELED, report)
+    }
+
     /** Exercises native optional API/JSON parsing on the phone without microphone/ASR/Feishu writes. */
     private fun checkMeetingHttp(report: Bundle) {
         val settings = Settings(targetContext)

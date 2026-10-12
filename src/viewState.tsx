@@ -4,12 +4,23 @@ const preview=typeof window!=='undefined'&&new URLSearchParams(window.location.s
 const prefix = 'oops-view-v3:';
 const values = new Map<string, unknown>();
 const subscribers = new Map<string, Set<() => void>>();
+let volatileObjects = new Set<string>();
+const volatileKey = (key: string) => key.split(':').some(part => volatileObjects.has(part));
+
+/** Temporary daily source drafts stay in memory, including across page navigation. */
+export function setVolatileObjects(ids: string[]) {
+  volatileObjects = new Set(ids);
+  if (preview) return;
+  try {
+    for (const key of Object.keys(sessionStorage)) if (key.startsWith(prefix) && volatileKey(key.slice(prefix.length))) sessionStorage.removeItem(key);
+  } catch { /* The in-memory draft remains usable. */ }
+}
 
 function read<T>(key: string, initial: T | (() => T)): T {
   if (values.has(key)) return values.get(key) as T;
   let value = typeof initial === 'function' ? (initial as () => T)() : initial;
   try {
-    const saved = preview ? null : sessionStorage.getItem(prefix + key);
+    const saved = preview || volatileKey(key) ? null : sessionStorage.getItem(prefix + key);
     if (saved !== null) value = JSON.parse(saved) as T;
   } catch { /* An unavailable browser store must not block drafting. */ }
   values.set(key, value);
@@ -32,7 +43,7 @@ export function useViewState<T>(key: string, initial: T | (() => T)): [T, Dispat
     const updated = typeof next === 'function' ? (next as (previous: T) => T)(current) : next;
     if (Object.is(current, updated)) return;
     values.set(key, updated);
-    try { if(!preview)sessionStorage.setItem(prefix + key, JSON.stringify(updated)); } catch { /* Keep the in-memory draft. */ }
+    try { if(!preview && !volatileKey(key))sessionStorage.setItem(prefix + key, JSON.stringify(updated)); } catch { /* Keep the in-memory draft. */ }
     subscribers.get(key)?.forEach(listener => listener());
   }, [key]);
   return [value, setValue];

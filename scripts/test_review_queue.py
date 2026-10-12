@@ -13,6 +13,16 @@ ROWS = [dict(id="u1", text="那你等我一下我马上回来", tag="commitment"
 
 
 class ReviewQueueTest(unittest.TestCase):
+    def test_title_priority_keeps_manual_and_agenda_ahead_of_minutes(self):
+        from meeting_features import meeting_title
+        row = dict(title='人工名', agenda={'goal':'议程'}, auto_title={'title':'旧自动名'})
+        self.assertEqual(('人工名', 'manual'), meeting_title(row, '纪要'))
+        row.pop('title')
+        self.assertEqual(('议程', 'agenda'), meeting_title(row, '纪要'))
+        row['agenda'] = {}
+        self.assertEqual(('纪要', 'minutes'), meeting_title(row, '纪要'))
+        self.assertEqual(('旧自动名', 'generated'), meeting_title(row))
+
     def test_without_minutes_every_tagged_line_and_unknown_speaker_is_checked(self):
         kinds = [(q["kind"], q["id"]) for q in review_queue(ROWS)]
         self.assertIn(("commitment", "u1"), kinds)

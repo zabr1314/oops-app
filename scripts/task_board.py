@@ -11,6 +11,7 @@ one batch at a time, and each board is saved under <state>/boards/<session>.json
 """
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -87,8 +88,9 @@ class Boards:
 
     SESSION = re.compile(r"[A-Za-z0-9_-]{8,80}")
 
-    def __init__(self, folder, model, log=print):
+    def __init__(self, folder, model, log=print, source_rows=None):
         self.folder, self.model, self.log = folder, model, log
+        self.source_rows = source_rows
         os.makedirs(folder, mode=0o700, exist_ok=True)
         self.lock = threading.Lock()
         self.queues, self.running = {}, set()
@@ -104,15 +106,49 @@ class Boards:
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 saved = json.load(f)
+        if self.source_rows:
+            hashes = self._hashes(sid)
+            if hashes is None:
+                self.discard(sid)
+                saved = {}
+            else:
+                old_tasks = saved.get('tasks', [])
+                saved['tasks'] = [t for t in old_tasks if t.get('sources') and
+                    all(i in hashes and saved.get('source_hashes', {}).get(i) == hashes[i] for i in t['sources'])]
+                if saved['tasks'] != old_tasks:
+                    saved['updated_at'] = 'source-changed-' + hashlib.sha256(json.dumps(
+                        saved['tasks'], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         with self.lock:
             pending = sid in self.running or bool(self.queues.get(sid))
         return dict(session_id=sid, tasks=saved.get("tasks", []), updated_at=saved.get("updated_at"), pending=pending)
+
+    def _hashes(self, sid):
+        rows = self.source_rows(sid)
+        return None if rows is None else {u['id']: hashlib.sha256(json.dumps(
+            {k: u.get(k) for k in ('text', 'speaker', 'review')}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            for u in rows}
+
+    def discard(self, sid):
+        with self.lock:
+            self.queues.pop(sid, None)
+            try:
+                os.unlink(self.path(sid))
+            except FileNotFoundError:
+                pass
+
+    def cleanup(self):
+        if self.source_rows:
+            for name in os.listdir(self.folder):
+                if name.endswith('.json'):
+                    self.view(name[:-5])
 
     def submit(self, sid, drafts, context):
         """drafts: [{what, owner, source}] from one sentence; context: the lines around it [{id, text, speaker}]."""
         self.path(sid)
         if not drafts or not self.model:
             return
+        if self.source_rows and self._hashes(sid) is None:
+            return  # temporary daily processing is never a persistent meeting board
         with self.lock:
             self.queues.setdefault(sid, []).append((drafts, context))
             if sid in self.running:
@@ -136,13 +172,21 @@ class Boards:
                             seen.add(u["id"])
                             context.append(u)
                 try:
+                    hashes = self._hashes(sid) if self.source_rows else None
+                    current_rows = self.source_rows(sid) if self.source_rows else None
+                    current = {u['id']: u for u in current_rows or []}
+                    if self.source_rows and (hashes is None or any(d['source'] not in hashes for d in drafts)
+                            or any(u['id'] not in current or u['text'] != current[u['id']]['text'] for u in context)):
+                        continue
                     board = update(self.model, self.view(sid)["tasks"], drafts, context[-CONTEXT_LINES * 2:])
                 except Exception as error:  # noqa: BLE001 - the drafts stay in the minutes; the board just misses them
                     self.log(f"task board {sid[:8]} update failed: {type(error).__name__}: {str(error)[:120]}")
                     continue
+                if self.source_rows and self._hashes(sid) != hashes:
+                    continue  # expiry/deletion/correction during generation withdraws this result
                 path = self.path(sid)
                 with open(path + ".tmp", "w", encoding="utf-8") as f:
-                    json.dump(dict(session_id=sid, tasks=board, updated_at=dt.datetime.now(dt.timezone.utc).isoformat()),
+                    json.dump(dict(session_id=sid, tasks=board, source_hashes=hashes or {}, updated_at=dt.datetime.now(dt.timezone.utc).isoformat()),
                               f, ensure_ascii=False, indent=1)
                 os.chmod(path + ".tmp", 0o600)
                 os.replace(path + ".tmp", path)

@@ -27,6 +27,10 @@ class NoticeTracker(@Volatile var agenda: Agenda = Agenda()) {
     @Volatile var tracking: String = "waiting"
     private val notices = mutableListOf<Notice>()
     @Synchronized fun list() = notices.toList()
+    /** Daily content, including quoted conflict notices, has the same five-minute lifetime. */
+    @Synchronized fun prune(beforeMs: Long, availableIds: Set<String>): Boolean = notices.removeAll {
+        it.atMs < beforeMs || it.evidenceIds.any { id -> id !in availableIds }
+    }
     @Synchronized fun state(now: Long): JSONObject {
         advance(now)
         return agenda.bridge(coverage, currentItemId, tracking)

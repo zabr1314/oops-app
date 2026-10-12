@@ -45,7 +45,8 @@ export function buildReviewItems(session: Session, previous: SessionReviewItem[]
   const questions = draft.questions.split('\n').map(text => text.trim()).filter(Boolean);
   const mode = reviewDraftSourceMode(draft);
   if (!conclusions.length && !questions.length) return { error: '写下一条结论或一个未决问题' };
-  if (mode === 'selected' && !session.transcript.some(turn => turn.id === draft.sourceId)) return { error: '所选来源已变化，请重新选择或改为人工整理' };
+  const available = [...session.transcript, ...(session.savedEvidence || [])];
+  if (mode === 'selected' && !available.some(turn => turn.id === draft.sourceId)) return { error: '所选来源已变化，请重新选择或改为人工整理' };
   const make = (text: string, kind: SessionReviewItem['kind'], index: number): SessionReviewItem => {
     // Reordering or rewriting a line cannot inherit another line's citation.
     const matches = previous.filter(item => item.kind === kind && item.text.trim() === text);
@@ -53,7 +54,7 @@ export function buildReviewItems(session: Session, previous: SessionReviewItem[]
     return { id: makeId(kind, index), kind, text, confirmed: true, shared: false, ...(sourceId !== undefined ? { sourceId } : {}) };
   };
   const items = [...conclusions.map((text, index) => make(text, 'conclusion', index)), ...questions.map((text, index) => make(text, 'question', index))];
-  if (items.some(item => item.sourceId !== undefined && !session.transcript.some(turn => turn.id === item.sourceId))) return { error: '旧引用已移除，请选择当前原话或明确改为人工整理' };
+  if (items.some(item => item.sourceId !== undefined && !available.some(turn => turn.id === item.sourceId))) return { error: '旧引用已移除，请选择当前原话或明确改为人工整理' };
   return { items, conclusions, questions };
 }
 

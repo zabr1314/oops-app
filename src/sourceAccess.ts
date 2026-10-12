@@ -14,7 +14,7 @@ export function sessionVisible(data: AppData, id: string, space = data.settings.
 export function sourceTurn(data: AppData, pointer: SourcePointer): Transcript | undefined {
   const session = data.sessions.find(s => s.id === pointer.sourceSession);
   if (!session) return undefined;
-  if (pointer.sourceId !== undefined) return pointer.sourceId ? session.transcript.find(t => t.id === pointer.sourceId) : undefined;
+  if (pointer.sourceId !== undefined) return pointer.sourceId ? [...session.transcript, ...(session.savedEvidence || [])].find(t => t.id === pointer.sourceId) : undefined;
   const matches = pointer.sourceTime ? session.transcript.filter(t => t.time === pointer.sourceTime) : [];
   return matches.length === 1 ? matches[0] : undefined;
 }
@@ -24,8 +24,9 @@ export function sourceAvailable(data: AppData, pointer: SourcePointer, options: 
   const session = data.sessions.find(s => s.id === pointer.sourceSession);
   if (!session) return false;
   if (options.requireShared && !sessionVisible(data, session.id, options.space || data.settings.space)) return false;
+  const available = [...session.transcript, ...(session.savedEvidence || []).filter(t => !session.transcript.some(raw => raw.id === t.id))];
   const turns = pointer.sourceId !== undefined
-    ? session.transcript.filter(t => !!pointer.sourceId && t.id === pointer.sourceId)
+    ? available.filter(t => !!pointer.sourceId && t.id === pointer.sourceId)
     : pointer.sourceTime ? session.transcript.filter(t => t.time === pointer.sourceTime) : session.transcript;
   if (pointer.sourceId !== undefined && turns.length !== 1 || pointer.sourceId === undefined && pointer.sourceTime && turns.length !== 1) return false;
   // A legacy whole-session citation cannot prove it excluded a private passage.
@@ -170,14 +171,16 @@ export function findSourceTask(data: AppData, pointer: SourcePointer): Task | un
   if (!pointer.sourceSession || pointer.sourceId === undefined && !pointer.sourceTime) return undefined;
   const turn = sourceTurn(data, pointer);
   if (!turn) return undefined;
-  return data.tasks.find(t => !['已拒绝', '已取消'].includes(t.status) && t.sourceSession === pointer.sourceSession && (t.sourceId !== undefined ? t.sourceId === turn.id : !!sourceTurn(data, t) && t.sourceTime === turn.time));
+  const canonicalId = (id: string) => id.replace(/^evidence-/, '');
+  return data.tasks.find(t => !['已拒绝', '已取消'].includes(t.status) && t.sourceSession === pointer.sourceSession && (t.sourceId !== undefined ? canonicalId(t.sourceId) === canonicalId(turn.id) : !!sourceTurn(data, t) && t.sourceTime === turn.time));
 }
 
 /** Invalidate derivations only; callers own the actual edit/delete/share mutation. */
-export function invalidateSessionSources(data: AppData, sessionId: string, sourceIds?: string[], reason = '来源已变化'): AppData {
+export function invalidateSessionSources(data: AppData, sessionId: string, sourceIds?: string[], reason = '来源已变化', preserveEvidence = false): AppData {
   const ids = sourceIds === undefined ? undefined : new Set(sourceIds);
   if (ids?.size === 0) return data;
   const session = data.sessions.find(s => s.id === sessionId);
+  if (ids && !preserveEvidence) for (const quote of session?.savedEvidence || []) if (ids.has(quote.id.replace(/^evidence-/, ''))) ids.add(quote.id);
   const affectedTimes = new Set(session?.transcript.filter(t => ids?.has(t.id)).map(t => t.time));
   const missingIds = !!ids && [...ids].some(id => !session?.transcript.some(t => t.id === id));
   function affected(pointer: SourcePointer): boolean {
@@ -200,13 +203,17 @@ export function invalidateSessionSources(data: AppData, sessionId: string, sourc
     });
   }
   const retention = { ...data.settings.retention, ['session-review-invalidated:' + sessionId]: reason };
-  delete retention['session-reviewed:' + sessionId];
+  let reviewAffected = true;
+  try { const rows = JSON.parse(data.settings.retention['session-review-items:' + sessionId] || '[]'); reviewAffected = Array.isArray(rows) && rows.some(row => row.confirmed && (!preserveEvidence || row.sourceId !== undefined) && affected({ sourceSession: sessionId, sourceId: row.sourceId })); } catch { /* Keep malformed reviews conservative. */ }
+  const needsReview = !preserveEvidence || taskIds.size > 0 || memoryIds.size > 0 || reviewAffected;
+  if (needsReview) delete retention['session-reviewed:' + sessionId];
   taskIds.forEach(id => { retention['task-space:' + id] = PERSONAL_SPACE; });
   const activitiesAt = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   return { ...data,
+    sessions: preserveEvidence || !ids ? data.sessions : data.sessions.map(s => s.id === sessionId ? { ...s, savedEvidence: s.savedEvidence?.filter(t => !ids.has(t.id)) } : s),
     tasks: data.tasks.map(task => taskIds.has(task.id) ? { ...task, authorized: false, generationToken: undefined, generationSnapshot: undefined, generationSources: undefined, sourceNeedsReview: true, needsReview: true, version: task.version + 1, aiStatus: task.aiStatus === '未启动' ? '未启动' : '待授权', artifacts: retainedArtifacts(task)?.map(a => affected(task) || fromReferences(task.sources) || artifactAffected(a, task) || !task.artifacts?.length ? { ...a, needsReview: true, sourceNeedsReview: true, reviewHistory: a.reviewedAt ? [...(a.reviewHistory || []), { version: a.version, reviewedAt: a.reviewedAt }] : a.reviewHistory, reviewedAt: undefined } : a), materialRefs: task.materialRefs?.map(m => affected(m) || !!m.memoryId && memoryIds.has(m.memoryId) ? { ...m, needsReview: true } : m), activities: [...task.activities, `${activitiesAt} · ${reason}；旧成果保留待复核，助手授权撤回`] } : task),
     memories: data.memories.map(memory => memoryIds.has(memory.id) ? { ...memory, confirmed: false, needsReview: true, visibility: '私有', tags: [...new Set([...memory.tags, '待复核'])] } : memory),
     messages: data.messages.map(message => message.role === 'assistant' && (message.sourceSession === sessionId && !message.sources?.length || fromReferences(message.sources)) ? { ...message, invalidated: true, text: '这条回答的来源已变化，请重新核对后提问。' } : message),
-    settings: { ...data.settings, retention, toggles: { ...data.settings.toggles, ['review-' + sessionId]: true } },
+    settings: { ...data.settings, retention, toggles: { ...data.settings.toggles, ['review-' + sessionId]: data.settings.toggles['review-' + sessionId] === true || needsReview } },
   };
 }

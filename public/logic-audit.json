@@ -1,17 +1,21 @@
 {
-  "revision": "feedback-p0-gaps-20261012",
+  "revision": "p0-storage-team-20261012",
   "reviewedAt": "2026-10-12",
-  "scope": "三项P0前端补齐：未知人物线索前置、来源绑定事实重点、首次使用隐私说明确认",
+  "scope": "两项定稿P0：日常/会议保存策略、团队入口收敛；沿用原生与后端链路，公开网站保持隔离示例",
   "browserVerified": true,
   "changedViews": [
-    "welcome",
-    "settings-privacy",
-    "memory",
-    "memory-person",
-    "memory-unknown",
-    "memory-voice",
+    "home",
+    "memory-project",
+    "session-create",
     "session-detail",
-    "session-transcript"
+    "session-listening",
+    "session-mode",
+    "settings",
+    "settings-listening",
+    "settings-members",
+    "settings-retention",
+    "settings-sharing",
+    "settings-spaces"
   ],
   "screenshotRefreshPending": false,
   "fixedIssueGroups": 10,
@@ -22,33 +26,48 @@
     "total": 29
   },
   "verification": {
-    "logicTestsPassed": 231,
-    "newLogicTests": 27,
+    "logicTestsPassed": 297,
+    "newLogicTests": 26,
     "boardTestsPassed": 6,
     "hostingTestsPassed": 4,
     "protectedRuntimeFiles": 28,
-    "nativeUITestEntriesPassed": 20,
+    "nativeUITestEntriesPassed": 37,
     "backendMeetingTestsPassed": 15,
-    "screenshotsCaptured": 162,
-    "interactiveEntries": 185,
+    "screenshotsCaptured": 182,
+    "interactiveEntries": 205,
     "backendSourceChangeTestsPassed": 12,
     "backendFakeFeishuTestsPassed": 11,
     "nativePreviewTestsPassed": 7,
     "backendReadRouteTestsPassed": 6,
-    "screenshotsRefreshedThisRound": 13
+    "screenshotsRefreshedThisRound": 24,
+    "screenshotsAddedThisRound": 8,
+    "logicTestEvidence": "work/p0-storage-team-20261012/web-logic-final.log",
+    "screenshotEvidence": "work/p0-storage-team-20261012/capture-results.json",
+    "kotlinLogicTestsPassed": 43,
+    "backendStorageRegressionTestsPassed": 60,
+    "newBackendStorageTests": 21
   },
   "nativeFlow": {
     "entry": "native-flow.html",
     "mode": "isolated-browser-mock",
     "source": "android/app/src/main/assets/web",
     "sourceFiles": 85,
-    "stateScreenshots": 6,
+    "stateScreenshots": 8,
     "browserVerified": true,
     "apkBuilt": false,
-    "kotlinTestsRun": false,
-    "realBackendDeployed": false
+    "kotlinTestsRun": true,
+    "realBackendDeployed": false,
+    "kotlinLogicTestsPassed": 43
   },
   "onlineBrowserVerified": false,
   "browserVerificationMode": "local-preview",
-  "onlineVerificationLimit": "公开站点受保存的浏览器权限设置限制，本轮完成本地操作截图与原生发布确认，不声称线上实屏验收。"
+  "onlineVerificationLimit": "公开站点受保存的浏览器权限设置限制，本轮完成本地实际操作截图；网站发布确认另行记录，不声称线上实屏验收。",
+  "verificationBoundary": "本地React真实操作与截图；Sites发布状态单独核对，公开站浏览器访问受保存设置限制。Android H5及存储JVM用例已验证，未安装APK或部署真实服务。",
+  "p0StorageTeam": {
+    "daily": "5分钟完整临时缓冲，停止/刷新不留全文归档",
+    "meeting": "明确云保存，新会议原音/全文分别7/30/90天默认30，不追溯历史",
+    "team": "主入口收敛，项目/对象共享/范围绑定保留",
+    "screenshotsRefreshed": 24,
+    "newStates": 8
+  }
 }

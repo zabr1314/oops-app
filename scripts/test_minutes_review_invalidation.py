@@ -82,6 +82,17 @@ def test_same_review_and_clearing_absent_fields_leave_current_cache_ready():
     assert resolver.asked == RUNS and calls == []
 
 
+def test_source_change_withdraws_minutes_title_but_keeps_review_citations():
+    actions, meetings, calls, _ = fixture()
+    analysis = actions.state.get('meetings', 's', 'analysis')
+    actions.state.put(dict(analysis, theme='周五样片评审'), 'meetings', 's', 'analysis')
+    meetings.cited = actions.cited_sentences
+    assert meetings.load('s')['title_source'] == 'minutes'
+    review(actions, owner='江古月')
+    assert meetings.load('s')['title_source'] != 'minutes'
+    assert actions.cited_sentences('s')['tasks'] == {'u1'}
+
+
 def test_review_during_model_generation_keeps_result_as_history_and_never_sends_it():
     actions, meetings, calls, resolver = fixture(generate=False)
     complete = resolver.complete_json

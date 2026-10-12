@@ -39,6 +39,50 @@ class UpdateTest(unittest.TestCase):
 
 
 class BoardsTest(unittest.TestCase):
+    def test_temporary_daily_context_is_never_sent_to_board_model_or_saved(self):
+        import tempfile
+        from pathlib import Path
+        class Never:
+            def complete_json(self, *args, **kwargs):
+                raise AssertionError('daily board generation must not run')
+        with tempfile.TemporaryDirectory() as folder:
+            boards = tb.Boards(folder, Never(), source_rows=lambda sid: None)
+            boards.submit('daily-0001', [dict(what='列 P0', source='u8')], CONTEXT)
+            self.assertEqual([], boards.view('daily-0001')['tasks'])
+            self.assertEqual([], list(Path(folder).iterdir()))
+
+    def test_expiry_or_correction_during_generation_cannot_save_a_late_board(self):
+        import tempfile
+        from pathlib import Path
+        for expired in (False, True):
+            rows = list(CONTEXT)
+            class Changed:
+                def complete_json(self, *args, **kwargs):
+                    rows.clear()
+                    if not expired: rows.extend([dict(CONTEXT[0]), dict(CONTEXT[1], text='先不用做了')])
+                    return {'tasks':[dict(id='new',what='列 P0',priority='P0',sources=['u8'])]}, 'fake'
+            with tempfile.TemporaryDirectory() as folder:
+                boards = tb.Boards(folder, Changed(), source_rows=lambda sid: rows or None)
+                boards.queues['sess-0001'] = [([dict(what='列 P0', source='u8')], CONTEXT)]
+                boards.running.add('sess-0001')
+                boards._work('sess-0001')
+                self.assertEqual([], list(Path(folder).iterdir()))
+
+    def test_saved_board_withdraws_changed_sources_and_is_deleted_after_expiry(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        rows = list(CONTEXT)
+        with tempfile.TemporaryDirectory() as folder:
+            boards = tb.Boards(folder, None, source_rows=lambda sid: rows or None)
+            path = Path(boards.path('sess-0001'))
+            path.write_text(json.dumps(dict(tasks=[dict(what='列 P0', sources=['u8'])],source_hashes=boards._hashes('sess-0001'))))
+            self.assertEqual(1, len(boards.view('sess-0001')['tasks']))
+            rows[1] = dict(rows[1], review={'verdict':'rejected'})
+            self.assertEqual([], boards.view('sess-0001')['tasks'])
+            rows.clear(); boards.cleanup()
+            self.assertFalse(path.exists())
+
     def test_drafts_are_folded_in_on_a_background_thread_and_saved(self):
         import tempfile
         import time

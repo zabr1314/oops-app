@@ -9,11 +9,13 @@ import datetime as dt
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
 import threading
 import wave
+from archive_policy import ArchivePolicyError, policy_from_request, expired, require_live
 
 FILES = {"audio.pcm": 4_000_000_000, "finals.jsonl": 200_000_000, "asr.jsonl": 1_000_000_000,
          "timing.jsonl": 200_000_000, "meta.json": 100_000}
@@ -21,6 +23,7 @@ CHUNK_LIMIT = 1_100_000
 CLIP_LIMIT_MS, CLIP_PAD_MS = 30_000, 300
 BYTES_PER_MS = 32  # 16 kHz mono s16le; byte 0 of audio.pcm is session time 0
 SESSION = re.compile(r"[A-Za-z0-9-]{8,80}")
+TRANSCRIPT_FILES = {'finals.jsonl', 'asr.jsonl', 'timing.jsonl', 'meta.json'}
 
 
 class RecordingError(ValueError):
@@ -47,12 +50,62 @@ def _write_json(path, value):
     os.replace(temp, path)
 
 
+def _read_json(path):
+    with open(path, encoding='utf-8') as source:
+        return json.load(source)
+
+
 class Recordings:
-    def __init__(self, directory, deleted=lambda sid: False):
+    def __init__(self, directory, deleted=lambda sid: False, policies=None, require_storage_policy=False):
         self.root, self.deleted = directory, deleted
+        self.policies, self.require_storage_policy = policies, require_storage_policy
         os.makedirs(directory, mode=0o700, exist_ok=True)
         os.chmod(directory, 0o700)
         self.lock = threading.RLock()
+
+    def _live(self, policy, asset, manifest=None):
+        if manifest and manifest.get(asset + '_expired_at'):
+            raise RecordingError(410, '本场会议资产已过保留期', asset=asset,
+                                 expires_at=manifest[asset + '_expired_at'])
+        try:
+            require_live(policy, asset)
+        except ArchivePolicyError as error:
+            raise RecordingError(error.status, str(error), **error.extra) from None
+
+    def _expire(self, sid, now=None):
+        """Leave a metadata tombstone so a late upload can never recreate expired files."""
+        folder = self.folder(sid)
+        path = os.path.join(folder, 'manifest.json')
+        if not os.path.isfile(path): return 0
+        manifest = self._manifest(sid)
+        policy = manifest.get('storage_policy')
+        if not policy: return 0
+        removed, changed = 0, False
+        for asset, names in (('audio', {'audio.pcm'}), ('transcript', TRANSCRIPT_FILES)):
+            if expired(policy, asset, now):
+                for name in names:
+                    target = os.path.join(folder, name)
+                    if os.path.isfile(target): os.unlink(target); removed += 1
+                key = asset + '_expired_at'
+                if key not in manifest:
+                    manifest[key] = policy[asset + '_expires_at']; changed = True
+        if changed:
+            # A diagnostic metadata value must not become a hidden transcript after expiry.
+            manifest['meta'] = {k: v for k, v in manifest.get('meta', {}).items()
+                                if k in ('session_id', 'source', 'started_at', 'audio_ended_at', 'bytes', 'capped')}
+            _write_json(path, manifest)
+        return removed
+
+    def cleanup(self, now=None):
+        removed = 0
+        with self.lock:
+            for sid in os.listdir(self.root):
+                if SESSION.fullmatch(sid) and os.path.isdir(os.path.join(self.root, sid)):
+                    try:
+                        removed += self._expire(sid, now)
+                    except (OSError, ValueError, KeyError, TypeError):
+                        logging.getLogger(__name__).warning('Skipped unreadable recording metadata: %s', sid)
+        return removed
 
     def folder(self, sid):
         if not isinstance(sid, str) or not SESSION.fullmatch(sid):
@@ -63,7 +116,7 @@ class Recordings:
         path = os.path.join(self.folder(sid), "manifest.json")
         if not os.path.isfile(path):
             raise RecordingError(409, "请先提交文件清单")
-        return json.load(open(path, encoding="utf-8"))
+        return _read_json(path)
 
     def meta(self, sid):
         """What the phone said about the recording (strings, as declared in the manifest)."""
@@ -91,10 +144,21 @@ class Recordings:
             if self.deleted(sid):
                 raise RecordingError(410, "该会议已删除，不再接收录音")
             folder = self.folder(sid)
+            manifest_path = os.path.join(folder, 'manifest.json')
+            old = self._manifest(sid) if os.path.isfile(manifest_path) else {}
+            try:
+                policy = (self.policies.accept(sid, body, legacy=bool(old) and not old.get('storage_policy')) if self.policies else
+                          policy_from_request(body, old.get('storage_policy'), bool(old) and not old.get('storage_policy'), self.require_storage_policy))
+            except ArchivePolicyError as error:
+                raise RecordingError(error.status, str(error), **error.extra) from None
+            self._expire(sid)
+            self._live(policy, 'audio', old)
+            if any(name in TRANSCRIPT_FILES for name in declared): self._live(policy, 'transcript', old)
             os.makedirs(folder, mode=0o700, exist_ok=True)
             done = os.path.join(folder, "complete.json")
-            if os.path.isfile(done) and json.load(open(done, encoding="utf-8"))["files"] == declared:
-                return {"session_id": sid, "complete": True, "received": {n: f["size"] for n, f in declared.items()}}
+            if os.path.isfile(done) and _read_json(done)["files"] == declared:
+                return {"session_id": sid, "complete": True, "storage_policy": policy,
+                        "received": {n: f["size"] for n, f in declared.items()}}
             for name in os.listdir(folder):  # a changed manifest restarts any file that no longer fits
                 if name in FILES and (name not in declared or self._received(folder, name) > declared[name]["size"]):
                     os.unlink(os.path.join(folder, name))
@@ -102,9 +166,13 @@ class Recordings:
                 os.unlink(done)
             _write_json(os.path.join(folder, "manifest.json"), {
                 "session_id": sid, "files": declared, "format": "pcm_s16le_16000_mono",
-                "meta": {k: str(v)[:200] for k, v in list(meta.items())[:20]},
+                "storage_policy": policy,
+                **{key: old[key] for key in ('audio_expired_at', 'transcript_expired_at') if key in old},
+                "meta": {k: str(v)[:200] for k, v in list(meta.items())[:20]
+                         if not any(key in old for key in ('audio_expired_at', 'transcript_expired_at'))
+                         or k in ('session_id', 'source', 'started_at', 'audio_ended_at', 'bytes', 'capped')},
                 "declared_at": dt.datetime.now(dt.timezone.utc).isoformat()})
-            return {"session_id": sid, "complete": False,
+            return {"session_id": sid, "complete": False, "storage_policy": policy,
                     "received": {name: self._received(folder, name) for name in declared}}
 
     def chunk(self, sid, name, offset, data, sha):
@@ -115,7 +183,10 @@ class Recordings:
         with self.lock:
             if self.deleted(sid):
                 raise RecordingError(410, "该会议已删除，不再接收录音")
-            declared = self._manifest(sid)["files"].get(name)
+            self._expire(sid)
+            manifest = self._manifest(sid)
+            self._live(manifest.get('storage_policy'), 'audio' if name == 'audio.pcm' else 'transcript', manifest)
+            declared = manifest["files"].get(name)
             if declared is None:
                 raise RecordingError(400, "清单里没有这个文件")
             folder = self.folder(sid)
@@ -134,7 +205,11 @@ class Recordings:
 
     def complete(self, sid):
         with self.lock:
+            if self.deleted(sid): raise RecordingError(410, '该会议已删除，不再接收录音')
+            self._expire(sid)
             manifest = self._manifest(sid)
+            self._live(manifest.get('storage_policy'), 'audio', manifest)
+            if any(name in TRANSCRIPT_FILES for name in manifest['files']): self._live(manifest.get('storage_policy'), 'transcript', manifest)
             folder = self.folder(sid)
             for name, declared in manifest["files"].items():
                 path = os.path.join(folder, name)
@@ -149,15 +224,25 @@ class Recordings:
             return dict(record, complete=True)
 
     def status(self, sid):
+        with self.lock:
+            return self._status(sid)
+
+    def _status(self, sid):
+        if self.deleted(sid): raise RecordingError(410, '该会议已删除')
+        self._expire(sid)
         folder = self.folder(sid)
         if not os.path.isdir(folder):
             raise RecordingError(404, "没有这场会议的录音")
         done = os.path.join(folder, "complete.json")
-        if os.path.isfile(done):
-            return dict(json.load(open(done, encoding="utf-8")), complete=True)
         manifest = self._manifest(sid)
-        return {"session_id": sid, "complete": False,
-                "received": {name: self._received(folder, name) for name in manifest["files"]}}
+        policy = manifest.get('storage_policy')
+        assets = {asset: ('expired' if manifest.get(asset + '_expired_at') or expired(policy, asset) else 'available' if
+                   any(self._received(folder, n) for n in names) else 'pending')
+                  for asset, names in (('audio', {'audio.pcm'}), ('transcript', {'finals.jsonl', 'asr.jsonl'}))}
+        result = (dict(_read_json(done), complete=True) if os.path.isfile(done) else
+                  {'session_id': sid, 'complete': False, 'received': {name: self._received(folder, name) for name in manifest['files']}})
+        return dict(result, storage_policy=policy, assets=assets,
+                    expires_at={asset: policy[asset + '_expires_at'] for asset in ('audio', 'transcript')} if policy else {})
 
     def clip(self, sid, start_ms, end_ms):
         """WAV of one sentence from the archived audio, for listening back after the phone has moved on."""
@@ -166,6 +251,10 @@ class Recordings:
             raise RecordingError(400, f"片段时间无效或超过 {CLIP_LIMIT_MS // 1000} 秒")
         path = os.path.join(self.folder(sid), "audio.pcm")
         with self.lock:
+            self._expire(sid)
+            if os.path.isfile(os.path.join(self.folder(sid), 'manifest.json')):
+                manifest = self._manifest(sid)
+                self._live(manifest.get('storage_policy'), 'audio', manifest)
             if self.deleted(sid) or not os.path.isfile(path):
                 raise RecordingError(404, "服务器上还没有这场会议的录音")
             size = os.path.getsize(path)

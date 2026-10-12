@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit
  */
 class SessionRecorder(dir: File, val sessionId: String, private val meta: JSONObject,
                       private val maxBytes: Long = 3L * 3600 * 32000) {
+    init { RecordingPolicy.fromMeta(meta) } // rejects unconfirmed/new daily archives before any file is opened
     private val pcmFile = File(dir.apply { mkdirs() }, "$sessionId.pcm")
     private val finalsFile = File(dir, "$sessionId.finals.jsonl")
     private val asrFile = File(dir, "$sessionId.asr.jsonl")
@@ -42,6 +43,7 @@ class SessionRecorder(dir: File, val sessionId: String, private val meta: JSONOb
     fun audio(pcm: ByteArray) {
         synchronized(audioLock) {
             val stream = out ?: return
+            if (meta.has("recording_mode") && RecordingExpiry.expired(meta, "audio")) return closeAudioLocked()
             if (bytes + pcm.size > maxBytes) {
                 capped = true
                 return closeAudioLocked()
@@ -87,7 +89,8 @@ class SessionRecorder(dir: File, val sessionId: String, private val meta: JSONOb
         runCatching { stream.flush() }
         runCatching { stream.close() }
         runCatching {
-            metaFile.writeText(JSONObject(meta.toString()).put("audio_ended_at", Instant.now().toString())
+            val current = runCatching { JSONObject(metaFile.readText()) }.getOrDefault(JSONObject(meta.toString()))
+            metaFile.writeText(current.put("audio_ended_at", Instant.now().toString())
                 .put("bytes", bytes).put("capped", capped).toString(2))
         }
     }
@@ -107,7 +110,9 @@ class SessionRecorder(dir: File, val sessionId: String, private val meta: JSONOb
     }
 
     private fun append(file: File, line: String) {
-        IO.execute { runCatching { file.appendText(line + "\n") } }
+        IO.execute { runCatching {
+            if (!meta.has("recording_mode") || !RecordingExpiry.expired(meta, "transcript")) file.appendText(line + "\n")
+        } }
     }
 
     companion object {
@@ -120,8 +125,9 @@ class SessionRecorder(dir: File, val sessionId: String, private val meta: JSONOb
          */
         fun prune(dir: File, keep: String?, nowMs: Long = System.currentTimeMillis(),
                   maxAgeMs: Long = 7L * 24 * 3600 * 1000, maxBytes: Long = 2L * 1024 * 1024 * 1024): List<String> {
+            RecordingExpiry.prune(dir, keep, nowMs)
             val sessions = dir.listFiles().orEmpty().groupBy { it.name.substringBefore('.') }
-                .filterKeys { it != keep }
+                .filterKeys { id -> id != keep && runCatching { !JSONObject(File(dir, "$id.json").readText()).has("recording_mode") }.getOrDefault(true) }
                 .filterValues { files -> files.any { it.name.endsWith(".uploaded") } }
                 .map { (id, files) -> Triple(id, files, files.maxOf { it.lastModified() }) }
                 .sortedBy { it.third }

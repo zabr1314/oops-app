@@ -36,11 +36,11 @@ test('welcome saves only explicit choices after acknowledgement, preserving voic
   const accepted=confirmPrivacyNotice(initialData(),true,now);
   accepted.settings.toggles.ownVoiceShare=false;
   const before=structuredClone(accepted);
-  const result=saveWelcomeChoices(accepted,choices);
+  const result=saveWelcomeChoices(accepted,choices,now);
   assert.equal(result.settings.name,'新称呼');assert.equal(result.settings.role,'设计师');
   assert.equal(result.settings.toggles.cloud,false);assert.equal(result.settings.toggles.memory,true);
   assert.deepEqual(result.settings.toggles,{...before.settings.toggles,cloud:false,memory:true});
-  assert.deepEqual(result.settings.retention,before.settings.retention);
+  assert.deepEqual(result.settings.retention,{...before.settings.retention,'identity-updated-at':now.toISOString()});
   assert.deepEqual(accepted,before);
 });
 test('an old notice version or invalid confirmation timestamp requires a fresh acknowledgement',()=>{

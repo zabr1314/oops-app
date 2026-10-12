@@ -30,7 +30,7 @@
     ownerEdits: new Map(), // manual selections remain visible when model hints refresh
     summary: {}, notices: new Map(), activeNotices: [],
     sheet: null, card: null, draft: null,
-    playingKey: null, loadingKey: null, latency: null, autoScroll: true,
+    playingKey: null, loadingKey: null, latency: null, autoScroll: true, dailyCandidates: [],
     voiceprintName: '', voiceprintDelete: null,
     team: [],
     route: { name: 'home' },
@@ -39,7 +39,7 @@
     tasks: { mine: true, status: 'open', items: null, query: '', cache: new Map() }, openTaskCount: 0,
     homeTasks: null, homeTasksState: { loading: false, error: null },
     requests: { history: {}, projects: {}, project: {}, tasks: {} }, pendingMeetingId: null, meetingRequest: null,
-    minutes: new Map(), minutesRequest: 0, remoteEpoch: null,
+    minutes: new Map(), minutesRequest: 0, remoteEpoch: null, pendingRetention: null, retentionRequest: 0,
     projects: { items: null, open: null, section: 'decisions' }, liveProject: null,
     review: null, pendingReview: null, sessionsQuery: '',
   };
@@ -117,8 +117,8 @@
   };
 
   function handle(type, p) {
-    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'speaker.corrected', 'review.saved', 'tasks.list'].includes(type)
-      || type === 'error' && ['history', 'minutes', 'projects', 'review', 'tasks'].includes(p.scope);
+    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'tasks.list'].includes(type)
+      || type === 'error' && ['history', 'minutes', 'projects', 'review', 'tasks', 'retention'].includes(p.scope);
     if (remote) {
       if ('backendUrl' in p && S.state.backendUrl !== undefined && p.backendUrl !== S.state.backendUrl) return;
       if (p.serviceEpoch !== undefined && S.remoteEpoch !== null && p.serviceEpoch !== S.remoteEpoch) return;
@@ -142,6 +142,9 @@
         render();
         break;
       case 'state': setState(p); break;
+      case 'capture.assetsExpired': closeSheet(); resetTranscript(); S.card=null; if(S.draft && !S.draft.submitted) S.draft=null; toast('完整文字已按期限清理，独立确认的任务与短依据保留'); render(); break;
+      case 'capture.cleared': closeSheet(); resetTranscript(); S.card = null; S.draft = null; render(); break;
+      case 'daily.candidates': S.dailyCandidates = p.items || []; openSheet({kind:'dailyCandidates'}); break;
       case 'backend.changed': {
         const changed = S.remoteEpoch !== p.serviceEpoch;
         const urlChanged = p.backend !== S.state.backend || p.backendUrl !== S.state.backendUrl;
@@ -154,6 +157,14 @@
       case 'history.list': S.historyItems = p.items || []; S.requests.history = {}; if (['home', 'sessions'].includes(S.route.name)) render(); if (S.sheet?.kind === 'history') renderSheet(); break;
       case 'history.open': historyOpen(p); break;
       case 'history.minutes': onMinutes(p); break;
+      case 'meeting.retained': {
+        const pending=S.pendingRetention;
+        if (!pending || pending.requestId!==p.requestId || pending.sessionId!==p.sessionId) break;
+        S.pendingRetention=null;
+        if (S.history?.session_id===p.sessionId) { S.history.retained_evidence=p.retained_evidence || [];S.history.retained_summaries=p.retained_summaries || []; }
+        if (S.sheet?.kind==='retain') closeSheet();
+        toast('已单独保留本人确认的内容');render();break;
+      }
       case 'history.delete': toast('会议文字已删除'); closeSheet(); go('sessions'); break;
       case 'history.search': historySearch(p); break;
       case 'history.renamed': onRenamed(p); break;
@@ -191,7 +202,15 @@
         if (S.route.name === 'live' && S.liveTab !== 'transcript') render();
         break;
       case 'transcript.pruned':
+        const removed = new Set(p.ids || []);
         (p.ids || []).forEach(removeLine);
+        if (S.state.recordingMode === 'daily') {
+          let close = false;
+          if (S.card?.data.pool?.some(u => removed.has(u.id))) { S.card = null; close = S.sheet?.kind === 'card'; }
+          if (S.draft && !S.draft.submitted && S.draft.data.evidence?.utteranceIds?.some(id => removed.has(id))) { S.draft = null; close ||= S.sheet?.kind === 'draft'; }
+          if (close) closeSheet();
+          (p.ids || []).forEach(id => S.ownerEdits.delete(id));
+        }
         S.pruned = true;
         break;
       case 'recall.pending':
@@ -243,7 +262,7 @@
       if (S.route.name === 'home' && S.state.selfName) loadHomeTasks();
       if (S.route.name === 'tasks') openTasks();
     }
-    if (s.notices) { s.notices.forEach((n) => S.notices.set(n.id, n)); renderNoticeBanners(); }
+    if (s.notices) { S.notices = new Map(s.notices.map(n => [n.id,n])); S.activeNotices = S.activeNotices.filter(id => S.notices.has(id)); renderNoticeBanners(); }
     if (before.preview !== S.state.speakerPreviewEnabled) S.records.forEach((_, id) => renderLine(id));
     if (S.sheet?.kind === 'voiceprint' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) renderSheet();
     if (S.route.name === 'memory' && S.memoryTab === 'people' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) render();
@@ -312,7 +331,7 @@
   function liveDetail() {
     const s = S.state;
     const source = s.capturing && s.sourceDetail ? s.sourceDetail : SOURCE_TEXT[s.source] || s.source || '';
-    return `${source} · 缓存 ${clock(s.bufferedMs)} / ${clock(s.retentionMs)}`;
+    return `${s.recordingMode === 'meeting' ? '正式会议 · 已选择云保存' : '日常临时聆听'} · ${source} · 缓存 ${clock(s.bufferedMs)} / ${clock(s.retentionMs)}`;
   }
   function warnings() {
     const s = S.state, w = [];
@@ -321,9 +340,11 @@
     else if (gaps.length) { const g = gaps[gaps.length - 1]; w.push(`识别中断过 ${gaps.length} 次，最近一次 ${clock(g.fromMs)}–${clock(g.toMs)} 没有转写`); }
     if (s.capturing && s.micBusy) w.push('麦克风被其他应用占用，这段时间没有声音进来');
     if (s.capturing && s.recordingCapped) w.push('录音已达 3 小时上限，之后只保留文字');
-    if (!s.memorySync) w.push('会议文字同步已关闭');
-    else if (s.syncStatus === 'failed') w.push('文字同步已停止，请检查服务器');
-    else if (s.syncStatus === 'unsupported') w.push('当前后端不支持会议文字同步');
+    if (s.recordingMode === 'meeting') {
+      if (!s.memorySync) w.push('会议文字同步已关闭');
+      else if (s.syncStatus === 'failed') w.push('文字同步已停止，请检查服务器');
+      else if (s.syncStatus === 'unsupported') w.push('当前后端不支持会议文字同步');
+    }
     if (s.capturing && s.speakerPreviewEnabled && s.liveOverlap) w.push('疑似多人同时说话（试验检测）');
     return w;
   }
@@ -535,13 +556,15 @@
         <button class="rc-end" data-act="capture-stop">${icon('stop', 19)}<span>结束</span></button></div>`;
   }
 
+  const recordingModeLabel = () => S.state.recordingMode === 'meeting' ? '正式会议' : '日常临时聆听';
+
   function liveTitle() {
     const a = S.state.agenda || {};
     if (a.goal) return a.goal;
-    if (!S.state.sessionId) return '本场会议';
+    if (!S.state.sessionId) return recordingModeLabel();
     // Native reports elapsed session time, not the clock time it began; good to the minute.
     S.liveStartedAt = S.liveStartedAt?.id === S.state.sessionId ? S.liveStartedAt : { id: S.state.sessionId, at: new Date(Date.now() - (S.state.sessionMs || 0)) };
-    return `会议 · ${shortDate(S.liveStartedAt.at.toISOString())}`;
+    return `${recordingModeLabel()} · ${shortDate(S.liveStartedAt.at.toISOString())}`;
   }
 
   // ---- 首页 ---------------------------------------------------------------------------------
@@ -569,12 +592,12 @@
           <p class="meta" id="home-record-people">${homePeopleSummary()}</p>
           <button class="button primary" type="button" data-act="go" data-route="live">${icon('waveform')}<span>回到记录现场</span></button>`
           : `<button class="button primary" type="button" data-act="capture-start">${icon('microphone')}<span>开始记录</span></button>`}
-        <div class="record-under"><span>会议 · ${esc(SOURCE_TEXT[S.state.source] || '手机麦克风')}</span><button data-act="go" data-route="settings">收音与保存设置</button></div>
+        <div class="record-under"><span>${S.state.capturing ? recordingModeLabel() : '默认日常临时聆听'} · ${esc(SOURCE_TEXT[S.state.source] || '手机麦克风')}</span><button data-act="go" data-route="settings">收音与保存设置</button></div>
       </section>
       ${sectionTitle('问 Oops')}
       <div class="ask-card">
         <textarea id="home-ask" aria-label="想问 Oops 的问题" placeholder="问问刚才或往期会议里说过什么…" rows="2" maxlength="500"></textarea>
-        <div class="ask-footer"><small>${icon('lock-key', 13)}团队会议原话</small>
+        <div class="ask-footer"><small>${icon('lock-key', 13)}${S.homeAskHistory ? '已存会议原话' : S.state.recordingMode === 'meeting' ? '本场会议原话' : '本场临时原话'}</small>
           <button class="input-text" data-act="home-ask-scope">${S.homeAskHistory ? '查往期会议' : '查本场'}</button>
           <button class="mic-button" data-act="home-ask" aria-label="提问">${icon('paper-plane-tilt', 23)}</button></div></div>
       ${listRow({ act: 'go', data: 'data-route="settings"', ic: 'waveform', title: '收音与唤醒', sub: `${SOURCE_TEXT[S.state.source] || '手机麦克风'} · ${S.state.voiceTrigger !== false ? '说「Oops」找回刚才' : '语音唤醒已关闭'}` })}
@@ -584,7 +607,7 @@
         ${live ? listRow({ act: 'go', data: 'data-route="live"', ic: 'waveform', title: liveTitle(), sub: `${S.state.capturing ? '正在收音' : '本场已停止'} · ${S.commitments.length}项待办` }) : ''}
         ${recent.map((m) => listRow({ act: 'meeting-open', data: `data-id="${esc(m.session_id)}"`, ic: 'users-three', title: meetingName(m),
           sub: `${formatDate(m.started_at)} · ${reviewPending(m) ? `${reviewPending(m)}项待核对` : `${m.utterance_count}句`}` })).join('')}
-        ${!live && !recent.length && !S.requests.history.error ? `<p class="meta">${S.historyItems ? '还没有记录。开始记录后，会议会出现在这里。' : '正在读取…'}</p>` : ''}
+        ${!live && !recent.length && !S.requests.history.error ? `<p class="meta">${S.historyItems ? '还没有已存会议。正式会议需单独选择云端保存；日常候选在记忆里核对。' : '正在读取…'}</p>` : ''}
       </div>
       ${sectionTitle('需要你处理', S.state.selfName ? S.homeTasks == null ? S.homeTasksState.error ? '查看任务' : '读取中' : `${S.homeTasks.length + (pendingMeeting ? 1 : 0)}项待处理` : '选择本人', 'go', `data-route="${S.state.selfName ? 'tasks' : 'me'}"`)}
       ${S.state.selfName ? requestNotice(S.homeTasksState, 'home-tasks-retry', !!S.homeTasks) : ''}
@@ -628,15 +651,15 @@
       <div class="session-list-secondary"><button data-act="saved-list">${icon('bookmark-simple', 18)}已保存片段</button><span>${all ? `${all.length}段记录` : ''}</span></div>
       ${live ? `<section class="session-list-group">${sectionTitle('正在记录')}<div class="session-list-item"><button class="card clickable" data-act="go" data-route="live">
         <div class="session-card-top"><span class="session-kind">${icon('waveform')}</span><span class="badge purple">${S.state.capturing ? '进行中' : '已停止'}</span></div>
-        <h3>${esc(liveTitle())}</h3><p class="meta">${S.state.capturing ? `收音中 · ${mmss(S.state.sessionMs)}` : '本场已停止'} · 会议</p>
+        <h3>${esc(liveTitle())}</h3><p class="meta">${S.state.capturing ? `收音中 · ${mmss(S.state.sessionMs)}` : '本场已停止'} · ${recordingModeLabel()}</p>
         <p class="session-preview">${S.records.size} 句原话 · 待办 ${S.commitments.length}</p>
         <div class="session-card-bottom"><span>${esc(S.liveProject || '未归项目')}</span><strong>${S.state.capturing ? '回到现场' : '查看'}</strong></div></button></div></section>` : ''}
       ${requestNotice(S.requests.history, 'history-retry', !!all)}
       ${all == null ? S.requests.history.error ? '' : spinnerHtml('正在读取会议…', '团队服务器') : `
         ${pending.length ? `<section class="session-list-group">${sectionTitle('待核对')}${pending.map(sessionCard).join('')}</section>` : ''}
         ${done.length ? `<section class="session-list-group">${sectionTitle('已完成')}${done.map(sessionCard).join('')}</section>` : ''}
-        ${!items.length ? `<div class="empty-state"><span>${icon('chat-circle-text', 28)}</span><strong>${q ? '没有找到' : '还没有会议'}</strong><p>${q ? '换个名称或项目再试试。' : '开始记录后，会议文字会同步到团队服务器，出现在这里。'}</p></div>` : ''}`}
-      <p class="meta">团队共享。会议文字与原始录音长期保留在团队服务器，删除会议时一并删除。</p>
+        ${!items.length ? `<div class="empty-state"><span>${icon('chat-circle-text', 28)}</span><strong>${q ? '没有找到' : '还没有会议'}</strong><p>${q ? '换个名称或项目再试试。' : '明确选择云端保存的正式会议会出现在这里；日常临时聆听不归档整场。'}</p></div>` : ''}`}
+      <p class="meta">新正式会议经本次确认后云端保存，原音与全文分别保留所选7、30或90天；已确认摘要、任务和短依据单独保留。历史会议沿用原保存规则。</p>
     </div>`;
   }
 
@@ -651,7 +674,7 @@
 
   function liveHtml() {
     const s = S.state;
-    const heading = sessionHeading(liveTitle(), `会议 · ${esc(S.liveProject || '个人记录')} · <span id="live-elapsed">${mmss(s.sessionMs)}</span>`, 'live-tools');
+    const heading = sessionHeading(liveTitle(), `${recordingModeLabel()} · ${esc(S.liveProject || '个人记录')} · <span id="live-elapsed">${mmss(s.sessionMs)}</span>`, 'live-tools');
     const stage = `<div class="session-stage"><span class="badge ${s.capturing ? 'purple' : 'gray'}">${s.capturing ? '进行中' : s.sessionId ? '已停止 · 可会后核对' : '未开始'}</span></div>`;
     if (S.liveTab === 'transcript') return liveTranscriptHtml(heading, stage);
     if (S.liveTab === 'actions') return liveActionsHtml(heading, stage);
@@ -684,6 +707,7 @@
         <button class="button secondary" type="button" data-act="saved-list">${icon('bookmark-simple')}<span>已保存 ${s.savedCount ?? 0}</span></button></div>
       ${!s.capturing && s.sessionId ? `<section class="card session-review-entry"><div><h3>会后核对</h3><p class="meta">逐条确认待办、决定和不知道谁说的话；确认后的决定会用于之后的冲突提醒。</p></div>
         <button class="button primary" type="button" data-act="review-start" data-id="${esc(s.sessionId)}"><span>开始 / 继续核对</span></button></section>` : ''}
+      ${s.capturing && s.recordingMode !== 'meeting' ? '<button class="button secondary" type="button" data-act="capture-meeting"><span>从现在转为正式会议</span></button>' : ''}
       ${s.capturing ? '<button class="button quiet" type="button" data-act="capture-stop"><span>结束当前记录</span></button>' : ''}
     </div>`;
   }
@@ -699,7 +723,7 @@
     return `<div class="stack sessions-feature">${heading}${stage}
       <div class="search-input">${icon('magnifying-glass', 18)}<input id="live-ask" aria-label="问这场会" placeholder="问这场会：预算上限是多少？" maxlength="500"></div>
       ${names.length ? speakerChips(names, S.transcriptFilter.speaker) : ''}
-      <p class="meta">点一句可以改说话人。${S.pruned ? '更早的字幕已移出列表，本场纪要仍可查看。' : '最近 5 分钟的原声可以在「找回刚才」里回听。'}</p>
+      <p class="meta">点一句可以改说话人。${S.pruned ? (S.state.recordingMode === 'meeting' ? '更早的字幕已移出列表，已存会议按选择期限保留。' : '超过5分钟的原音和临时全文已清除；私人候选仅保留必要短依据。') : '最近 5 分钟的原声可以在「找回刚才」里回听。'}</p>
       <div class="stack" id="slot-lines"></div>
       ${!S.records.size ? `<div class="empty-state"><span>${icon('waveform', 28)}</span><strong>还没有原话</strong><p>${S.state.capturing ? '开始说话后，转写会一句句出现在这里。' : '开始收音后，最近 5 分钟的对话会出现在这里。'}</p></div>` : ''}
       ${S.state.capturing ? '<button class="button quiet" type="button" data-act="capture-stop"><span>结束当前记录</span></button>' : ''}
@@ -764,9 +788,13 @@
     if (!h) return spinnerHtml('正在打开会议…', '团队服务器');
     const pending = (h.review_queue || []).length;
     const heading = sessionHeading(meetingName(h), `会议 · ${esc(h.project || '未归项目')} · ${formatDate(h.started_at)}${duration(h) ? ` · ${duration(h)}` : ''}`, 'meeting-tools');
-    const stage = `<div class="session-stage"><span class="badge ${pending ? 'gray' : 'green'}">${pending ? '已保存 · 待核对' : '已保存 · 已核对'}</span></div>`;
+    const stage = `<div class="session-stage"><span class="badge ${pending ? 'gray' : 'green'}">${h.transcript_status === 'expired' ? '完整文字已到期' : pending ? '已保存 · 待核对' : '已保存 · 已核对'}</span></div>`;
     if (S.meetingTab === 'transcript') return meetingTranscriptHtml(heading, stage);
     if (S.meetingTab === 'actions') return meetingActionsHtml(heading, stage);
+    if (h.transcript_status === 'expired') {
+      const retained=[...(h.retained_summaries || []),...(h.retained_evidence || [])].filter(x=>x.confirmed && x.source_status!=='changed');
+      return `<div class="stack sessions-feature">${heading}${stage}<section class="card"><h3>完整原文已按期限清理</h3><p class="meta">这里只显示独立确认的摘要和必要短依据，不恢复完整原文，也不表示所有内容已经核对。</p>${retained.map(x=>`<p>${esc(x.text)}</p>`).join('') || '<p class="meta">没有独立确认保留的内容。</p>'}</section><button class="button secondary" data-act="go" data-route="tasks">查看独立保存的任务</button><button class="button quiet" data-act="tab" data-tab="transcript">查看全文到期状态</button></div>`;
+    }
     const decisions = (h.digest?.decision || []).filter(u => u.review?.verdict !== 'rejected'), constraints = (h.digest?.constraint || []).filter(u => u.review?.verdict !== 'rejected');
     const confirmed = [...decisions, ...constraints].filter((u) => u.review?.verdict === 'confirmed');
     const unconfirmed = [...decisions, ...constraints].filter((u) => u.review?.verdict !== 'confirmed');
@@ -776,11 +804,14 @@
     const ideas = h.digest?.idea || [];
     const rawCount = unconfirmed.length + open.length + ideas.length;
     const minutesReady = S.minutes.get(h.session_id)?.data?.status === 'ready';
+    const retained = [...(h.retained_summaries || []), ...(h.retained_evidence || [])].filter(x=>x.confirmed && x.source_status !== 'changed');
     return `<div class="stack sessions-feature">${heading}${stage}
+      ${h.transcript_status === 'expired' ? `<section class="card"><h3>完整原文已按期限清理</h3><p class="meta">下方仅保留另行确认的摘要、任务和短依据；不会恢复完整原文。</p>${retained.map(x=>`<p>${esc(x.text)}</p>`).join('') || '<p class="meta">没有独立确认保留的内容。</p>'}</section>` : ''}
       ${p0Grid([['sparkle', pending ? `会后核对 ${pending}` : '会后核对', 'review-start', `data-id="${esc(h.session_id)}"`], ['bell', `会议提醒 ${(h.notices || []).length}`, 'meeting-notices'],
         ['quotes', '全文与说话人', 'tab', 'data-tab="transcript"'], ['folder-simple', h.project ? `项目：${h.project}` : '所属项目', 'history-project']])}
       <div class="stack session-overview">
         ${minutesHtml(h.session_id)}
+        ${h.transcript_status !== 'expired' ? `<section class="card"><h3>独立保留的确认结果</h3><p class="meta">原音和全文到期后，仅保留你在这里明确核对的摘要和短依据。</p>${retained.map(x=>`<p>${esc(x.text)}</p>`).join('') || '<p class="meta">还没有独立确认的内容。</p>'}<button class="button secondary" data-act="retain-open">选择短依据 / 编辑摘要</button></section>` : ''}
         ${rawCount ? `<details class="card raw-tags"><summary><strong>Oops 整理出的候选 ${rawCount} 条</strong><span class="meta">逐句识别，逐条核对后才成为确认的结论。${minutesReady ? '纪要已从中挑出有用的内容。' : '还没有会议纪要。'}</span></summary>
           ${unconfirmed.length ? `<h3>决定与约束候选</h3>${unconfirmed.map(u => listRow({act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'constraint' ? 'flag' : 'check-circle', title: u.text, sub: `${hms(u.start_ms)} · ${u.review?.speaker || speakerLabel(u.speaker) || '说话人待确认'} · 待核对`})).join('')}` : ''}
           ${open.length ? `<h3>待办候选</h3>${open.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
@@ -799,6 +830,7 @@
 
   function meetingTranscriptHtml(heading, stage) {
     const h = S.history;
+    if (h.transcript_status === 'expired') return `<div class="stack sessions-feature">${heading}${stage}<section class="card"><h3>完整文字已到期清理</h3><p>另行确认的摘要、任务及必要短依据仍可在概览查看；它们不等于完整原文。</p></section></div>`;
     const rows = (h.utterances || []).filter((u) => (u.text || '').trim());
     const who = (u) => u.review?.speaker || u.speaker;
     const names = [...new Set(rows.map(who).filter(Boolean))];
@@ -847,12 +879,12 @@
     S.history = null; S.historyItems = null; S.projects.items = null; S.projects.open = null; S.liveProject = null;
     S.minutes.clear(); clearTaskIdentity();
     S.requests = { history: {}, projects: {}, project: {}, tasks: {} };
-    S.pendingMeetingId = null; S.pendingReview = null; S.pendingTools = null; S.review = null;
+    S.pendingMeetingId = null; S.pendingReview = null; S.pendingTools = null; S.review = null; S.pendingRetention=null;
     // A cancelled intent prevents an old response from opening the same session on the new server.
     S.meetingRequest = { active: false };
     S.draft = null;
     if (remoteCard) S.card = null;
-    if (['pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
+    if (['pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result', 'retain'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
     if (S.route.name === 'meeting') S.route = { name: 'sessions' };
     if (S.route.name === 'project') S.route = { name: 'memory' };
     renderNav();
@@ -935,6 +967,7 @@
     }
     const items = S.projects.items;
     return `<div class="stack memory-settings">${seg}
+      <button class="card clickable ms-pending" data-act="daily-candidates"><span class="badge gray">私人 · 待核对</span><h3>日常留下的候选重点</h3><p class="meta">只留必要短依据，核对后单独保存；不保留整场原音或全文。</p></button>
       <button class="card clickable ms-pending" data-act="go" data-route="sessions"><span class="badge purple">项目记忆</span><h3>同一项目里确认过的决定</h3><p class="meta">会在之后开会时用来提醒"和之前定的不一样"。在会议里点「所属项目」把会议归进项目。</p></button>
       ${sectionTitle('项目')}
       ${requestNotice(S.requests.projects, 'projects-retry', !!items)}
@@ -977,7 +1010,7 @@
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'microphone', title: '收音与唤醒', sub: `${SOURCE_TEXT[s.source] || s.source || ''} · ${s.voiceTrigger !== false ? '语音唤醒开' : '语音唤醒关'}` }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'plugs-connected', title: '团队服务器', sub: s.backend === 'mock' ? 'Mock 后端（不连服务器）' : s.backendUrl || '未配置' })])}
       ${group('数据与运行', [
-        listRow({ act: 'go', data: 'data-route="settings"', ic: 'shield-check', title: '会议文字与录音', sub: `${s.memorySync !== false ? '文字自动同步' : '文字同步已关'} · ${s.recordSession ? '保存原始录音' : '不保存录音'}` }),
+        listRow({ act: 'go', data: 'data-route="settings"', ic: 'shield-check', title: '会议文字与录音', sub: '日常临时5分钟；正式会议每次明确选择保存期限' }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'chart-bar', title: '诊断与召回耗时', sub: S.latency?.recentMs?.length ? `召回中位数 ${(S.latency.medianMs / 1000).toFixed(1)} 秒` : '还没有召回记录' })])}
       <p class="meta ms-center">Oops · 会议文字保存在团队服务器</p>
     </div>`;
@@ -1002,9 +1035,7 @@
         <div class="inline-actions"><button class="chip" data-act="pick-audio">选择测试 WAV</button><button class="chip" data-act="reset-audio">恢复内置音频</button></div>
         ${toggle('set-voice', '说「Oops」触发找回/提问', '', s.voiceTrigger !== false)}
         ${toggle('set-vibrate', '提醒短震动', '', s.noticeVibrate !== false)}</section>
-      <section class="card"><h3>会议数据</h3>
-        ${toggle('set-sync', '会议文字自动同步', '把转写文字、标签、说话人和提醒存到团队服务器，不含音频，可在会议里删除。', s.memorySync !== false)}
-        ${toggle('set-record', '保存原始录音与转写', `会后自动上传团队服务器，约 1.9 MB/分钟。${s.recordingsPending ? `${s.recordingsPending} 场待上传${s.recordingUpload === 'uploading' ? '（上传中）' : ''}` : '全部已上传'}`, s.recordSession)}</section>
+      <section class="card"><h3>保存方式</h3><p>日常原音与临时全文只滚动保留5分钟，停止清除。明确选择正式会议后才云端归档；原音与全文分别选7/30/90天。</p><p class="meta">实时识别可能使用云端ASR，不归档不代表音频完全不上云。历史记录不追溯删除。</p><button class="button secondary" type="button" data-act="daily-candidates">查看私人待核对候选</button><p class="meta">${s.recordingsPending || 0} 场会议资产待上传</p><input type="checkbox" id="set-sync" hidden ${s.memorySync !== false ? 'checked' : ''}><input type="checkbox" id="set-record" hidden ${s.recordSession ? 'checked' : ''}></section>
       <section class="card"><h3>团队服务器</h3>
         ${toggle('set-mock', '使用 Mock 后端', '只在本机模拟，不连服务器', s.backend === 'mock')}
         <label class="form-field"><span>后端地址</span><input id="set-url" inputmode="url" placeholder="https://…" value="${esc(s.backendUrl || '')}"></label>
@@ -1108,6 +1139,10 @@
       projectPick: projectPickHtml,
       rename: renameHtml,
       tools: toolsHtml,
+      retain: retentionHtml,
+      captureMode: captureModeHtml,
+      dailyCandidates: () => frame('私人待核对候选', S.dailyCandidates.length ? S.dailyCandidates.map(x => `<section class="card"><span class="badge">私有 · 未确认</span><p>${esc(x.quote)}</p><p class="meta">${formatDate(x.updated_at)} · 独立短依据，完整原音/全文已不保留</p><button class="button secondary" data-act="daily-confirm-open" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">核对这条内容</button><button class="button quiet" data-act="daily-discard" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">舍弃候选</button></section>`).join('') : '<p>还没有私人候选；不会保存整场全文来填充这里。</p>'),
+      dailyConfirm: () => frame('核对并保存私人记忆', `<label class="form-field"><span>要留下的内容</span><textarea id="daily-quote">${esc(S.sheet.item.quote)}</textarea></label><label class="toggle-row"><span>我已核对这条短依据，单独保存为私人记忆</span><input id="daily-confirmed" type="checkbox"></label><p class="meta">不自动创建任务、关联身份或共享。完整原音和全文不会恢复。</p><button class="button primary" data-act="daily-confirm-save">保存私人记忆</button>`),
       selfPick: selfPickHtml,
     }[k];
     // Re-rendering the same sheet (a play state, a late result) keeps its scroll; a different sheet starts at the top.
@@ -1117,6 +1152,26 @@
     const next = $('sheet').querySelector ? $('sheet').querySelector('.sheet-content') : null;
     if (next) next.scrollTop = keep;
     syncPlayButtons();
+  }
+
+  function retentionHtml() {
+    const sheet=S.sheet,rows=S.history?.utterances || [],pending=S.pendingRetention;
+    const loading=pending?.status==='saving';
+    if(pending?.status==='stale') return frame('来源需要重新核对', `<p>${esc(pending.error)}</p><button class="button primary" data-act="retain-reopen">重新读取会议</button><button class="button quiet" data-act="close">返回</button>`);
+    return frame('单独保留确认结果', `<p class="meta">全文到期会清理；只保留本次手选的短原话与本人填写的摘要，不自动保留AI总结。</p>
+      ${rows.map(u=>`<button class="card clickable" data-act="retain-pick" data-id="${esc(u.id)}" aria-pressed="${sheet.selected.includes(u.id)}" ${loading?'disabled':''}><span class="badge ${sheet.selected.includes(u.id)?'purple':'gray'}">${sheet.selected.includes(u.id)?'已选择':'选择短依据'}</span><p>${esc(u.text.slice(0,280))}</p><p class="meta">${hms(u.start_ms)} · 最多保留280字${u.text.length>280?'，已截取可见部分':''}</p></button>`).join('')}
+      <label class="form-field"><span>本人核对的摘要（可不填）</span><textarea id="retain-summary" maxlength="2000" ${loading?'disabled':''}>${esc(sheet.summary || '')}</textarea></label>
+      <label class="toggle-row"><span>我已核对所选短依据和摘要，同意独立保留</span><input id="retain-confirmed" type="checkbox" ${loading?'disabled':''}></label>
+      ${pending?.error?`<p class="warn-text">${esc(pending.error)}</p><button class="button secondary" data-act="retain-retry">重试保存相同内容</button>`:''}
+      <button class="button primary" data-act="retain-save" ${loading?'disabled':''}>${loading?'正在等待保存回执…':'确认并单独保留'}</button><button class="button quiet" data-act="close">取消 / 返回</button>`);
+  }
+
+  function captureModeHtml() {
+    const switching = S.sheet.switching, meeting = switching || S.sheet.mode === 'meeting';
+    const days = (id,title) => `<label class="form-field"><span>${title}</span><select id="${id}">${[7,30,90].map(n=>`<option value="${n}" ${n===30?'selected':''}>${n}天</option>`).join('')}</select></label>`;
+    return frame(switching ? '从现在开始正式会议' : '选择记录方式', `<div class="action-grid">${switching?'':`<button class="chip" data-act="capture-mode" data-mode="daily" aria-pressed="${!meeting}">日常临时聆听</button><button class="chip" data-act="capture-mode" data-mode="meeting" aria-pressed="${meeting}">正式会议</button>`}</div>
+      ${meeting ? `${days('capture-audio-days','原始录音保留')}${days('capture-transcript-days','完整文字保留')}<label class="toggle-row"><span>我选择将本次正式会议原音和完整文字保存到云端</span><input id="capture-cloud" type="checkbox"></label><p class="meta">到期分别清理本机与服务端副本；摘要、任务和另行确认的短依据单独保留。</p>${switching?'<p>从切换时刻重新开始；此前缓冲不会自动归档。需要留下刚才片段时，请先选择并单独保存。</p><button class="button quiet" data-act="capture-before-recall">先选择刚才的片段</button>':''}` : '<p>最近5分钟原音和临时全文滚动覆盖，停止即清除；不归档整场，不同步团队。可整理私有候选，确认后才成为长期记忆。</p>'}
+      <p class="meta">实时识别可能由云端ASR处理；不归档不代表音频完全不上云。</p><button class="button primary" data-act="capture-confirm">${switching?'确认并从现在开始':'开始本次记录'}</button><button class="button quiet" data-act="close">取消</button>`);
   }
 
   function notFoundHtml() {
@@ -1731,6 +1786,12 @@
       if ((!('mine' in p) || !!p.mine === S.tasks.mine) && (!p.status || p.status === S.tasks.status)) S.requests.tasks = { error: p.message };
       if ((!('mine' in p) || p.mine) && (!p.status || p.status === 'open')) S.homeTasksState = { error: p.message };
       if (['tasks', 'home'].includes(S.route.name)) render();
+    } else if (p.scope === 'retention') {
+      const pending=S.pendingRetention;
+      if (pending && (!p.requestId || pending.requestId===p.requestId) && (!p.sessionId || pending.sessionId===p.sessionId)) {
+        pending.status=p.sourceChanged?'stale':'failed';pending.error=p.message;
+        if (S.sheet?.kind==='retain') renderSheet();
+      }
     } else if (p.scope === 'minutes') {
       const entry = S.minutes.get(p.sessionId);
       if (entry && (!p.requestId || p.requestId === entry.requestId)) {
@@ -1803,7 +1864,48 @@
     'minutes-source': (el) => openSheet({ kind: 'minutesSource', sessionId: S.history.session_id, id: el.dataset.id }),
     'minutes-doc': () => { const p = S.minutes.get(S.history?.session_id)?.data; if (p?.status === 'ready' && p.doc_url) send('open.url', { url: p.doc_url }); },
     'minutes-history-doc': () => { const p = S.minutes.get(S.history?.session_id)?.data; if (p?.reason === 'source_changed' && p.historical_doc_url) send('open.url', { url: p.historical_doc_url }); },
-    'capture-start': () => send('capture.start'),
+    'retain-reopen': () => { const id=S.pendingRetention?.sessionId;S.pendingRetention=null;closeSheet();if(id)openMeeting(id); },
+    'retain-open': () => {
+      if (!S.history || S.history.transcript_status==='expired') return toast('全文已到期，不能补造未核对的原文依据',true);
+      S.pendingRetention=null;openSheet({kind:'retain',selected:[],summary:''});
+    },
+    'retain-pick': el => {
+      if (S.pendingRetention?.status==='saving') return;
+      S.sheet.summary=$('retain-summary').value || '';
+      const ids=S.sheet.selected,id=el.dataset.id;
+      if(ids.includes(id))S.sheet.selected=ids.filter(x=>x!==id);else if(ids.length<10)ids.push(id);else return toast('一次最多选择10条必要短依据',true);
+      S.pendingRetention=null;renderSheet();
+    },
+    'retain-save': () => {
+      if (S.pendingRetention?.status==='saving') return;
+      if (!$('retain-confirmed').checked) return toast('请核对后单独确认保留',true);
+      const selected=S.sheet.selected,summary=($('retain-summary').value || '').trim();S.sheet.summary=summary;
+      const rows=(S.history?.utterances || []).filter(u=>selected.includes(u.id));
+      if (!rows.length || rows.length!==selected.length || S.history.transcript_status==='expired') return toast('请重新选择当前可核对的短原话',true);
+      if(summary.length>2000 || rows.some(u=>u.text.length>10000))return toast('摘要或来源超出本次保留范围',true);
+      const requestId='retain-'+(++S.retentionRequest),sessionId=S.history.session_id;
+      const payload={sessionId,requestId,confirm:true,evidence:rows.map(u=>({id:u.id,quote:u.text.slice(0,280),sourceText:u.text})),
+        summaries:summary?[{id:'summary-'+Date.now(),text:summary,source_ids:rows.map(u=>u.id)}]:[]};
+      S.pendingRetention={sessionId,requestId,status:'saving',payload};renderSheet();send('meeting.retain',payload);
+    },
+    'retain-retry': () => { const pending=S.pendingRetention;if(!pending || pending.status!=='failed')return;pending.status='saving';pending.error=null;renderSheet();send('meeting.retain',pending.payload); },
+    'capture-start': () => openSheet({kind:'captureMode',mode:'daily'}),
+    'capture-meeting': () => openSheet({kind:'captureMode',mode:'meeting',switching:true}),
+    'capture-mode': el => { S.sheet.mode = el.dataset.mode; renderSheet(); },
+    'capture-before-recall': () => { closeSheet(); send('recall.trigger'); },
+    'capture-confirm': () => {
+      const meeting = S.sheet.switching || S.sheet.mode === 'meeting';
+      if (meeting && !$('capture-cloud').checked) return toast('请明确选择本次云端保存',true);
+      const payload = {recordingMode:meeting?'meeting':'daily',cloudSaveConfirmed:meeting,
+        audioRetentionDays:meeting?Number($('capture-audio-days').value):30,
+        transcriptRetentionDays:meeting?Number($('capture-transcript-days').value):30};
+      if (![7,30,90].includes(payload.audioRetentionDays) || ![7,30,90].includes(payload.transcriptRetentionDays)) return toast('请选择7、30或90天',true);
+      const action = S.sheet.switching?'capture.meeting':'capture.start'; closeSheet(); send(action,payload);
+    },
+    'daily-candidates': () => send('daily.candidates'),
+    'daily-discard': el => send('daily.candidate.discard',{sessionId:el.dataset.session,id:el.dataset.id}),
+    'daily-confirm-open': el => { const item=S.dailyCandidates.find(x=>x.id===el.dataset.id && x.session_id===el.dataset.session); if(item)openSheet({kind:'dailyConfirm',item}); },
+    'daily-confirm-save': () => { if(!$('daily-confirmed').checked)return toast('请核对后再确认保存',true); const item=S.sheet.item; send('daily.candidate.confirm',{sessionId:item.session_id,id:item.id,quote:$('daily-quote').value,confirmed:true});closeSheet(); },
     'capture-stop': () => {
       const count = S.commitments.filter((u) => u.reviewStatus !== 'confirmed').length;
       if (count) toast(`${count} 条负责人待确认，可以在会后核对里处理`);
@@ -1942,12 +2044,13 @@
     'reset-audio': () => send('testAudio.reset'),
   };
 
-  // The sheet has its own listeners (it is inside the page, so page clicks inside it are skipped).
+  // Stop before an action replaces sheet markup: the browser's event path still reaches root
+  // even after the clicked node no longer has #sheet as an ancestor.
   $('sheet').addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || el.disabled) return;
     const act = ACTIONS[el.dataset.act];
-    if (act) act(el);
+    if (act) { e.stopPropagation(); act(el); }
   });
   $('sheet').addEventListener('change', (e) => {
     if (e.target.id === 'vp-name') { S.voiceprintName = e.target.value; renderSheet(); }

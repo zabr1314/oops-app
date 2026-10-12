@@ -1,12 +1,15 @@
 """Text-only meeting storage and conservative Jev evidence judgements."""
 import datetime as dt
 import json
+import hashlib
+import logging
 import math
 import os
 import re
 import tempfile
 import threading
 from zoneinfo import ZoneInfo
+from archive_policy import ArchivePolicyError, policy_from_request, expired, require_live
 
 def read_json(path):
     with open(path, encoding='utf-8') as source:
@@ -315,9 +318,21 @@ def review_queue(utterances, cited=None):
             + [dict(kind='speaker', id=u['id']) for u in speakers])
 
 
+def evidence_rows(row):
+    """Independent saved quotes remain usable, explicitly labelled, without recreating a transcript."""
+    rows = list(row['utterances'])
+    seen = {u['id'] for u in rows}
+    rows.extend(dict(u, review=u.get('review') or {'verdict': 'confirmed'}, source_kind='saved_excerpt')
+                for u in row.get('retained_evidence', [])
+                if u['id'] not in seen and u.get('confirmed') is True and u.get('source_status') != 'changed')
+    return rows
+
+
 class Meetings:
-    def __init__(self, directory, ops=None, retention_days=None, owner=None, deadline=None, team=(), cited=None):
+    def __init__(self, directory, ops=None, retention_days=None, owner=None, deadline=None, team=(), cited=None,
+                 policies=None, require_storage_policy=False):
         self.dir, self.ops, self.team = directory, ops, tuple(team)
+        self.policies, self.require_storage_policy = policies, require_storage_policy
         self.owner, self.deadline = owner, deadline
         # sid → {'tasks', 'decisions', 'theme'} from the meeting's minutes, or None: narrows the review queue and names it.
         self.cited = cited
@@ -332,18 +347,54 @@ class Meetings:
     def path(self, sid):
         return os.path.join(self.dir, identifier(sid) + '.json')
 
-    def cleanup(self):
-        if not self.retention:
-            return
-        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=self.retention)
+    def cleanup(self, now=None):
+        now = now or dt.datetime.now(dt.timezone.utc)
+        cutoff = now - dt.timedelta(days=self.retention)
+        count = 0
         with self.lock:
             for name in os.listdir(self.dir):
                 if not name.endswith('.json'):
                     continue
                 path = os.path.join(self.dir, name)
-                row = read_json(path)
-                if timestamp(row['started_at']) < cutoff:
+                try:
+                    row = read_json(path)
+                    policy = row.get('storage_policy')
+                    transcript_expired = expired(policy, 'transcript', now)
+                    legacy_expired = not policy and self.retention and timestamp(row['started_at']) < cutoff
+                except (OSError, ValueError, KeyError, TypeError):
+                    logging.getLogger(__name__).warning('Skipped unreadable meeting metadata: %s', name)
+                    continue
+                if policy and transcript_expired and row.get('transcript_status') != 'expired':
+                    # Only a person's confirmed result survives as independent short evidence.
+                    # These are not a replacement transcript and must never populate utterances.
+                    evidence = {u['id']: u for u in row.get('retained_evidence', [])}
+                    reviews = row.get('reviews', {})
+                    for u in row.get('utterances', []):
+                        review = reviews.get(u['id'], {})
+                        if (review.get('verdict') == 'confirmed' and u['id'] not in evidence
+                                and row.get('confirmed_text_hashes', {}).get(u['id']) == hashlib.sha256(u['text'].encode()).hexdigest()):
+                            evidence[u['id']] = dict(id=u['id'], text=u['text'][:280], start_ms=u['start_ms'],
+                                end_ms=u['end_ms'], tag=u.get('tag'), speaker=reviews[u['id']].get('speaker') or u.get('speaker'),
+                                confirmed=True, excerpt=True, source_status='expired', review=reviews[u['id']])
+                    row['retained_evidence'] = [dict(u, source_status='changed' if u.get('source_status') == 'changed' else 'expired',
+                                                      transcript_status='expired') for u in list(evidence.values())[:50]]
+                    changed_ids = {u['id'] for u in row['retained_evidence'] if u.get('source_status') == 'changed'}
+                    row['retained_summaries'] = [dict(s, source_status='changed' if s.get('source_status') == 'changed' or changed_ids.intersection(s.get('source_ids', [])) else 'expired')
+                                                for s in row.get('retained_summaries', [])]
+                    retained_ids = {u['id'] for u in row['retained_evidence']}
+                    row['reviews'] = {key: value for key, value in reviews.items() if key in retained_ids}
+                    row.pop('confirmed_text_hashes', None)
+                    row['utterances'], row['notices'] = [], []
+                    row['transcript_status'] = 'expired'
+                    row['transcript_expired_at'] = policy['transcript_expires_at']
+                    for key in ('digest', 'tasks', 'review_queue', 'last_sync_at'):
+                        row.pop(key, None)
+                    self.write(row['session_id'], row)
+                    count += 1
+                elif legacy_expired:
+                    # Explicit legacy administrator setting only; new defaults never touch old rows.
                     os.unlink(path)
+        return count
 
     def load(self, sid):
         with self.lock:
@@ -352,6 +403,7 @@ class Meetings:
             if not os.path.isfile(path):
                 raise FileNotFoundError(sid)
             row = read_json(path)
+            row.setdefault('transcript_status', 'available')
             reviews = row.get('reviews', {})
             for u in row['utterances']:
                 if u['id'] in reviews:
@@ -376,7 +428,8 @@ class Meetings:
                 u['task_url'] = (task.get('feishu_task') or {}).get('url') if task else None
             minutes = self.cited(sid) if self.cited else None
             row['review_queue'] = review_queue(row['utterances'], minutes)
-            row['display_title'], row['title_source'] = meeting_title(row, (minutes or {}).get('theme'))
+            row['display_title'], row['title_source'] = meeting_title(row,
+                (minutes or {}).get('theme') if row['transcript_status'] != 'expired' else None)
             return row
 
     def sync(self, req):
@@ -411,6 +464,17 @@ class Meetings:
                 if started is None:
                     raise ValueError('缺少开始日期')
                 row = dict(session_id=sid, started_at=started, time_zone=zone, utterances=[], notices=[])
+            existing = row.get('storage_policy')
+            legacy = os.path.isfile(self.path(sid)) and existing is None
+            policy = (self.policies.accept(sid, req, legacy=legacy) if self.policies else
+                      policy_from_request(req, existing, legacy, self.require_storage_policy))
+            if row.get('transcript_status') == 'expired':
+                raise ArchivePolicyError(410, '本场会议全文已到期，不能重新同步', asset='transcript',
+                                         expires_at=(policy or {}).get('transcript_expires_at'))
+            require_live(policy, 'transcript')
+            if policy is not None:
+                row['storage_policy'] = policy
+                row['transcript_status'] = 'available'
             for derived in ('digest', 'tasks', 'review_queue', 'display_title', 'title_source'):
                 row.pop(derived, None)
             if started and started != row['started_at']:
@@ -425,13 +489,28 @@ class Meetings:
                 row['last_sync_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
             for key, updates in (('utterances', rows), ('notices', notices)):
                 merged = {i['id']: {k:v for k,v in i.items() if k not in DERIVED} for i in row[key]}
+                if key == 'utterances':
+                    for update in updates:
+                        before = merged.get(update['id'])
+                        if before and before['text'] != update['text']:
+                            review = row.get('reviews', {}).get(update['id'], {})
+                            if review.get('verdict') == 'confirmed':
+                                review.pop('verdict', None)
+                                row.get('confirmed_text_hashes', {}).pop(update['id'], None)
+                                review['source_changed_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+                            for evidence in row.get('retained_evidence', []):
+                                if evidence['id'] == update['id']:
+                                    evidence['source_status'] = 'changed'
+                            for summary in row.get('retained_summaries', []):
+                                if update['id'] in summary.get('source_ids', []): summary['source_status'] = 'changed'
                 merged.update({i['id']: i for i in updates})
                 if len(merged) > (20000 if key == 'utterances' else 2000):
                     raise ValueError('会议容量已满')
                 row[key] = list(merged.values())
             row['utterances'].sort(key=lambda u: (u['start_ms'], u['id']))
             self.write(sid, row)
-            result = dict(session_id=sid, utterance_count=len(row['utterances']), notice_count=len(row['notices']))
+            result = dict(session_id=sid, utterance_count=len(row['utterances']), notice_count=len(row['notices']),
+                          storage_policy=policy, transcript_status=row.get('transcript_status', 'available'))
             return dict(result, rejected=rejected) if rejected else result
 
     def set_ended(self, sid, ended_at, source):
@@ -479,13 +558,79 @@ class Meetings:
             if not any(u['id'] == uid for u in row['utterances']):
                 raise ValueError('会议里没有这句话')
             reviews = row.setdefault('reviews', {})
+            hashes = row.setdefault('confirmed_text_hashes', {})
             entry = {k: v for k, v in {**reviews.get(uid, {}), **fields}.items() if v is not None and k in ('speaker', 'verdict', 'owner')}
             if entry:
                 reviews[uid] = dict(entry, by=by, at=dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'))
+                if fields.get('verdict') == 'confirmed':
+                    utterance = next(u for u in row['utterances'] if u['id'] == uid)
+                    hashes[uid] = hashlib.sha256(utterance['text'].encode()).hexdigest()
+                elif entry.get('verdict') != 'confirmed': hashes.pop(uid, None)
             else:
                 reviews.pop(uid, None)
+                hashes.pop(uid, None)
             self.write(sid, row)
             return dict(session_id=sid, utterance_id=uid, review=reviews.get(uid))
+
+    def retain(self, req):
+        """Explicitly save a confirmed summary and short exact quotes independently of full-text expiry."""
+        if req.get('confirm') is not True:
+            raise ValueError('请先确认独立保留的摘要与短原话')
+        sid = identifier(req.get('session_id'))
+        summaries, quotes = req.get('summaries', []), req.get('evidence', [])
+        if not isinstance(summaries, list) or not isinstance(quotes, list) or len(summaries) > 20 or len(quotes) > 50:
+            raise ValueError('独立摘要或短依据数量超限')
+        if not quotes:
+            raise ValueError('请至少选择一条当前原话作为独立保留依据')
+        with self.lock:
+            row = self.load(sid)
+            if row.get('transcript_status') == 'expired':
+                raise ValueError('全文已过期，不能补造已无法核对的原文依据')
+            source = {u['id']: u for u in row['utterances']}
+            kept = {u['id']: u for u in row.get('retained_evidence', [])}
+            selected = set()
+            changed_quotes = set()
+            confirmed_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            for item in quotes:
+                if not isinstance(item, dict): raise ValueError('短原话格式无效')
+                uid, quote = identifier(item.get('id')), text(item.get('quote'), 280).strip()
+                expected = item.get('expected_text_hash')
+                if not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected):
+                    raise ValueError('请提供核对时完整原话的 SHA-256 摘要')
+                if uid in selected:
+                    raise ValueError('同一条原话只能选择一次')
+                u = source.get(uid)
+                if u is not None and hashlib.sha256(u['text'].encode('utf-8')).hexdigest() != expected:
+                    raise ArchivePolicyError(409, '原话已变化，请重新核对后保留', asset='transcript')
+                if not quote or u is None or quote not in u['text']:
+                    raise ValueError('短原话必须匹配当前会议原文')
+                selected.add(uid)
+                if uid in kept and kept[uid]['text'] != quote:
+                    changed_quotes.add(uid)
+                kept[uid] = dict(id=uid, text=quote, start_ms=u['start_ms'], end_ms=u['end_ms'],
+                    tag=u.get('tag'), speaker=u.get('review', {}).get('speaker') or u.get('speaker'),
+                    confirmed=True, confirmed_at=confirmed_at, excerpt=True, source_status='available')
+            saved = {s['id']: s for s in row.get('retained_summaries', [])}
+            for summary in saved.values():
+                if changed_quotes.intersection(summary.get('source_ids', [])):
+                    summary['source_status'] = 'changed'
+            for item in summaries:
+                if not isinstance(item, dict): raise ValueError('摘要格式无效')
+                sources = item.get('source_ids')
+                if not isinstance(sources, list) or not sources or len(sources) > 10 or any(not isinstance(uid, str) or uid not in selected for uid in sources):
+                    raise ValueError('摘要须绑定已选择的短原话依据')
+                summary_text = text(item.get('text'), 2000).strip()
+                if not summary_text: raise ValueError('独立摘要不能为空')
+                saved[identifier(item.get('id'))] = dict(id=item['id'], text=summary_text,
+                    source_ids=list(dict.fromkeys(sources)), confirmed=True, confirmed_at=confirmed_at, source_status='available')
+            if len(kept) > 50 or len(saved) > 20:
+                raise ValueError('独立保留内容已达上限，请先整理')
+            for key in ('digest', 'tasks', 'review_queue', 'display_title', 'title_source'):
+                row.pop(key, None)
+            row['utterances'] = [{key: value for key, value in u.items() if key not in DERIVED} for u in row['utterances']]
+            row['retained_evidence'], row['retained_summaries'] = list(kept.values()), list(saved.values())
+            self.write(sid, row)
+            return dict(session_id=sid, retained_evidence=row['retained_evidence'], retained_summaries=row['retained_summaries'])
 
     def rename(self, req):
         """A person's name for the meeting; an empty title goes back to the automatic one."""
@@ -570,6 +715,8 @@ class Meetings:
                 title=r['display_title'], title_source=r['title_source'], project=r.get('project'),
                 ended_at=r.get('ended_at'), goal=(r.get('agenda') or {}).get('goal', ''),
                 utterance_count=len(r['utterances']), digest_counts={t: len(r['digest'][t]) for t in DIGEST},
+                storage_policy=r.get('storage_policy'), transcript_status=r.get('transcript_status', 'available'),
+                retained_evidence_count=len(r.get('retained_evidence', [])),
                 review_pending={k: sum(q['kind'] == k for q in r['review_queue']) for k in ('commitment', 'decision', 'speaker')})
                 for r in rows[:limit]])
 
@@ -599,19 +746,20 @@ class Meetings:
             def item(s, u, confirmed):
                 return dict(id=f"h:{s['session_id']}:{u['id']}", text=u['text'], start_ms=u['start_ms'], end_ms=u['end_ms'],
                             tag=u.get('tag'), speaker=u.get('review', {}).get('speaker') or u.get('speaker'),
-                            session_id=s['session_id'], started_at=s['started_at'], meeting_title=s['title'], confirmed=confirmed)
+                            session_id=s['session_id'], started_at=s['started_at'], meeting_title=s['title'], confirmed=confirmed,
+                            source_kind=u.get('source_kind', 'transcript'), source_status=u.get('source_status', 'available'))
             if project:
                 pool = []
                 for s in (s for s in sessions if s.get('project') == project):
                     row = self.load(s['session_id'])
-                    pool += [item(s, u, True) for u in row['utterances'] if u.get('tag') in ('decision', 'constraint')
+                    pool += [item(s, u, True) for u in evidence_rows(row) if u.get('tag') in ('decision', 'constraint')
                              and u.get('review', {}).get('verdict') == 'confirmed']
                 if pool:
                     return pool[:self.PROJECT_POOL]
             pool = []
             for s in sessions[:10]:
                 row = self.load(s['session_id'])
-                pool += [item(s, u, False) for u in row['utterances'] if u.get('tag') in ('decision', 'constraint')
+                pool += [item(s, u, u.get('source_kind') == 'saved_excerpt') for u in evidence_rows(row) if u.get('tag') in ('decision', 'constraint')
                          and u.get('review', {}).get('verdict') != 'rejected']
             return sorted((u for u in pool if overlap(query, u['text']) > 0),
                           key=lambda u: -overlap(query, u['text']))[:10]
@@ -652,7 +800,7 @@ class Meetings:
                 confirmed = 0
                 for s in meetings:
                     row = self.load(s['session_id'])
-                    confirmed += sum(1 for u in row['utterances'] if u.get('tag') in ('decision', 'constraint')
+                    confirmed += sum(1 for u in evidence_rows(row) if u.get('tag') in ('decision', 'constraint')
                                      and u.get('review', {}).get('verdict') == 'confirmed')
                 items.append(dict(name=name, meeting_count=len(meetings), confirmed_decisions=confirmed,
                                   last_started_at=max(s['started_at'] for s in meetings)))
@@ -669,14 +817,15 @@ class Meetings:
             decisions, unreviewed = [], 0
             for s in meetings:
                 row = self.load(s['session_id'])
-                for u in sorted(row['utterances'], key=lambda u: u['start_ms']):
+                for u in sorted(evidence_rows(row), key=lambda u: u['start_ms']):
                     if u.get('tag') not in ('decision', 'constraint'):
                         continue
                     verdict = u.get('review', {}).get('verdict')
                     if verdict == 'confirmed':
                         decisions.append(dict(id=u['id'], text=u['text'], tag=u['tag'], start_ms=u['start_ms'], end_ms=u['end_ms'],
                                               speaker=u.get('review', {}).get('speaker') or u.get('speaker'),
-                                              session_id=s['session_id'], started_at=s['started_at'], meeting_title=s['title']))
+                                              session_id=s['session_id'], started_at=s['started_at'], meeting_title=s['title'],
+                                              source_kind=u.get('source_kind', 'transcript'), source_status=u.get('source_status', 'available')))
                     elif verdict is None and u['tag'] == 'decision':
                         unreviewed += 1
             return dict(name=name, meetings=meetings, decisions=decisions, unreviewed_decisions=unreviewed)
@@ -691,7 +840,7 @@ class Meetings:
                 if not name.endswith('.json'): continue
                 row = self.load(name[:-5])
                 s = row
-                for u in row['utterances']:
+                for u in evidence_rows(row):
                     if len(u['text']) >= 4 and not re.search(r'oops|欧普斯|哦普斯|奥普斯|把?(?:刚刚|刚才).*(?:留下来|记下来|保存下来|找回来)', u['text'], re.I):
                         pool.append(dict(u, id=f"h:{s['session_id']}:{u['id']}", utterance_id=u['id'],
                                          session_id=s['session_id'], started_at=s['started_at']))

@@ -74,13 +74,15 @@ test('voice permission, save preference and project sharing stay independent', (
   const data = initialData(); data.settings.toggles.recordingAllowed = false;
   assert.equal(logic.startListeningSession(data, signal(), options()).data, data);
   data.settings.toggles.recordingAllowed = true; data.settings.space = '项目 A';
-  assert.match(logic.startListeningSession(data, signal(), options()).error, /共同纪要/);
+  assert.equal(logic.startListeningSession(data, signal(), options()).error, undefined);
   const config = { ...logic.defaultListeningConfig, shared: true, saveScope: '手动选择片段' };
   const started = logic.startListeningSession(data, signal(), options({ config })).data;
-  assert.equal(started.settings.space, '项目 A');
-  assert.equal(started.settings.toggles['shared-session-listen-new'], true);
-  assert.equal(started.settings.retention['session-space:session-listen-new'], '项目 A');
+  assert.equal(started.settings.space, '我的空间');
+  assert.equal(started.settings.toggles['shared-session-listen-new'], false);
+  assert.equal(started.settings.retention['session-space:session-listen-new'], '我的空间');
   assert.equal(started.settings.retention['session-session-listen-new'], '手动选择片段');
+  assert.equal(started.sessions[0].storage.mode, 'daily');
+  assert.equal(started.sessions[0].storage.cloudSaveConfirmed, false);
 });
 
 test('cross-midnight quiet hours prevent automatic creation but allow one explicit override', () => {

@@ -1,24 +1,28 @@
 {
   "metadata": {
-    "revision": "feedback-p0-gaps-20261012",
+    "revision": "p0-storage-team-20261012",
     "logicReviewedAt": "2026-10-12",
     "browserVerified": true,
     "screenshotRefreshPending": false,
     "changedViews": [
-      "welcome",
-      "settings-privacy",
-      "memory",
-      "memory-person",
-      "memory-unknown",
-      "memory-voice",
+      "home",
+      "memory-project",
+      "session-create",
       "session-detail",
-      "session-transcript"
+      "session-listening",
+      "session-mode",
+      "settings",
+      "settings-listening",
+      "settings-members",
+      "settings-retention",
+      "settings-sharing",
+      "settings-spaces"
     ],
-    "capturedAt": "2026-10-12T06:58:41.380Z",
+    "capturedAt": "2026-10-12T12:29:11.742Z",
     "capturedFrom": "2026-10-12T04:21:33.098Z",
     "app": "https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/",
-    "screenshots": 162,
-    "coverage": 185
+    "screenshots": 182,
+    "coverage": 205
   },
   "pages": [
     {
@@ -853,7 +857,7 @@
     },
     {
       "key": "u14-settings-spaces",
-      "title": "工作空间",
+      "title": "内容范围与共享",
       "group": "我的",
       "route": {
         "view": "settings-spaces"
@@ -862,7 +866,7 @@
     },
     {
       "key": "u15-settings-members",
-      "title": "团队成员与邀请",
+      "title": "协作与共享 · 兼容入口",
       "group": "我的",
       "route": {
         "view": "settings-members"
@@ -1999,6 +2003,408 @@
         "mode": "概览"
       },
       "scene": "feedback-facts-finished"
+    },
+    {
+      "key": "f14-memory-understanding",
+      "title": "个人理解 · 场景、更新时间与纠正",
+      "group": "记忆",
+      "route": {
+        "view": "memory"
+      },
+      "scene": "default",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "核对",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f15-document-role-source",
+      "title": "文档角色 · 选定来源与原话",
+      "group": "我的",
+      "route": {
+        "view": "settings-role-import"
+      },
+      "scene": "default",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "选择示例飞书文档",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f16-document-role-draft",
+      "title": "文档角色 · 可修改并明确应用的草稿",
+      "group": "我的",
+      "route": {
+        "view": "settings-role-import"
+      },
+      "scene": "default",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "选择示例飞书文档",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "原文 1",
+          "exact": false,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "整理角色建议",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f17-recording-compact",
+      "title": "跨页记录 · 紧凑控制与直接暂停结束",
+      "group": "任务",
+      "route": {
+        "view": "tasks"
+      },
+      "scene": "recording",
+      "actions": []
+    },
+    {
+      "key": "f18-recording-expanded",
+      "title": "跨页记录 · 展开标记与返回现场",
+      "group": "任务",
+      "route": {
+        "view": "tasks"
+      },
+      "scene": "recording",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "展开记录控制",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f19-assistant-work-ppt",
+      "title": "工作助手 · PPT 类型与使用范围",
+      "group": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-plan",
+      "actions": []
+    },
+    {
+      "key": "f20-assistant-work-offline",
+      "title": "工作助手 · 离线等待与恢复在线",
+      "group": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "助手离线",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f21-assistant-work-generation-failure",
+      "title": "工作助手 · 生成失败与重新核对",
+      "group": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "生成失败",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "查看本地示例结果",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f22-assistant-work-delivery-failure",
+      "title": "工作助手 · 交付失败只重读结果",
+      "group": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "交付失败",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "查看本地示例结果",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f23-assistant-work-recovered",
+      "title": "工作助手 · 同一请求恢复与已有草稿",
+      "group": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "交付失败",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "查看本地示例结果",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "重试读取示例结果",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f24-home-preparing",
+      "title": "首页伙伴 · 本人草稿准备状态",
+      "group": "首页",
+      "route": {
+        "view": "home"
+      },
+      "scene": "tasks-in-progress",
+      "actions": []
+    },
+    {
+      "key": "f25-home-failed",
+      "title": "首页伙伴 · 准备中断与重试入口",
+      "group": "首页",
+      "route": {
+        "view": "home"
+      },
+      "scene": "tasks-failure",
+      "actions": []
+    },
+    {
+      "key": "f26-daily-buffer",
+      "title": "日常 · 五分钟临时缓冲",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-daily-active",
+      "actions": []
+    },
+    {
+      "key": "f27-daily-stop",
+      "title": "日常 · 停止并清除全文",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-daily-active",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "结束当前记录",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f28-daily-finished",
+      "title": "日常 · 候选与短证据",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "概览"
+      },
+      "scene": "p0-daily-finished",
+      "actions": []
+    },
+    {
+      "key": "f29-daily-to-meeting",
+      "title": "日常转会议 · 单独选择云保存",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-daily-active",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "切换为正式会议",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f30-meeting-cloud-choice",
+      "title": "正式会议 · 独立期限与云保存",
+      "group": "会话",
+      "route": {
+        "view": "session-mode",
+        "mode": "会议"
+      },
+      "scene": "default",
+      "actions": []
+    },
+    {
+      "key": "f31-meeting-retention",
+      "title": "正式会议 · 原音与全文期限",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-meeting-retention",
+      "actions": []
+    },
+    {
+      "key": "f32-meeting-expired",
+      "title": "会议到期 · 仅独立短证据",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "原文"
+      },
+      "scene": "p0-meeting-expired",
+      "actions": []
+    },
+    {
+      "key": "f33-project-sharing",
+      "title": "项目 · 上下文与同一任务",
+      "group": "记忆",
+      "route": {
+        "view": "memory-project",
+        "id": "project-1"
+      },
+      "scene": "default",
+      "actions": []
     }
   ],
   "coverage": [
@@ -3626,26 +4032,27 @@
     },
     {
       "id": "U17",
-      "title": "工作空间",
+      "title": "内容范围与共享",
       "module": "我的",
       "route": {
         "view": "settings-spaces"
       },
       "scene": "default",
-      "note": "个人与团队空间、新建／加入本机示例、切换和成员入口；与首页空间选择共用设置。",
+      "note": "查看已有内容范围；不创建或加入团队，不改变资料归属、共享许可与分范围草稿。项目背景和同一任务从记忆→项目继续。",
       "key": "U17",
       "group": "我的",
       "shot": "u14-settings-spaces"
     },
     {
       "id": "U18",
-      "title": "成员、邀请与权限",
+      "title": "协作与共享 · 兼容入口",
       "module": "我的",
       "route": {
         "view": "settings-members"
       },
       "scene": "default",
-      "note": "成员角色、邀请和移除本机示例；不真实发送邀请消息，个人／当前团队可见范围由同一空间状态判断。",
+      "note": "旧成员链接保留兼容承接；成员邀请和本地角色模拟已撤下，改从项目上下文和具体对象管理共享。",
+      "merged": true,
       "key": "U18",
       "group": "我的",
       "shot": "u15-settings-members"
@@ -4700,6 +5107,488 @@
       "note": "会后仍显示两个议题的普通事实，点击查看对应原话；提醒与原话摘录分开，摘录不会自动成为结论或任务。",
       "key": "F13",
       "group": "会话"
+    },
+    {
+      "id": "F14",
+      "title": "个人理解 · 场景、更新时间与纠正",
+      "module": "记忆",
+      "route": {
+        "view": "memory"
+      },
+      "scene": "default",
+      "shot": "f14-memory-understanding",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "核对",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "展开本人可纠正的身份、助理偏好及来源有效的已确认目标/背景。适用场景分别展示；旧数据没有精确更新时间就明确未记录。来源可查看，身份与偏好可纠正；不推断人格、关系亲疏或理解百分比。",
+      "key": "F14",
+      "group": "记忆"
+    },
+    {
+      "id": "F15",
+      "title": "文档角色 · 选定来源与原话",
+      "module": "我的",
+      "route": {
+        "view": "settings-role-import"
+      },
+      "scene": "default",
+      "shot": "f15-document-role-source",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "选择示例飞书文档",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "在个人空间选择示例飞书文档，或粘贴本人选定的正文，再手动选一段原文。当前不连接飞书、不上传文档，不会按同名或他人职责认定自己的身份；可跳过返回。",
+      "key": "F15",
+      "group": "我的"
+    },
+    {
+      "id": "F16",
+      "title": "文档角色 · 可修改并明确应用的草稿",
+      "module": "我的",
+      "route": {
+        "view": "settings-role-import"
+      },
+      "scene": "default",
+      "shot": "f16-document-role-draft",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "选择示例飞书文档",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "原文 1",
+          "exact": false,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "整理角色建议",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "本人选择原文后整理可编辑的本地角色字段。核对勾选默认关闭；明确应用才修改当前身份，并创建私有、待核对的角色背景候选。已确认的旧角色记忆保留。取消或跳过不应用；真实飞书读取和模型分析尚未接通。",
+      "key": "F16",
+      "group": "我的"
+    },
+    {
+      "id": "F17",
+      "title": "跨页记录 · 紧凑控制与直接暂停结束",
+      "module": "任务",
+      "route": {
+        "view": "tasks"
+      },
+      "scene": "recording",
+      "shot": "f17-recording-compact",
+      "actions": [],
+      "note": "活动记录跨页默认紧凑，暂停/继续与结束直接可达；展开按钮打开完整控制。这里只显示隔离示例，未调用麦克风。切换会话、空间、页面或分栏清除旧展开状态，键盘打开时隐藏。",
+      "key": "F17",
+      "group": "任务"
+    },
+    {
+      "id": "F18",
+      "title": "跨页记录 · 展开标记与返回现场",
+      "module": "任务",
+      "route": {
+        "view": "tasks"
+      },
+      "scene": "recording",
+      "shot": "f18-recording-expanded",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "展开记录控制",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "从任务页展开当前示例记录控制，可标记重点、返回现场、暂停/继续或结束。收起恢复紧凑；结束仍先暂停并检查保存快照，取消沿用原恢复逻辑，不改变保存或硬件规则。",
+      "key": "F18",
+      "group": "任务"
+    },
+    {
+      "id": "F19",
+      "title": "工作助手 · PPT 类型与使用范围",
+      "module": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-plan",
+      "shot": "f19-assistant-work-ppt",
+      "actions": [],
+      "note": "按已有工作助手的查资料、报告与 PPT 能力选择类型，核对任务引用原话与选定资料。当前 App 仅演示本地工作状态；工作提交、在线状态读取及真实文档/文件取回尚未接通，不提供虚构结果地址。",
+      "key": "F19",
+      "group": "任务"
+    },
+    {
+      "id": "F20",
+      "title": "工作助手 · 离线等待与恢复在线",
+      "module": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "shot": "f20-assistant-work-offline",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "助手离线",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "选择离线示例，并分别核对读取范围与仅体验个人草稿后，进入等待上线状态。可模拟恢复在线或停止示例；不重复提交真实工作，也不改变任务承接、业务完成、成果或外部回执。",
+      "key": "F20",
+      "group": "任务"
+    },
+    {
+      "id": "F21",
+      "title": "工作助手 · 生成失败与重新核对",
+      "module": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "shot": "f21-assistant-work-generation-failure",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "生成失败",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "查看本地示例结果",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "启动后查看本地结果，展示生成失败。已有个人草稿保留；可补资料并重新核对、重新允许。示例不生成新文件，不把失败写成业务已完成，真实工作接口尚未接通。",
+      "key": "F21",
+      "group": "任务"
+    },
+    {
+      "id": "F22",
+      "title": "工作助手 · 交付失败只重读结果",
+      "module": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "shot": "f22-assistant-work-delivery-failure",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "交付失败",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "查看本地示例结果",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "本地示例区分内容生成与服务交付失败；重试读取同一请求结果，不重新生成或对外发送。现有草稿保留，真实回包缺失时不拼造飞书文档、文件下载地址或发送回执。",
+      "key": "F22",
+      "group": "任务"
+    },
+    {
+      "id": "F23",
+      "title": "工作助手 · 同一请求恢复与已有草稿",
+      "module": "任务",
+      "route": {
+        "view": "task-assistant-work",
+        "id": "TASK-021",
+        "mode": "ppt"
+      },
+      "scene": "tasks-results",
+      "shot": "f23-assistant-work-recovered",
+      "actions": [
+        {
+          "kind": "select",
+          "label": "体验哪种工作状态",
+          "value": "交付失败",
+          "exact": true
+        },
+        {
+          "kind": "click",
+          "name": "已核对本次原话、要求与选定资料",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "仅体验个人草稿，不授权对外发送",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "核对并体验工作状态",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "查看本地示例结果",
+          "exact": true,
+          "role": "button"
+        },
+        {
+          "kind": "click",
+          "name": "重试读取示例结果",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "从交付失败重试读取同一示例请求，恢复到结果待本人核对，并可打开已有个人草稿。范围或来源变化仍撤回允许；恢复示例不代表真实服务返回文件，也不自动验收或发送。",
+      "key": "F23",
+      "group": "任务"
+    },
+    {
+      "id": "F24",
+      "title": "首页伙伴 · 本人草稿准备状态",
+      "module": "首页",
+      "route": {
+        "view": "home"
+      },
+      "scene": "tasks-in-progress",
+      "shot": "f24-home-preparing",
+      "actions": [],
+      "note": "首页官方形象依据当前空间可见且由本人负责的草稿准备状态显示准备姿态与状态文字。只是现有前端对象的轻微动效，遵守减弱动态设置，不证明模型、麦克风或设备正在真实工作。",
+      "key": "F24",
+      "group": "首页"
+    },
+    {
+      "id": "F25",
+      "title": "首页伙伴 · 准备中断与重试入口",
+      "module": "首页",
+      "route": {
+        "view": "home"
+      },
+      "scene": "tasks-failure",
+      "shot": "f25-home-failed",
+      "actions": [],
+      "note": "首页官方形象显示本人准备任务中断及可继续处理的入口。失败与准备中区别呈现；按任务重新核对范围与来源后再继续，不扩大权限、不把草稿状态等同实际工作完成。",
+      "key": "F25",
+      "group": "首页"
+    },
+    {
+      "id": "F26",
+      "title": "日常 · 五分钟临时缓冲",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-daily-active",
+      "shot": "f26-daily-buffer",
+      "actions": [],
+      "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。",
+      "key": "F26",
+      "group": "会话"
+    },
+    {
+      "id": "F27",
+      "title": "日常 · 停止并清除全文",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-daily-active",
+      "shot": "f27-daily-stop",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "结束当前记录",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。",
+      "key": "F27",
+      "group": "会话"
+    },
+    {
+      "id": "F28",
+      "title": "日常 · 候选与短证据",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "概览"
+      },
+      "scene": "p0-daily-finished",
+      "shot": "f28-daily-finished",
+      "actions": [],
+      "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。",
+      "key": "F28",
+      "group": "会话"
+    },
+    {
+      "id": "F29",
+      "title": "日常转会议 · 单独选择云保存",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-daily-active",
+      "shot": "f29-daily-to-meeting",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "切换为正式会议",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。",
+      "key": "F29",
+      "group": "会话"
+    },
+    {
+      "id": "F30",
+      "title": "正式会议 · 独立期限与云保存",
+      "module": "会话",
+      "route": {
+        "view": "session-mode",
+        "mode": "会议"
+      },
+      "scene": "default",
+      "shot": "f30-meeting-cloud-choice",
+      "actions": [],
+      "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。",
+      "key": "F30",
+      "group": "会话"
+    },
+    {
+      "id": "F31",
+      "title": "正式会议 · 原音与全文期限",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "现场"
+      },
+      "scene": "p0-meeting-retention",
+      "shot": "f31-meeting-retention",
+      "actions": [],
+      "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。",
+      "key": "F31",
+      "group": "会话"
+    },
+    {
+      "id": "F32",
+      "title": "会议到期 · 仅独立短证据",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-policy",
+        "mode": "原文"
+      },
+      "scene": "p0-meeting-expired",
+      "shot": "f32-meeting-expired",
+      "actions": [],
+      "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。",
+      "key": "F32",
+      "group": "会话"
+    },
+    {
+      "id": "F33",
+      "title": "项目 · 上下文与同一任务",
+      "module": "记忆",
+      "route": {
+        "view": "memory-project",
+        "id": "project-1"
+      },
+      "scene": "default",
+      "shot": "f33-project-sharing",
+      "actions": [],
+      "note": "保留项目背景、历史决定、获准资料及同一任务引用；不另建团队门户。",
+      "key": "F33",
+      "group": "记忆"
     }
   ]
 }
