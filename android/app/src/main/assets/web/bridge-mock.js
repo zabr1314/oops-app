@@ -76,6 +76,11 @@
           state.notices.push(n); emit('notice', n);
         }
         emit('session.summary', summary());
+        if (final.tag === 'commitment') { // the server's running task list (task_board), simulated
+          const tasks = sessionTranscript.filter((x) => x.tag === 'commitment').map((x, n) => ({ id: `t${n + 1}`, what: x.text.replace(/[。！？]$/, ''),
+            owner: '', priority: n ? 'P2' : 'P0', status: 'open', sources: [x.id], reason: n ? '有参考价值，可以排期（模拟）' : '直接影响本次结论（模拟）' }));
+          emit('tasks.board', { session_id: state.sessionId, tasks, pending: false, updated_at: new Date().toISOString() });
+        }
       } else if (state.sessionMs >= u.startMs && state.sessionMs < u.endMs) {
         const chars = Math.ceil(u.text.length * (state.sessionMs - u.startMs) / (u.endMs - u.startMs));
         emit('asr.partial', { ...u, text: u.text.slice(0, chars) });
@@ -225,7 +230,7 @@
         const payload = {session_id: p.sessionId, requestId: p.requestId || ''};
         if (flow === 'minutes-pending') Object.assign(payload, {status: 'pending', reason: 'writing'});
         else if (changed) Object.assign(payload, {status: 'unavailable', reason: 'source_changed', message: '核对结果已变化，旧纪要需重新核对。', historical_doc_url: 'https://example.com/historical-minutes'});
-        else Object.assign(payload, {status: 'ready', doc_url: null, minutes: {version: 1, substantive: true, overview: '首版围绕两周内上线展开，预算上限与方案成本需要核对。', decisions: [{text: '预算上限为10万', ids: ['u1']}], actions: [{owner: '洪玉麟', task: '核对并提交新方案', due: '周五前', ids: ['u2']}], topics: [{topic: '上线计划与预算', points: ['先明确首版体验与预算范围']}], open_questions: [{question: '13万方案如何满足10万预算？', quote: historicalRows.find(u => u.id === 'u3').text, id: 'u3'}], follow_ups: []}, sources: Object.fromEntries(historicalRows.map(u => [u.id, {text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}]))});
+        else Object.assign(payload, {status: 'ready', doc_url: null, minutes: {version: 4, substantive: true, theme: '首版上线方案与预算', overview: '首版围绕两周内上线展开，预算上限与方案成本需要核对。', decisions: [{text: '预算上限为10万', ids: ['u1']}], actions: [{owner: '洪玉麟', task: '核对并提交新方案', due: '周五前', priority: 'main', ids: ['u2']}, {owner: '', task: '预约下周评审会议室', due: '', priority: 'other', ids: ['u3']}], topics: [{topic: '上线计划与预算', points: ['先明确首版体验与预算范围']}], open_questions: [{question: '13万方案如何满足10万预算？', quote: historicalRows.find(u => u.id === 'u3').text, id: 'u3'}], follow_ups: []}, sources: Object.fromEntries(historicalRows.map(u => [u.id, {text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}]))});
         setTimeout(() => emit('history.minutes', payload), 220); break;
       }
       case 'history.delete': if (p.confirm) {mockMeetings = mockMeetings.filter(i => i.session_id !== p.sessionId); emit('history.delete', {deleted: true});} break;

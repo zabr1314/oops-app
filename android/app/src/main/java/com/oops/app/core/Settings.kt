@@ -93,6 +93,10 @@ class Settings(context: Context) {
         const val SOURCE_MIC = "mic"
         const val SOURCE_WAV = "wav"
         const val SOURCE_REMOTE = "remote"
+        /** The Anker 录音豆 through its SDK (only in builds that include it). */
+        const val SOURCE_BEAN = "bean"
+        /** A simulated 录音豆 replaying assets/test/dialog.opusraw in the bean's packet format. */
+        const val SOURCE_BEAN_SIM = "bean_sim"
         const val DEFAULT_REMOTE_ADDRESS = "127.0.0.1:7790"
 
         /** "host:port" → pair, or null when malformed. */

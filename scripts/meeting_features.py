@@ -262,13 +262,15 @@ def short_title(text, limit=18):
     return value[:limit] + '…' if len(value) > limit else value
 
 
-def meeting_title(row):
-    """(title, source): a person's name for it, the agenda goal, or a sentence that says what it was about."""
+def meeting_title(row, theme=None):
+    """(title, source): a person's name for it, the agenda goal, the minutes' topic, or a sentence that says what it was about."""
     if row.get('title'):
         return row['title'], 'manual'
     goal = (row.get('agenda') or {}).get('goal', '').strip()
     if goal:
         return goal, 'agenda'
+    if theme:  # read from the whole meeting, unlike a title made from its opening minutes
+        return theme, 'minutes'
     generated = row.get('auto_title') or {}
     if generated.get('title'):
         return generated['title'], 'generated'
@@ -287,17 +289,28 @@ def meeting_title(row):
     return None, 'none'
 
 
-def review_queue(utterances):
-    """What a person should check after the meeting, most consequential first: tasks, decisions, then unknown speakers."""
+def review_queue(utterances, cited=None):
+    """What a person should check after the meeting, most consequential first: tasks, decisions, then unknown speakers.
+
+    cited: {'tasks': ids, 'decisions': ids} the meeting's minutes rest on. When the minutes exist, only those sentences
+    are checked (and their unknown speakers), not every sentence the live tagging flagged.
+    """
     tasks, decisions, speakers = [], [], []
+    picked = None if cited is None else set(cited.get('tasks', ())) | set(cited.get('decisions', ()))
     for u in utterances:
         review = u.get('review', {})
-        if u.get('tag') == 'commitment' and 'verdict' not in review and u.get('task_status') != 'created':
+        if cited is not None:
+            if u['id'] in cited.get('tasks', ()) and 'verdict' not in review and u.get('task_status') != 'created':
+                tasks.append(u)
+            elif u['id'] in cited.get('decisions', ()) and 'verdict' not in review:
+                decisions.append(u)
+        elif u.get('tag') == 'commitment' and 'verdict' not in review and u.get('task_status') != 'created':
             tasks.append(u)
         elif u.get('tag') == 'decision' and 'verdict' not in review:
             decisions.append(u)
         # Very short lines ("好的", "嗯") are cheap to skip and rarely matter for who owns what.
-        if not u.get('speaker') and 'speaker' not in review and len(re.sub(r'[\W_]', '', u['text'])) >= 4:
+        if (picked is None or u['id'] in picked) and not u.get('speaker') and 'speaker' not in review \
+                and len(re.sub(r'[\W_]', '', u['text'])) >= 4:
             speakers.append(u)
     # Unknown speakers of tasks and decisions first: they decide owners and whose decision it was.
     speakers.sort(key=lambda u: u.get('tag') not in ('commitment', 'decision'))
@@ -316,11 +329,13 @@ def evidence_rows(row):
 
 
 class Meetings:
-    def __init__(self, directory, ops=None, retention_days=None, owner=None, deadline=None, team=(),
+    def __init__(self, directory, ops=None, retention_days=None, owner=None, deadline=None, team=(), cited=None,
                  policies=None, require_storage_policy=False):
         self.dir, self.ops, self.team = directory, ops, tuple(team)
         self.policies, self.require_storage_policy = policies, require_storage_policy
         self.owner, self.deadline = owner, deadline
+        # sid → {'tasks', 'decisions', 'theme'} from the meeting's minutes, or None: narrows the review queue and names it.
+        self.cited = cited
         # Meeting text is a long-lived asset: 0 (default) keeps it until a user deletes the meeting.
         self.retention = int(retention_days if retention_days is not None else os.getenv('OOPS_MEETING_RETENTION_DAYS', '0'))
         if self.retention < 0:
@@ -411,8 +426,10 @@ class Meetings:
                 task = next((t for t in row['tasks'] if u['id'] in t['evidence'].get('utterance_ids', [])), None)
                 u['task_status'] = task['status'] if task else None
                 u['task_url'] = (task.get('feishu_task') or {}).get('url') if task else None
-            row['review_queue'] = review_queue(row['utterances'])
-            row['display_title'], row['title_source'] = meeting_title(row)
+            minutes = self.cited(sid) if self.cited else None
+            row['review_queue'] = review_queue(row['utterances'], minutes)
+            row['display_title'], row['title_source'] = meeting_title(row,
+                (minutes or {}).get('theme') if row['transcript_status'] != 'expired' else None)
             return row
 
     def sync(self, req):

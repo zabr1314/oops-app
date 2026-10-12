@@ -77,6 +77,7 @@ object ApiJson {
         .put("context", JSONArray(r.context.map(::candidate)))
         .put("reference_time", r.referenceTime)
         .put("time_zone", r.timeZone)
+        .apply { if (r.board) put("board", true) }
 
     fun draftResponse(json: JSONObject): DraftResponse {
         val time = json.optJSONObject("when")
@@ -97,6 +98,7 @@ object ApiJson {
             reason = json.optString("reason", "负责人待确认"),
             ownerCandidates = readSpeakerCandidates(json.optJSONArray("owner_candidates")),
             context = json.optJSONObject("task_context")?.let { runCatching { taskContext(it) }.getOrNull() },
+            board = json.optJSONObject("board")?.takeIf { it.optJSONArray("tasks") != null },
         )
     }
 

@@ -1,0 +1,21 @@
+[Unit]
+Description=Oops team labelling site for discussion recordings
+After=network-online.target
+
+[Service]
+User=oops
+Group=oops
+WorkingDirectory=/opt/oops/label
+EnvironmentFile=/var/lib/oops-label/label.env
+ExecStart=/usr/bin/python3 -u /opt/oops/label/team_label.py serve --data /var/lib/oops-label --port 8798
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/oops-label
+
+[Install]
+WantedBy=multi-user.target

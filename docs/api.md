@@ -280,6 +280,7 @@ pyannote 3.0 局部编号不作为身份，不跨不连续发言共用声纹判�
 | GET /v1/meetings?limit=30 | limit 1–100 → {count,items:[session_id,started_at,ended_at,goal,utterance_count,digest_counts]} |
 | GET /v1/meetings/{id} | 元数据、按时间排列的 utterances、notices、digest 四类原话、按 operations.request.session_id 关联的 tasks |
 | GET /v1/meetings/{id}/minutes | {session_id,status,reason?,message?,minutes?,sources?,doc_url?,historical_doc_url?}；飞书机器人写好的 AI 纪要，只读，见下 |
+| GET /v1/meetings/{id}/board | {session_id,tasks:[{id,what,owner,priority:P0–P3,status:open/done/dropped,sources,reason}],updated_at,pending}；本场实时任务清单（2026-10-12），只读，见下 |
 | POST /v1/meetings/search | {query:1–500字} → {items:[id,text,start_ms,end_ms,speaker,tag,session_id,started_at,prob],engine} |
 | POST /v1/meetings/delete | {session_id,confirm:true} → {deleted:true}；重复删除幂等，迟到同步返回 400 |
 | POST /v1/meetings/rename | {session_id,title:0–40字} → {session_id,title,title_source}；空字符串恢复自动名称 |
@@ -369,3 +370,9 @@ python3 scripts/cleanup_archives.py --state-dir /Volumes/GPFS/Users/a1234/oops-a
 Mac沿用 `deploy/mac/oops-archive-pull.sh` 的既有03:30双向链路，默认镜像目录仍为队友Mac的`/Volumes/GPFS/Users/a1234/oops-archive`。更新脚本后，每次拉取在rsync前后执行TTL清理，即便拉取中途失败也清理已复制的过期资产。运行 `sh deploy/mac/oops-archive-pull.sh --install-cleanup` 会替换`~/.local/share/oops-archive/pull.sh`并安装每60秒的`local.oops.archive-cleanup` launchd任务，保留原夜间拉取任务；分钟任务仅本机清理、不连服务器。拉取与分钟清理共用`fcntl.flock`跨进程锁，进程退出自动释放，避免rsync和清理互相覆盖。依赖同一Mac上可用的Python3、当前仓库策略模块、GPFS卷和原SSH授权；非默认安装可显式配置`OOPS_ARCHIVE_DEST/REPO/HOST/PYTHON`，管理员须指定可信的已有本地目录。卷未挂载时跳过，不创建假镜像。夜间拉取仍会取得服务端尚未清理的文件，但本地后置清理立即删除过期类别；不能把03:30同步当全天到期清理。
 
 本轮仅验证本机临时目录中的实际删除、Mac脚本入口、跨进程锁、失败拉取后清理及HTTP合同，没有部署服务器、在队友Mac安装调度任务或删除真实数据。当前开发Mac没有上述GPFS路径/已安装pull任务；香港SSH只读检查停在主机密钥验证，尚未验证当前机器的服务器登录权限，不能沿用另一台Mac的历史部署结果宣称已上线。
+
+## 本场实时任务清单（2026-10-12）
+
+`POST /v1/actions/draft` 可带 `"board": true`（App 只在后台取负责人提示时这样做）。服务器把这句补全出的任务交给 `scripts/task_board.py`：和本场已有任务合并、排 P0–P3，或丢弃举例、当场做完的事和空话；随后续对话调整优先级或作废。更新在后台进行，响应里的 `board` 是这句之前的清单，`pending: true` 表示还在整理，App 稍后读 `GET /v1/meetings/{id}/board`。清单存在 `<state>/boards/<session>.json`，重启不丢。
+
+清单只用于展示和排序：建飞书任务仍要从原话生成草稿并由人确认（op_id 规则不变）。会上只请大家确认 P0，其余会后处理。每条任务带原话编号 `sources`；没有出处的任务、不是团队成员的负责人都会被丢掉。

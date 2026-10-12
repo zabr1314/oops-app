@@ -113,3 +113,9 @@ body { -webkit-tap-highlight-color: transparent; }
 .minutes-item { padding: 10px 0; border-bottom: 1px solid #eeeaf4; }
 .minutes-item p, .minutes-overview { white-space: pre-wrap; overflow-wrap: anywhere; }
 .minutes-item .chip { margin: 6px 6px 0 0; }
+.minutes-theme { display: grid; gap: 2px; margin: 4px 0 8px; }
+.minutes-theme small { color: #7a7490; font-size: 12px; }
+.minutes-theme strong { font-size: 18px; line-height: 1.4; }
+.raw-tags summary { display: grid; gap: 2px; cursor: pointer; list-style: none; }
+.raw-tags summary::-webkit-details-marker { display: none; }
+.raw-tags[open] summary { margin-bottom: 8px; }

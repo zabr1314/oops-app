@@ -10,7 +10,12 @@ import com.oops.app.asr.RawUtterance
 import com.oops.app.asr.VolcAsrClient
 import com.oops.app.asr.VolcRequest
 import com.oops.app.audio.AudioSource
+import com.oops.app.audio.BeanAudioSource
+import com.oops.app.audio.BeanAuth
+import com.oops.app.audio.BeanSdk
+import com.oops.app.audio.MediaCodecOpusDecoder
 import com.oops.app.audio.MicAudioSource
+import com.oops.app.audio.ReplayBeanLink
 import com.oops.app.audio.RemoteAudioSource
 import com.oops.app.audio.WavFileAudioSource
 import com.oops.app.backend.ActionDraft
@@ -77,7 +82,10 @@ object OopsEngine {
     /** Shorter sentences carry too little voice to identify reliably. */
     private const val SPEAKER_MIN_MS = 1_000L
     private const val SPLIT_POLLS = 3
+    private const val BOARD_POLL_MS = 6_000L
+    private const val BOARD_POLLS = 6
     private const val TEST_WAV = "test/dialog.wav"
+    private const val TEST_BEAN_STREAM = "test/dialog.opusraw" // dialog.wav through scripts/bean_opus.py encode
     private val MANUAL_OTHER = setOf("other", "multi", "unclear")
     private const val REVIEW_RETRIES = 3
     private const val REVIEW_RETRY_MS = 25_000L
@@ -157,6 +165,9 @@ object OopsEngine {
     private val cards = ConcurrentHashMap<String, RecallCard>()
     private val drafts = ConcurrentHashMap<String, ActionDraft>()
     private val ownerHints = ConcurrentHashMap<String, com.oops.app.backend.DraftResponse>()
+    /** The server's running task list for this session (P0–P3); display only, confirming still goes through drafts. */
+    @Volatile private var taskBoard: JSONObject? = null
+    private var boardPoll: Job? = null
     private val hintEpochs = ConcurrentHashMap<String, Long>()
     private val suggestionEpochs = ConcurrentHashMap<String, Long>()
     private val opIds = ConcurrentHashMap<String, String>() // draftId → op_id, reused on retry
@@ -312,6 +323,7 @@ object OopsEngine {
             cards.clear()
             drafts.keys.removeAll { !submitted.containsKey(it) }
             ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear()
+            taskBoard = null; boardPoll?.cancel()
             sessionId = UUID.randomUUID().toString()
             sessionModes[sessionId] = policy.mode
             val archiveStartedAt = Instant.now().toString()
@@ -462,6 +474,9 @@ object OopsEngine {
                 ?: ("127.0.0.1" to RemoteAudioSource.DEFAULT_PORT)
             RemoteAudioSource(host, port)
         }
+        Settings.SOURCE_BEAN -> BeanAudioSource(BeanSdk.link(app, BeanAuth.fromBuildConfig()), ::MediaCodecOpusDecoder, kind)
+        Settings.SOURCE_BEAN_SIM -> BeanAudioSource(
+            ReplayBeanLink("录音豆模拟（内置对话）", { app.assets.open(TEST_BEAN_STREAM) }), ::MediaCodecOpusDecoder, kind)
         else -> MicAudioSource()
     }
 
@@ -973,16 +988,44 @@ object OopsEngine {
             try {
                 val hintStart = SystemClock.elapsedRealtime()
                 val result = policy.request(reservation) { client.draftAction(DraftRequest(session,
-                    listOf(utterance.toCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toCandidate() })) }
+                    listOf(utterance.toCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toCandidate() }, board = sessionModes[session] == "meeting")) }
                 timing(session, utterance.id, "draft", "http_ms" to (SystemClock.elapsedRealtime() - hintStart))
                 if (result != null && session == sessionId && hintEpochs[utterance.id] == epoch) {
                     ownerHints[utterance.id] = result
                     publishSessionSummary(session)
                 }
+                result?.board?.let { updateTaskBoard(session, it) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { Log.w(TAG, "owner hint unavailable: ${error.javaClass.simpleName}") }
         }.invokeOnCompletion { reservation.close() }
     }
+
+    /** The draft answer carries the list before this sentence; the server folds it in meanwhile, so read it again shortly. */
+    private fun updateTaskBoard(session: String, board: JSONObject) {
+        if (session != sessionId) return
+        val previous = taskBoard
+        if (previous == null || previous.optString("updated_at") != board.optString("updated_at")) {
+            taskBoard = board
+            emit(OopsEvent.Json("tasks.board", JSONObject(board.toString()).put("session_id", session)))
+        }
+        if (!board.optBoolean("pending") || boardPoll?.isActive == true) return
+        val client = api
+        boardPoll = scope.launch {
+            repeat(BOARD_POLLS) {
+                delay(BOARD_POLL_MS)
+                val fresh = try { client.meetingBoard(session) } catch (error: CancellationException) { throw error }
+                    catch (error: Exception) { null } ?: return@repeat
+                if (session != sessionId) return@launch
+                if (taskBoard?.optString("updated_at") != fresh.optString("updated_at")) {
+                    taskBoard = fresh
+                    emit(OopsEvent.Json("tasks.board", JSONObject(fresh.toString()).put("session_id", session)))
+                }
+                if (!fresh.optBoolean("pending")) return@launch
+            }
+        }
+    }
+
+    fun taskBoardSnapshot(): JSONObject? = taskBoard?.let { JSONObject(it.toString()).put("session_id", sessionId) }
 
     private fun refreshDraftSuggestions(session: String, utteranceId: String) {
         drafts.values.filter { utteranceId in it.evidence.utteranceIds && !submitted.containsKey(it.draftId) }.forEach { draft ->
@@ -1442,7 +1485,7 @@ object OopsEngine {
             require(mode == "test" || name in Settings.TEAM) { "请先选择本人姓名" }
             require(_state.value.voiceprint.phase !in setOf("saving", "testing", "checking", "loading", "recording")) { "请等待当前操作结束" }
             val kind = source?.kind ?: Settings.SOURCE_MIC
-            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE)) { "请先切换到手机或 Mac 麦克风，不能用测试 WAV 注册" }
+            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN)) { "请先切换到手机、Mac 麦克风或录音豆，不能用测试音频注册" }
             val client = api as? HttpOopsApi ?: error("请先连接真实服务器")
             val catalog = _state.value.voiceprint.catalog ?: error("请先刷新声纹列表")
             voiceprintClient = client
@@ -2085,7 +2128,8 @@ object OopsEngine {
         val previousAddress = settings.remoteAddress
         if (json.has("source")) {
             val kind = json.getString("source")
-            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_WAV, Settings.SOURCE_REMOTE)) { "音源无效" }
+            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_WAV, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN, Settings.SOURCE_BEAN_SIM)) { "音源无效" }
+            require(kind != Settings.SOURCE_BEAN || BeanSdk.included) { "这个安装包没有包含录音豆 SDK" }
             settings.source = kind
         }
         if (json.has("remoteAddress")) {

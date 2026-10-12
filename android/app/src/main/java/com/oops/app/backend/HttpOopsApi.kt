@@ -54,6 +54,10 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
         require(id.matches(Regex("[A-Za-z0-9_-]{1,100}")))
         return optionalGet("/v1/meetings/$id/minutes")
     }
+    override suspend fun meetingBoard(id: String): JSONObject? {
+        require(id.matches(Regex("[A-Za-z0-9_-]{1,100}")))
+        return optionalGet("/v1/meetings/$id/board")
+    }
     override suspend fun retainMeeting(request: JSONObject) = optional("/v1/meetings/retain", request)
     override suspend fun historyDelete(id: String) = optional("/v1/meetings/delete", JSONObject().put("session_id", id).put("confirm", true))
     override suspend fun historySearch(query: String) = optional("/v1/meetings/search", JSONObject().put("query", query))
