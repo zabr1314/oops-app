@@ -37,6 +37,8 @@ python3 scripts/test_jev_budget.py
 python3 scripts/test_meetings_overview.py
 python3 scripts/test_label_meeting.py
 python3 scripts/test_team_label.py
+python3 scripts/test_label_readiness.py
+python3 scripts/test_evaluate_cached_labels.py
 python3 scripts/test_bean_opus.py
 python3 scripts/test_question_watch.py
 python3 scripts/test_minutes_vote.py
