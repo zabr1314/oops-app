@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compare existing replay tags with human labels, offline. Never calls or calibrates a model.
 
-Sentence labels are folded onto their original ASR final; no final tag is copied onto child sentences.
-Incomplete/disputed human answers or changed transcript text prevent scoring.
+Content labels are folded onto their original ASR final; no final tag is copied onto child sentences.
+Only finals with complete, undisputed content answers are scored. Speaker confirmation is independent.
 """
 import argparse
 from collections import Counter
@@ -10,7 +10,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from team_label import Data, PEOPLE, LIVE_TAG, complete, merge
+from team_label import Data, PEOPLE, LIVE_TAG
+from label_workflow import content_audit
 
 
 def digest(value):
@@ -23,7 +24,11 @@ def ratio(n, d):
 
 def evaluate(rows, labels, replay):
     expected = {}
+    sentence_ids = set()
     for row in rows:
+        if row['id'] in sentence_ids:
+            raise ValueError('Duplicate sentence ID: ' + row['id'])
+        sentence_ids.add(row['id'])
         parent = row.get('parent')
         if not parent:
             raise ValueError('Sentence-to-final mapping is missing')
@@ -37,23 +42,58 @@ def evaluate(rows, labels, replay):
         children.sort(key=lambda u: (u['start_ms'], u['id']))
         if compact(''.join(u['text'] for u in children)) != compact(by_id[parent]['text']):
             raise ValueError('Replay text differs from the human-labelled source: ' + parent)
-    truth = merge(rows, labels)
-    complete_ids = {row['id'] for row in rows if any(
-        complete(person.get(row['id'], {}), dict(row, voice=None)) for person in labels.values())}
+    truth = content_audit(rows, labels)
+    complete_ids = set(truth['complete_ids'])
+    disputed_ids = set(truth['content_disputed_ids'])
+    stale_ids = set(truth.get('stale_kind_ids', []))
+    eligible = {}
+    excluded = []
+    for parent, children in expected.items():
+        ids = {u['id'] for u in children}
+        if ids <= complete_ids:
+            eligible[parent] = children
+            continue
+        disputed = sorted(ids & disputed_ids)
+        stale = sorted(ids & stale_ids)
+        missing = sorted(ids - complete_ids - disputed_ids - stale_ids)
+        excluded.append(dict(id=parent,
+            reasons=([ 'content_dispute' ] if disputed else []) +
+                    ([ 'stale_content_source' ] if stale else []) +
+                    ([ 'missing_content' ] if missing else []),
+            disputed_sentence_ids=disputed, stale_sentence_ids=stale, missing_sentence_ids=missing))
     report = dict(status='waiting_for_human_labels', granularity='asr_final',
         sentence_count=len(rows), final_count=len(expected), complete_human_rows=len(complete_ids),
-        disputed_rows=len(truth['disputes']), human_snapshot_sha256=digest(labels),
+        disputed_rows=len(disputed_ids), speaker_disputed_rows=len(truth['speaker_disputes']),
+        scored_final_count=len(eligible), scored_final_ids=sorted(eligible),
+        excluded_final_count=len(excluded), excluded_finals=excluded,
+        human_content_sentence_coverage=ratio(len(complete_ids), len(rows)),
+        human_content_final_coverage=ratio(len(eligible), len(expected)),
+        full_content_coverage=bool(rows) and len(eligible) == len(expected),
+        ready_for_content=truth['ready_for_content'],
+        content_label_sources=truth['content_label_sources'],
+        speaker_label_sources=truth['speaker_label_sources'],
+        label_source_counter_unit='person_sentence_field',
+        independent_speaker_rows=truth['independent_speaker_rows'],
+        grouped_speaker_rows=truth['grouped_speaker_rows'],
+        stale_kind_labels=truth['stale_kind_labels'], stale_speaker_labels=truth['stale_speaker_labels'],
+        human_snapshot_sha256=digest(labels),
         replay_sha256=digest(replay), source_sha256=digest(rows),
         scope='cached_development_replay', calibration_complete=False, real_meeting_accepted=False,
+        model_calls=0, source_data_modified=False,
         limitations=['Cached replay does not prove the currently deployed model version.',
+                     'Metrics cover only complete, undisputed human-content finals; exclusions remain unscored.',
+                     'Unlabelled short context is not automatically noise.',
+                     'Voice-group confirmation is not independent per-sentence speaker ground truth.',
+                     'Source counters count person/sentence fields, not independent confirmation actions.',
+                     'Legacy labels without source fingerprints remain compatible; their historical source cannot be revalidated.',
                      'No threshold is fitted: class confidence is not an effective-content probability.',
                      'These previously replayed meetings cannot serve as unseen holdout acceptance.'])
-    if not rows or len(complete_ids) != len(rows) or truth['disputes']:
+    if not eligible:
         return report
     matrix = {actual: {predicted: 0 for predicted in ('effective', 'noise', 'abstain')}
               for actual in ('effective', 'noise')}
     binary = {kind: Counter(tp=0, fp=0, fn=0, tn=0, abstain=0) for kind in ('task', 'decision')}
-    for parent, children in expected.items():
+    for parent, children in eligible.items():
         kinds = {truth['kinds'][u['id']] for u in children}
         actual = 'effective' if kinds - {'noise'} else 'noise'
         predicted = LIVE_TAG.get(by_id[parent].get('tag'))
@@ -70,7 +110,8 @@ def evaluate(rows, labels, replay):
     positives = sum(matrix['effective'].values())
     decided = sum(count for actual in matrix.values() for pred, count in actual.items() if pred != 'abstain')
     report.update(status='scored_cached_replay', effective_confusion=matrix,
-        decision_coverage=ratio(decided, len(expected)),
+        decision_coverage=ratio(decided, len(eligible)),
+        decision_coverage_denominator='scored_human_content_finals',
         effective_precision=ratio(tp, tp + fp), effective_recall=ratio(tp, positives),
         task_and_decision={kind: dict(counts, precision=ratio(counts['tp'], counts['tp']+counts['fp']),
             recall=ratio(counts['tp'], counts['tp']+counts['fn'])) for kind, counts in binary.items()})

@@ -7,8 +7,8 @@ and to each other.
     team_label.py links --base https://giftedprofessor.xyz/oops-meeting/label/   # personal links (LABEL_SECRET)
     team_label.py merge --data <pulled data> 0236                   # → evidence/<session>/truth.json + disagreements
 
-Per sentence a person marks who spoke, whether it is a task / decision / neither, the task owner, and which
-sentences state the same task. Labels are stored per person (labels/<meeting>/<name>.json) and merged into one
+A person confirms voice groups, labels continuous expressions, and corrects individual sentences.
+Identity linkage and content labels keep separate provenance and undo histories; tasks also need an owner. Labels are stored per person (labels/<meeting>/<name>.json) and merged into one
 truth file afterwards; sentences on which labellers disagree are listed instead of silently picking one.
 Listens on 127.0.0.1 only. Audio is served in single-sentence clips, only with a valid personal key.
 """
@@ -16,6 +16,7 @@ import argparse
 import base64
 import hashlib
 import hmac
+import hashlib
 import json
 import os
 import re
@@ -28,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from label_meeting import clip_wav  # noqa: E402
+from label_workflow import expressions, content_audit, current_label, row_fingerprint  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PEOPLE = ["林春源", "洪玉麟", "江古月", "黄丽萍"]
@@ -74,6 +76,8 @@ def clean(raw, rows):
         item = {}
         if label.get("speaker") in PEOPLE or label.get("speaker") in SPEAKER_OTHER:
             item["speaker"] = label["speaker"]
+        if label.get("speaker_excluded") is True:
+            item["speaker_excluded"] = True
         if label.get("kind") in KINDS:
             item["kind"] = label["kind"]
         if item.get("kind") == "task" and (label.get("owner") in PEOPLE or label.get("owner") in OWNER_OTHER):
@@ -82,7 +86,18 @@ def clean(raw, rows):
                 and label["dup"] in DUPS:
             item["dup"] = label["dup"]
         if item:
-            out[uid] = item
+            for field, mode in (("kind", "expression"), ("speaker", "voice_group")):
+                source = label.get(field + "_source")
+                if field in item and isinstance(source, dict) and source.get("mode") in (mode, 'single') \
+                        and isinstance(source.get("id"), str) and isinstance(source.get("fingerprint"), str):
+                    item[field + "_source"] = {k: source[k] for k in ("mode", "id", "fingerprint")}
+                elif field + '_source' in label:
+                    item.pop(field, None)  # Malformed provenance must never turn into a legacy human answer.
+                    if field == 'kind':
+                        item.pop('owner', None)
+                        item.pop('dup', None)
+            if item:
+                out[uid] = item
     return out
 
 
@@ -101,6 +116,19 @@ def complete(label, row):
 
 def merge(rows, by_person):
     """One truth from several labellers. A field counts when everyone who set it agrees; otherwise it is a dispute."""
+    units = {uid: unit for unit in expressions(rows) for uid in unit['ids']}
+    linked = {}
+    reviewed = {}
+    for person, labels in by_person.items():
+        reviewed[person] = {}
+        for row in rows:
+            label = current_label(row, labels.get(row['id'], {}), units[row['id']])
+            if label.get('speaker_source', {}).get('mode') == 'voice_group':
+                linked.setdefault(row['id'], {})[person] = label.pop('speaker')
+                label.pop('speaker_source')
+            if label:
+                reviewed[person][row['id']] = label
+    by_person = reviewed
     tasks, decisions, non_tasks, speakers, disputes, groups = [], [], [], {}, [], {}
     kinds = {}
     for u in rows:
@@ -143,10 +171,15 @@ def merge(rows, by_person):
                        if u.get("voice") and speakers.get(u["id"]) and speakers[u["id"]] != u["voice"]}
     return {"tasks": tasks, "decisions": decisions, "non_tasks": non_tasks, "kinds": kinds, "speakers": speakers,
             "voice_prefill_unreviewed": voice_only, "role_claim_unreviewed": role_only, "voice_prefill_overruled": voice_overruled,
+            "voice_group_linked": linked,
             "duplicates": [list(g) for g in dup_sets], "disputes": disputes, "labelers": sorted(by_person)}
 
 
 # ---------- storage ----------
+
+class RevisionConflict(ValueError):
+    pass
+
 
 class Data:
     def __init__(self, folder):
@@ -176,26 +209,224 @@ class Data:
                     u["role"] = roles[u["id"]]["role"]
             self.meetings[mid] = {"id": mid, "title": meeting.get("title", mid), "rows": meeting["utterances"],
                                   "wav": os.path.join(path, "audio.wav")}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        self.groups = self._voice_groups()
+
+    def _voice_groups(self):
+        groups = {}
+        for mid, meeting in self.meetings.items():
+            for row in meeting['rows']:
+                gid = 'voice:' + row['voice'] if row.get('voice') else 'role:' + row['role'] if row.get('role') else None
+                if not gid:
+                    continue
+                group = groups.setdefault(gid, dict(id=gid, title=gid.split(':', 1)[1], members=[], clips=[]))
+                group['members'].append(dict(meeting=mid, id=row['id'], text=row['text'],
+                    start_ms=row['start_ms'], end_ms=row['end_ms']))
+        for gid, group in groups.items():
+            group['fingerprint'] = hashlib.sha256(json.dumps(group['members'], ensure_ascii=False,
+                sort_keys=True).encode()).hexdigest()
+            role = self.roles.get(group['title'], {})
+            if role.get('clips'):
+                group['clips'] = role['clips']
+            else:
+                candidates = sorted(group['members'], key=lambda r: (-min(r['end_ms'] - r['start_ms'], 6000), r['id']))
+                for mid in self.meetings:
+                    clip = next((r for r in candidates if r['meeting'] == mid), None)
+                    if clip:
+                        group['clips'].append(clip)
+                group['clips'] = group['clips'][:3]
+        return groups
+
+    @staticmethod
+    def _read(path, default):
+        if not os.path.isfile(path):
+            return default
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+
+    @staticmethod
+    def _write(path, body):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + '.tmp', 'w', encoding='utf-8') as f:
+            json.dump(body, f, ensure_ascii=False, indent=1)
+        os.replace(path + '.tmp', path)
+
+    def _document(self, mid, name):
+        doc = self._read(self.labels_path(mid, name), {})
+        doc['labels'] = clean(doc.get('labels', {}), self.meetings[mid]['rows'])
+        # Group approval lives separately. Never persist its materialized speaker as single-row truth.
+        for label in doc['labels'].values():
+            if label.get('speaker_source', {}).get('mode') == 'voice_group':
+                label.pop('speaker', None)
+                label.pop('speaker_source', None)
+        return {'revision': 0, 'history': [], 'seen': {}, **doc}
+
+    def _identity_path(self, name):
+        return os.path.join(self.folder, 'identities', name + '.json')
+
+    def _identities(self, name):
+        doc = self._read(self._identity_path(name), {})
+        return {'revision': 0, 'history': [], 'seen': {}, 'approvals': {}, **doc}
+
+    def identity_payload(self, name):
+        doc = self._identities(name)
+        claims = self.claims()
+        groups = []
+        for gid, group in self.groups.items():
+            approval = doc['approvals'].get(gid)
+            valid = bool(approval and approval.get('fingerprint') == group['fingerprint'])
+            suggestion = gid.split(':', 1)[1] if gid.startswith('voice:') else claims.get(group['title'], {}).get('person')
+            groups.append(dict(group, suggested_person=suggestion, approval=approval, current=valid,
+                count=len(group['members'])))
+        return dict(groups=groups, revision=doc['revision'], can_undo=bool(doc['history']))
+
+    @staticmethod
+    def _begin(doc, body, field):
+        request = body.get('request_id')
+        if not isinstance(request, str) or not 8 <= len(request) <= 100:
+            raise ValueError('request_id required')
+        fingerprint = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+        if request in doc['seen']:
+            if doc['seen'][request] != fingerprint:
+                raise ValueError('request_id reused')
+            return False
+        if body.get('revision') != doc['revision']:
+            raise RevisionConflict('State changed; reload before editing')
+        if body.get('action') == 'undo':
+            if not doc['history']:
+                raise ValueError('nothing to undo')
+            doc[field] = doc['history'].pop()
+        else:
+            doc['history'] = (doc['history'] + [json.loads(json.dumps(doc[field]))])[-30:]
+        doc['revision'] += 1
+        doc['seen'][request] = fingerprint
+        doc['seen'] = dict(list(doc['seen'].items())[-100:])
+        return True
+
+    def review_identity(self, name, body):
+        with self.lock:
+            doc = self._identities(name)
+            if not self._begin(doc, body, 'approvals'):
+                return self.identity_payload(name)
+            if body.get('action') != 'undo':
+                group = self.groups.get(body.get('group'))
+                if not group or body.get('fingerprint') != group['fingerprint']:
+                    raise RevisionConflict('Voice group changed')
+                if body.get('action') == 'revoke':
+                    doc['approvals'].pop(group['id'], None)
+                elif body.get('action') == 'confirm' and body.get('speaker') in PEOPLE + list(SPEAKER_OTHER):
+                    doc['approvals'][group['id']] = dict(speaker=body['speaker'], fingerprint=group['fingerprint'],
+                        by=name, at=time.strftime('%Y-%m-%dT%H:%M:%S'), scope='voice_group',
+                        members=[dict(meeting=r['meeting'], id=r['id']) for r in group['members']])
+                else:
+                    raise ValueError('unknown identity action')
+            self._write(self._identity_path(name), doc)
+            return self.identity_payload(name)
+
+    def meeting_payload(self, mid, name):
+        rows = self.rows_with_claims(mid)
+        doc = self._document(mid, name)
+        labels = self.load(mid, name)
+        audit = content_audit(rows, {name: labels})
+        units = expressions(rows)
+        by_id = {uid: e for e in units for uid in e['ids']}
+        current = {u['id']: current_label(u, labels.get(u['id'], {}), by_id[u['id']]) for u in rows}
+        current = {uid: label for uid, label in current.items() if label}
+        return dict(id=mid, rows=[dict(u, chars=chars(u), fingerprint=row_fingerprint(u)) for u in rows], labels=current,
+            stale_ids=list(set(audit['stale_kind_ids'] + audit['stale_speaker_ids'])),
+            expressions=audit['expressions'], revision=doc['revision'], can_undo=bool(doc['history']),
+            content_progress={k: audit[k] for k in ('required_expression_count', 'complete_required_expressions',
+                'context_expression_count', 'ready_for_content')})
+
+    def review(self, mid, name, body):
+        with self.lock:
+            doc = self._document(mid, name)
+            if not self._begin(doc, body, 'labels'):
+                return self.meeting_payload(mid, name)
+            if body.get('action') != 'undo':
+                rows = self.rows_with_claims(mid)
+                field, value = body.get('field'), body.get('value')
+                if field not in ('kind', 'speaker', 'owner', 'dup'):
+                    raise ValueError('unknown field')
+                expression = None
+                if body.get('scope') == 'expression':
+                    if field == 'speaker':
+                        raise ValueError('expression cannot establish speaker identity')
+                    expression = next((e for e in expressions(rows) if e['id'] == body.get('expression')), None)
+                    if not expression or expression['fingerprint'] != body.get('fingerprint'):
+                        raise RevisionConflict('Expression changed')
+                    ids = expression['ids']
+                elif body.get('scope') == 'row' and body.get('id') in {u['id'] for u in rows}:
+                    ids = [body['id']]
+                    row = next(u for u in rows if u['id'] == body['id'])
+                    if body.get('fingerprint') != row_fingerprint(row):
+                        raise RevisionConflict('Sentence changed')
+                else:
+                    raise ValueError('unknown scope')
+                allowed = {'kind': KINDS, 'speaker': PEOPLE + list(SPEAKER_OTHER),
+                    'owner': PEOPLE + list(OWNER_OTHER), 'dup': list(DUPS)}
+                if value is not None and value not in allowed[field]:
+                    raise ValueError('unknown value')
+                for uid in ids:
+                    label = doc['labels'].setdefault(uid, {})
+                    # Whole-expression changes preserve deliberate single-row exceptions.
+                    row = next(u for u in rows if u['id'] == uid)
+                    if expression and current_label(row, label, expression).get('kind') \
+                            and label.get('kind_source', {}).get('mode') != 'expression':
+                        continue
+                    if value is None:
+                        label.pop(field, None)
+                    else:
+                        label[field] = value
+                    if field == 'kind':
+                        label.pop('kind_source', None)
+                        if expression and value:
+                            label['kind_source'] = dict(mode='expression', id=expression['id'], fingerprint=expression['fingerprint'])
+                        elif value:
+                            label['kind_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row))
+                        if value != 'task':
+                            label.pop('owner', None)
+                        if value not in ('task', 'decision'):
+                            label.pop('dup', None)
+                    if field == 'speaker':
+                        label.pop('speaker_source', None)
+                        label['speaker_excluded'] = value is None
+                        if value:
+                            label['speaker_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row))
+                    if not expression and field in ('owner', 'dup') and label.get('kind'):
+                        # Correcting a dependent content field makes this row an explicit exception too.
+                        label['kind_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row))
+                doc['labels'] = clean(doc['labels'], rows)
+            doc.update(meeting=mid, labeler=name)
+            self._write(self.labels_path(mid, name), doc)
+            return self.meeting_payload(mid, name)
 
     def labels_path(self, mid, name):
         return os.path.join(self.folder, "labels", mid, name + ".json")
 
     def load(self, mid, name):
-        path = self.labels_path(mid, name)
-        if not os.path.isfile(path):
-            return {}
-        with open(path, encoding="utf-8") as f:
-            return clean(json.load(f).get("labels"), self.meetings[mid]["rows"])
+        labels = self._document(mid, name)['labels']
+        approvals = self._identities(name)['approvals']
+        for row in self.rows_with_claims(mid):
+            gid = row.get('voice_group_id')
+            approval = approvals.get(gid)
+            label = labels.get(row['id'], {})
+            if approval and approval.get('fingerprint') == row.get('voice_group_fingerprint') \
+                    and not label.get('speaker') and not label.get('speaker_excluded'):
+                labels[row['id']] = dict(label, speaker=approval['speaker'], speaker_source=dict(
+                    mode='voice_group', id=gid, fingerprint=approval['fingerprint']))
+        return labels
 
-    def save(self, mid, name, raw):
+    def save(self, mid, name, raw, revision=None):
         labels = clean(raw, self.meetings[mid]["rows"])
         path = self.labels_path(mid, name)
         with self.lock:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path + ".tmp", "w", encoding="utf-8") as f:
-                json.dump({"meeting": mid, "labeler": name, "labels": labels}, f, ensure_ascii=False, indent=1)
-            os.replace(path + ".tmp", path)
+            doc = self._document(mid, name)
+            if revision is not None and revision != doc['revision']:
+                raise RevisionConflict('State changed')
+            doc['history'] = (doc['history'] + [doc['labels']])[-30:]
+            doc.update(meeting=mid, labeler=name, labels=labels, revision=doc['revision'] + 1)
+            self._write(path, doc)
         return labels
 
     def claims(self):
@@ -227,7 +458,13 @@ class Data:
         out = []
         for u in self.meetings[mid]["rows"]:
             person = (claims.get(u.get("role")) or {}).get("person")
-            out.append(dict(u, voice=person, claimed=True) if not u.get("voice") and person in PEOPLE else u)
+            gid = 'voice:' + u['voice'] if u.get('voice') else 'role:' + u['role'] if u.get('role') else None
+            row = dict(u, **dict(voice=person, claimed=True)) if not u.get('voice') and person in PEOPLE else dict(u)
+            # Strip any archived predictions before returning a blind annotation page.
+            row = {k: row[k] for k in ('id', 'parent', 'text', 'start_ms', 'end_ms', 'voice', 'role', 'claimed') if k in row}
+            if gid:
+                row.update(voice_group_id=gid, voice_group_fingerprint=self.groups[gid]['fingerprint'])
+            out.append(row)
         return out
 
     def progress(self, mid):
@@ -289,21 +526,27 @@ def make_handler(data, secret):
                 return self.send(200, json.dumps({"name": name, "meetings": meetings}, ensure_ascii=False).encode())
             if url.path == "/api/roles":
                 return self.send(200, json.dumps({"roles": data.roles, "claims": data.claims()}, ensure_ascii=False).encode())
+            if url.path == '/api/identity' and name != TEAM:
+                return self.send(200, json.dumps(data.identity_payload(name), ensure_ascii=False).encode())
             m = re.fullmatch(r"/api/meeting/([0-9]{4})", url.path)
             if m and name == TEAM:
                 return self.send(400, b'{"error":"who"}')
             if m and m.group(1) in data.meetings:
                 mid = m.group(1)
-                rows = [{"id": u["id"], "text": u["text"], "start_ms": u["start_ms"], "end_ms": u["end_ms"], "chars": chars(u),
-                         **{k: u[k] for k in ("voice", "role", "claimed") if u.get(k)}}
-                        for u in data.rows_with_claims(mid)]  # blind: no model output, nobody else's labels
-                return self.send(200, json.dumps({"id": mid, "rows": rows, "labels": data.load(mid, name)},
-                                                 ensure_ascii=False).encode())
+                return self.send(200, json.dumps(data.meeting_payload(mid, name), ensure_ascii=False).encode())
             m = re.fullmatch(r"/clip/([0-9]{4})/([A-Za-z0-9_-]{1,40})\.wav", url.path)
             if m and m.group(2) in index.get(m.group(1), {}):
                 u = index[m.group(1)][m.group(2)]
                 pad = 0 if (query.get("pad") or [""])[0] == "0" else 300
-                return self.send(200, clip_wav(data.meetings[m.group(1)]["wav"], u["start_ms"], u["end_ms"], pad), "audio/wav")
+                end_ms = u['end_ms']
+                through = (query.get('through') or [''])[0]
+                if through:
+                    expr = next((e for e in expressions(data.rows_with_claims(m.group(1)))
+                        if e['ids'][0] == u['id'] and e['ids'][-1] == through), None)
+                    if not expr:
+                        return self.send(400, b'{}')
+                    end_ms = expr['end_ms']
+                return self.send(200, clip_wav(data.meetings[m.group(1)]["wav"], u["start_ms"], end_ms, pad), "audio/wav")
             self.send(404, b"{}")
 
         def do_POST(self):
@@ -312,6 +555,20 @@ def make_handler(data, secret):
             if not name or name == TEAM:
                 return self.send(401, b'{"error":"link"}')
             size = int(self.headers.get("Content-Length") or 0)
+            review = re.fullmatch(r'/api/meeting/([0-9]{4})/review', url.path)
+            if url.path == '/api/identity' or review and review.group(1) in data.meetings:
+                if not 0 < size <= 10000:
+                    return self.send(400, b'{}')
+                try:
+                    body = json.loads(self.rfile.read(size))
+                    if not isinstance(body, dict):
+                        raise ValueError('object required')
+                    result = data.review_identity(name, body) if url.path == '/api/identity' else data.review(review.group(1), name, body)
+                except RevisionConflict:
+                    return self.send(409, b'{"error":"changed"}')
+                except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+                    return self.send(400, b'{}')
+                return self.send(200, json.dumps(result, ensure_ascii=False).encode())
             if url.path == "/api/roles":
                 try:
                     body = json.loads(self.rfile.read(size)) if 0 < size <= 10_000 else {}
@@ -324,8 +581,12 @@ def make_handler(data, secret):
                 return self.send(404, b"{}")
             if not 0 < size <= 1_500_000:
                 return self.send(400, b"{}")
+            if self.headers.get('X-Label-Revision') is None:
+                return self.send(409, b'{"error":"upgrade_required"}')
             try:
-                labels = data.save(m.group(1), name, json.loads(self.rfile.read(size)))
+                labels = data.save(m.group(1), name, json.loads(self.rfile.read(size)), int(self.headers['X-Label-Revision']))
+            except RevisionConflict:
+                return self.send(409, b'{"error":"changed"}')
             except (json.JSONDecodeError, ValueError):
                 return self.send(400, b"{}")
             self.send(200, json.dumps({"saved": len(labels)}).encode())
@@ -371,17 +632,18 @@ def links(args):
 
 def merge_cmd(args):
     import dji_to_eval
+    data = Data(args.data)
     for short in args.meetings:
         with open(os.path.join(args.data, "meetings", short, "meeting.json"), encoding="utf-8") as f:
             meeting = json.load(f)
-        rows = Data(args.data).rows_with_claims(short)
+        rows = data.rows_with_claims(short)
         folder = os.path.join(args.data, "labels", short)
         by_person = {}
         for name in PEOPLE:
             path = os.path.join(folder, name + ".json")
-            if os.path.isfile(path):
-                with open(path, encoding="utf-8") as f:
-                    by_person[name] = clean(json.load(f).get("labels"), rows)
+            labels = data.load(short, name)
+            if labels:
+                by_person[name] = labels
         truth = {"meeting": meeting["session"], "source": "team_label", **merge(rows, by_person)}
         out = os.path.join(ROOT, "evidence", meeting["session"], "truth.json")
         with open(out, "w", encoding="utf-8") as f:
@@ -444,6 +706,7 @@ details.help summary{cursor:pointer;font-weight:600}details.help li{margin:3px 0
 @media(max-width:640px){header{padding:6px 12px}main{padding:4px 10px 120px}h1{display:none}.t{display:none}.txt{font-size:15px}
 .row{padding:8px 10px}.ctl{gap:6px}.grp>span{display:none}.c{padding:2px 7px;min-height:32px}.hide-s{display:none}.tool{padding:3px 9px}
 .grp+.grp{padding-left:8px;border-left:1px solid var(--line)}}
+.child{padding:12px 0;border-top:1px solid var(--line)}.corrections{margin-top:10px}.corrections summary,.members{font-size:13px}.members{max-height:360px;overflow:auto}.members>div{padding:8px 0;border-top:1px solid var(--line)}button:disabled,select:disabled{opacity:.5;cursor:wait}.role{padding:16px 0}.role .clip{align-items:flex-start}.role details summary{cursor:pointer}.child .txt{font-size:14px}
 </style>
 <div id="gate" hidden><h1>请用个人链接打开</h1><p class="mut">这个页面只对团队成员开放。请使用发给你的完整链接（包含 #k= 的那一段）。</p></div>
 <div id="pick" hidden style="max-width:420px;margin:15vh auto;padding:0 16px;text-align:center"><h1>你是谁？</h1>
@@ -451,115 +714,86 @@ details.help summary{cursor:pointer;font-weight:600}details.help li{margin:3px 0
 <div id="app" hidden>
 <header><div class="hrow"><h1>Oops 讨论标注</h1><div class="tabs" id="tabs"></div><span class="mut" id="me"></span><span class="mut" id="state">已保存</span></div>
 <div class="hrow" style="margin-top:6px"><span class="mut" id="prog"></span>
-<button class="tool" id="cont" title="从当前句开始连续播放，边听边标（快捷键 P）">▶ 连续播放</button>
+<button class="tool" id="cont" title="从当前表达开始连续播放，边听边标">▶ 连续播放</button>
 <select class="tool" id="rate" title="播放速度"><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option></select>
-<select class="tool" id="filter"><option value="all">全部句子</option><option value="todo">只看没标完的</option><option value="who">只看说话人待定的</option><option value="marked">只看任务/决定</option></select></div></header>
-<main><details class="help" id="roles" hidden><summary id="roles-sum">认领声音</summary><p class="mut" style="margin:6px 0 0">声纹还认不出的声音，按音色分成了几个角色（三场是同一个角色）。听一下代表片段，点是谁；认领后这个角色的句子会自动填上说话人（虚线框），错了照样可以改。</p><div id="roles-list"></div></details>
-<details class="help" id="help"><summary>怎么标（1 分钟看完）</summary><ul>
-<li><b>只标长句</b>：不到 10 个字的短句（「对」「可以的」）显示成灰色小字，不用标，听和看上下文就行。如果短句本身就是任务或决定（比如「你来。」「行，就这么定」），点它右边的「标」再标。</li>
-<li><b>谁说的</b>：声纹有把握的句子、以及已认领角色的句子都已经预填（虚线框），听着不对就点正确的人改掉，对的不用动。其余句子请听一下，点说话人。几个人同时说选「多人」，听不出或不是我们四个人选「听不清」。</li>
-<li><b>任务</b>：有人要去做的具体事，自己认领（“我来改”）或被安排（“你把文档发我”）都算，再选负责人；大家一起做选「大家」。</li>
-<li><b>决定</b>：大家定下来的结论，例如“那就先做声纹”。只是提想法、还在讨论的不算。</li>
-<li><b>有效</b>：不是任务也不是决定，但值得写进纪要或思维导图的内容：想法、方案、理由、问题、数据、限制条件。像“回头再看看”“可以考虑”这种听起来像任务但没人要做的，也标「有效」。</li>
-<li><b>无效</b>：闲聊、跑题、口头禅、重复、说了一半没意义的话。会后整理时可以直接丢掉的。</li>
-<li><b>同一件事</b>：同一个任务或决定说了好几遍，就给这几句选同一个字母。</li>
-<li>每次点击自动保存。你看不到模型的判断，也看不到别人的标注，按自己的理解标就好。</li>
-<li class="hide-s">键盘：<kbd>↑</kbd><kbd>↓</kbd> 换句，<kbd>空格</kbd> 听，<kbd>P</kbd> 连续播放，<kbd>1</kbd>–<kbd>4</kbd> 说话人（春源/玉麟/古月/丽萍），<kbd>5</kbd> 多人，<kbd>0</kbd> 听不清，<kbd>T</kbd> 任务，<kbd>D</kbd> 决定，<kbd>I</kbd> 有效，<kbd>N</kbd> 无效，<kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd><kbd>R</kbd> 负责人，<kbd>A</kbd> 负责人为大家。</li>
+<select class="tool" id="filter"><option value="all">全部表达</option><option value="todo">内容待核对</option><option value="who">身份待核对</option><option value="marked">任务 / 决定</option></select><button class="tool" id="undo-content">撤销本场上一步标注</button><button class="tool" id="undo-identity">撤销上一步音色组操作</button><button class="tool" id="reload">重新读取</button><button class="tool" id="retry" hidden>重试保存</button></div></header>
+<main><details class="help" id="roles" hidden><summary id="roles-sum">认领声音</summary><p class="mut" style="margin:6px 0 0">同音色的片段放在一组。先听代表录音，查看关联范围，再确认是谁；单句纠错优先，整组可撤销。身份确认只作用于“谁说的”。</p><div id="roles-list"></div></details>
+<details class="help" id="help"><summary>怎么标</summary><ul>
+<li>先在音色组里核对身份，一次关联多句；代表录音不能保证整组都正确，可以展开范围逐句移出或纠正。</li>
+<li>连续表达合起来听、合起来标。整段按钮只改内容，不改说话人。已有单句内容纠错会保留；不同内容请展开逐句标。</li>
+<li>短句上下文可以跳过，不会自动记成无效。若“你来”“就这么定”本身有任务或决定，请展开标注。</li>
+<li>任务要核对负责人；有效包括观点、问题、方案、事实与限制；无效包括口头禅、闲聊和无意义重复。</li>
+<li>内容和身份分别统计。每次操作收到服务器回执才显示已保存；失败可重试。本场标注和音色组确认分别恢复上一操作，刷新后仍可撤销。</li>
+<li>你看不到模型内容分类，也看不到别人的逐句答案。快捷键：↑↓换表达，空格听整段，T任务、D决定、I有效、N无效。</li>
 </ul></details><div id="list"></div></main></div>
 <script>
-const PEOPLE=__PEOPLE__, SP_OTHER=__SPOTHER__, OW_OTHER=__OWOTHER__, SHORT=__SHORT__, DUPS="__DUPS__";
-const SHORTN={"林春源":"春源","洪玉麟":"玉麟","江古月":"古月","黄丽萍":"丽萍"};
-const $=s=>document.querySelector(s), esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const PEOPLE=__PEOPLE__, DUPS="__DUPS__";
+const SHORTN={"林春源":"春源","洪玉麟":"玉麟","江古月":"古月","黄丽萍":"丽萍",other:'其他人',multi:'多人',unclear:'听不清',collective:'大家',unknown:'不确定'};
+const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clock=ms=>{const s=Math.floor(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
-const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
-let KEY='', ME=null, M=null, U=[], L={}, cur=0, audio=new Audio(), cont=false, saveTimer=null, dirty=false;
-const hash=new URLSearchParams(location.hash.slice(1));
-if(hash.get('k')){KEY=hash.get('k');store.set('oops-label-key',KEY);history.replaceState(null,'',location.pathname+location.search)} else KEY=store.get('oops-label-key')||'';
-let WHO=store.get('oops-label-who')||'';
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}},remove(k){try{localStorage.removeItem(k)}catch(e){}}};
+let KEY='', WHO=store.get('oops-label-who')||'', ME=null, M=null, U=[], L={}, E=[], DOC=null, IDENTITY=null, cur=0, audio=new Audio(), cont=false, busy=false, pending=null;
+const OPEN=new Set(), hash=new URLSearchParams(location.hash.slice(1));
+if(hash.get('k')){KEY=hash.get('k');store.set('oops-label-key',KEY);history.replaceState(null,'',location.pathname+location.search)}else KEY=store.get('oops-label-key')||'';
 const api=(p,o={})=>fetch(p.replace(/^\//,''),{...o,headers:{...(o.headers||{}),Authorization:'Bearer '+KEY,...(WHO?{'X-Labeler':encodeURIComponent(WHO)}:{})}});
-const shortRow=u=>u.end_ms-u.start_ms<SHORT;
-const complete=(l,u)=>!!(l&&l.kind&&(l.speaker||u.voice||shortRow(u))&&(l.kind!=='task'||l.owner));
-const whoOpen=u=>!isMini(u)&&!u.voice&&!(L[u.id]||{}).speaker;
-let ROLES={},CLAIMS={};
-function chip(k,v,label,on,cls=''){return `<button class="c ${cls} ${on?'on':''}" data-k="${k}" data-v="${v}">${label}</button>`}
-const isMini=u=>u.chars<10;const OPEN=new Set();
-function rowHTML(u,i){const l=L[u.id]||{};
-  if(isMini(u)&&!OPEN.has(u.id)&&!Object.keys(l).length)return `<div class="row mini ${i===cur?'cur':''}" data-i="${i}" id="r-${u.id}"><div class="top"><span class="t">${clock(u.start_ms)}</span><div class="txt">${esc(u.text)}</div><button class="c" data-open="1">标</button><button class="play" data-play="1">▶</button></div></div>`;
-  const vp=!l.speaker&&u.voice;
-  const sp=PEOPLE.map(p=>chip('speaker',p,SHORTN[p],l.speaker===p||(vp&&u.voice===p),vp&&u.voice===p?'vp':'')).join('')+chip('speaker','multi','多人',l.speaker==='multi')+chip('speaker','unclear','听不清',l.speaker==='unclear');
-  const kd=chip('kind','task','任务',l.kind==='task')+chip('kind','decision','决定',l.kind==='decision','dec')+chip('kind','info','有效',l.kind==='info','inf')+chip('kind','noise','无效',l.kind==='noise','neg');
-  const ow=l.kind==='task'?`<span class="grp"><span>负责人</span>${PEOPLE.map(p=>chip('owner',p,SHORTN[p],l.owner===p)).join('')}${chip('owner','collective','大家',l.owner==='collective')}${chip('owner','unknown','不确定',l.owner==='unknown')}</span>`:'';
-  const dp=(l.kind==='task'||l.kind==='decision')?`<span class="grp"><span>同一件事</span><select class="tool" data-k="dup"><option value="">—</option>${DUPS.split('').map(c=>`<option ${l.dup===c?'selected':''}>${c}</option>`).join('')}</select></span>`:'';
-  return `<div class="row ${complete(l,u)?'done':''} ${l.kind?'k-'+l.kind:''} ${i===cur?'cur':''}" data-i="${i}" id="r-${u.id}">
-   <div class="top"><span class="t">${clock(u.start_ms)}</span><div class="txt">${esc(u.text)}</div><button class="play" data-play="1">▶</button></div>
-   <div class="ctl"><span class="grp"><span>谁说的</span>${sp}${vp?`<em class="vpnote">${u.claimed?esc(u.role)+'已认领，错了再改':'声纹已填，错了再改'}</em>`:(!l.speaker&&u.role?`<em class="vpnote">像${esc(u.role)}，认领后自动填</em>`:'')}</span><span class="grp"><span>类型</span>${kd}</span>${ow}${dp}</div></div>`}
-function visible(u){const f=$('#filter').value,l=L[u.id]||{};return f==='all'||(f==='todo'&&!isMini(u)&&!complete(l,u))||(f==='who'&&whoOpen(u))||(f==='marked'&&(l.kind==='task'||l.kind==='decision'))}
-function renderList(){const html=U.map((u,i)=>visible(u)?rowHTML(u,i):'').join('');$('#list').innerHTML=html||'<div class="empty">没有符合条件的句子</div>';renderProg()}
-function renderRow(i){const el=document.getElementById('r-'+U[i].id);if(!el)return;const tmp=document.createElement('div');tmp.innerHTML=rowHTML(U[i],i);const n=tmp.firstElementChild;if(el.classList.contains('playing'))n.classList.add('playing');el.replaceWith(n)}
-function renderProg(){let done=0,t=0,d=0;const need=U.filter(u=>!isMini(u)).length;U.forEach(u=>{const l=L[u.id];if(!isMini(u)&&complete(l,u))done++;if(l&&l.kind==='task')t++;if(l&&l.kind==='decision')d++});
-  const who=U.filter(whoOpen).length;$('#prog').textContent=`说话人待定 ${who} 句 · 长句已标 ${done}/${need}（${Math.round(done*100/Math.max(1,need))}%）· 任务 ${t} · 决定 ${d}`;
-  const tab=document.querySelector(`#tabs button[data-m="${M}"] small`);if(tab)tab.textContent=` ${Math.round(done*100/Math.max(1,need))}%`}
-function setCur(i,scroll=true){if(i<0||i>=U.length)return;const old=cur;cur=i;renderRow(old);renderRow(i);store.set('oops-label-cur-'+M,String(i));
-  const el=document.getElementById('r-'+U[i].id);if(el&&scroll)el.scrollIntoView({block:'nearest',behavior:'smooth'})}
-function setField(i,k,v){const u=U[i],l=L[u.id]=L[u.id]||{};l[k]=(l[k]===v||v==='')?undefined:v;
-  if(l.kind!=='task')delete l.owner;if(l.kind!=='task'&&l.kind!=='decision')delete l.dup;Object.keys(l).forEach(x=>l[x]===undefined&&delete l[x]);if(!Object.keys(l).length)delete L[u.id];
-  renderRow(i);renderProg();queueSave()}
-function queueSave(){dirty=true;store.set('oops-label-draft-'+M,JSON.stringify(L));$('#state').className='mut';$('#state').textContent='保存中…';clearTimeout(saveTimer);saveTimer=setTimeout(save,500)}
-async function save(){const mid=M,body=JSON.stringify(L);try{const r=await api(`/api/meeting/${mid}/labels`,{method:'POST',headers:{'Content-Type':'application/json'},body});
-  if(!r.ok)throw new Error(r.status);if(mid===M){dirty=false;$('#state').textContent='已保存'}}catch(e){$('#state').className='err';$('#state').textContent='保存失败，网络恢复后会自动重试';clearTimeout(saveTimer);saveTimer=setTimeout(save,4000)}}
-function play(i,pad){const u=U[i];document.querySelectorAll('.row.playing').forEach(e=>e.classList.remove('playing'));
-  audio.pause();audio=new Audio(`clip/${M}/${u.id}.wav?pad=${pad?'':'0'}&k=${encodeURIComponent(KEY)}`);audio.playbackRate=+$('#rate').value;
-  const el=document.getElementById('r-'+u.id);if(el)el.classList.add('playing');
-  audio.onended=()=>{if(el)el.classList.remove('playing');if(cont&&i+1<U.length){setCur(i+1);play(i+1,false)}else stopCont()};
-  audio.play().catch(()=>stopCont());
-  if(i+1<U.length){const n=new Audio(`clip/${M}/${U[i+1].id}.wav?pad=0&k=${encodeURIComponent(KEY)}`);n.preload='auto'}}
-function stopCont(){cont=false;$('#cont').classList.remove('on');$('#cont').textContent='▶ 连续播放'}
-function toggleCont(){if(cont){cont=false;audio.pause();stopCont();document.querySelectorAll('.row.playing').forEach(e=>e.classList.remove('playing'));return}
-  cont=true;$('#cont').classList.add('on');$('#cont').textContent='❚❚ 暂停';play(cur,false)}
-$('#list').addEventListener('click',e=>{const row=e.target.closest('.row');if(!row)return;const i=+row.dataset.i;
-  if(e.target.dataset.open){OPEN.add(U[i].id);setCur(i,false);renderRow(i);return}
-  if(e.target.dataset.play){if(i!==cur)setCur(i,false);stopCont();play(i,true);return}
-  if(e.target.classList.contains('c')){if(i!==cur)setCur(i,false);setField(i,e.target.dataset.k,e.target.dataset.v);return}
-  if(e.target.classList.contains('txt')&&i!==cur)setCur(i,false)});
-$('#list').addEventListener('change',e=>{const row=e.target.closest('.row');if(row&&e.target.dataset.k)setField(+row.dataset.i,e.target.dataset.k,e.target.value)});
-$('#filter').addEventListener('change',renderList);$('#cont').addEventListener('click',toggleCont);
-$('#rate').addEventListener('change',()=>{audio.playbackRate=+$('#rate').value;store.set('oops-label-rate',$('#rate').value)});
-document.addEventListener('keydown',e=>{if(e.target.tagName==='SELECT'||e.metaKey||e.ctrlKey||e.altKey||!U.length)return;const k=e.key.toLowerCase();
-  const sp={'1':PEOPLE[0],'2':PEOPLE[1],'3':PEOPLE[2],'4':PEOPLE[3],'5':'multi','0':'unclear'},ow={q:PEOPLE[0],w:PEOPLE[1],e:PEOPLE[2],r:PEOPLE[3],a:'collective'},kd={t:'task',d:'decision',i:'info',n:'noise'};
-  if(k==='arrowdown'||k==='j'){e.preventDefault();setCur(nextVisible(cur,1))}else if(k==='arrowup'||k==='k'){e.preventDefault();setCur(nextVisible(cur,-1))}
-  else if(k===' '){e.preventDefault();stopCont();play(cur,true)}else if(k==='p'){toggleCont()}
-  else if(sp[k])setField(cur,'speaker',sp[k]);else if(kd[k])setField(cur,'kind',kd[k]);else if(ow[k]&&(L[U[cur].id]||{}).kind==='task')setField(cur,'owner',ow[k])});
-function nextVisible(i,step){for(let j=i+step;j>=0&&j<U.length;j+=step)if(visible(U[j])&&(!isMini(U[j])||OPEN.has(U[j].id)||L[U[j].id]))return j;return i}
-async function loadRoles(){const r=await api('/api/roles');if(!r.ok)return;const d=await r.json();ROLES=d.roles||{};CLAIMS=d.claims||{};
-  const names=Object.keys(ROLES);$('#roles').hidden=!names.length;if(!names.length)return;
-  const open=names.filter(n=>!CLAIMS[n]).length;$('#roles-sum').textContent=open?`认领声音：还有 ${open} 个角色没人认领`:'认领声音：都已认领';
-  $('#roles-list').innerHTML=names.map(n=>{const c=CLAIMS[n],who=c&&c.person;
-    return `<div class="role" data-role="${esc(n)}"><b>${esc(n)} <span class="mut">· ${ROLES[n].seconds} 秒${who?` · 已认领为 ${esc(who==='other'?'不是我们四个':who)}（${esc(c.by)}）`:''}</span></b>
-    ${ROLES[n].clips.map(x=>`<div class="clip"><button class="play" data-clip="${esc(x.meeting)}/${esc(x.id)}">▶</button><span>${esc(x.meeting)}</span>${esc(x.text)}</div>`).join('')}
-    <div class="ctl"><span class="grp"><span>这是</span>${PEOPLE.map(p=>`<button class="c ${who===p?'on':''}" data-claim="${p}">${SHORTN[p]}</button>`).join('')}<button class="c neg ${who==='other'?'on':''}" data-claim="other">不是我们</button>${who?'<button class="c" data-claim="">撤销</button>':''}</span></div></div>`}).join('')}
-$('#roles-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;const role=b.closest('.role').dataset.role;
-  if(b.dataset.clip){stopCont();audio.pause();audio=new Audio(`clip/${b.dataset.clip}.wav?k=${encodeURIComponent(KEY)}`);audio.play();return}
-  if(b.dataset.claim===undefined)return;
-  await api('/api/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,person:b.dataset.claim||null})});
-  await loadRoles();if(M)openMeeting(M)});
-async function openMeeting(mid){if(dirty)await save();stopCont();audio.pause();M=mid;store.set('oops-label-meeting',mid);
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.m===mid));$('#list').innerHTML='<div class="empty">加载中…</div>';
-  const r=await api('/api/meeting/'+mid);const d=await r.json();U=d.rows;L=d.labels||{};
-  const draft=store.get('oops-label-draft-'+mid);if(draft){try{const x=JSON.parse(draft);if(Object.keys(x).length>Object.keys(L).length){L=x;queueSave()}}catch(e){}}
-  cur=Math.min(+(store.get('oops-label-cur-'+mid)||0),U.length-1);renderList();const el=document.getElementById('r-'+U[cur].id);if(el)el.scrollIntoView({block:'center'})}
-(async()=>{if(!KEY){$('#gate').hidden=false;return}const r=await api('/api/me');if(!r.ok){$('#gate').hidden=false;return}
-  ME=await r.json();
-  if(!ME.name){if(WHO){WHO='';store.set('oops-label-who','')}$('#pick').hidden=false;$('#pickers').innerHTML=ME.people.map(p=>`<button data-p="${p}" style="font-size:16px;padding:8px 18px">${p}</button>`).join('');
-    $('#pickers').onclick=e=>{const b=e.target.closest('button');if(!b)return;WHO=b.dataset.p;store.set('oops-label-who',WHO);location.reload()};return}
-  $('#app').hidden=false;$('#me').innerHTML=esc(ME.name)+(WHO?' <a href="#" id="switch" style="color:var(--brand)">换人</a>':'');
-  const sw=document.getElementById('switch');if(sw)sw.onclick=async e=>{e.preventDefault();if(dirty)await save();store.set('oops-label-who','');location.reload()};$('#rate').value=store.get('oops-label-rate')||'1';
-  if(store.get('oops-label-help-seen'))$('#help').open=false;else{$('#help').open=true;store.set('oops-label-help-seen','1')}
-  $('#tabs').innerHTML=ME.meetings.map(m=>`<button data-m="${m.id}" title="${esc(m.title)} · ${m.minutes} 分钟 · ${m.count} 个长句 · ${Object.entries(m.progress).map(([p,n])=>SHORTN[p]+' '+Math.round(n*100/m.count)+'%').join('，')||'还没人标'}">${m.id}<small> ${Math.round((m.progress[ME.name]||0)*100/m.count)}%</small></button>`).join('');
-  $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b&&b.dataset.m!==M)openMeeting(b.dataset.m)});
-  await loadRoles();if(Object.keys(ROLES).some(n=>!CLAIMS[n]))$('#roles').open=true;
-  const last=store.get('oops-label-meeting');openMeeting(ME.meetings.some(m=>m.id===last)?last:ME.meetings[0].id)})();
+const pendingKey=()=>`oops-label-pending:${ME.name}`;
+const status=(message,error=false)=>{$('#state').textContent=message;$('#state').className=error?'err':'mut'};
+function lock(){document.querySelectorAll('#app button,#app select').forEach(b=>b.disabled=busy||!!pending);$('#retry').hidden=!pending;$('#retry').disabled=busy;$('#undo-content').disabled=busy||!!pending||!DOC?.can_undo;$('#undo-identity').disabled=busy||!!pending||!IDENTITY?.can_undo}
+async function get(path){const r=await api(path);if(!r.ok)throw new Error(r.status);return r.json()}
+function adopt(doc){DOC=doc;U=doc.rows;L=doc.labels;E=doc.expressions;cur=Math.min(cur,Math.max(0,E.length-1));renderList();lock()}
+async function mutate(url,body){if(busy||pending)return;pending={url,body:{...body,request_id:crypto.randomUUID()}};store.set(pendingKey(),JSON.stringify(pending));await submit()}
+async function submit(){if(busy||!pending)return;busy=true;lock();status('保存中…');const request=pending;
+ try{const r=await api(request.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request.body)});
+  if(r.status===409){pending=null;store.remove(pendingKey());IDENTITY=await get('/api/identity');renderGroups();if(M)adopt(await get('/api/meeting/'+M));status('另一页面或来源已更新，请核对后重新操作',true);return}
+  if(!r.ok)throw new Error(r.status);const doc=await r.json();pending=null;store.remove(pendingKey());
+  if(request.url==='/api/identity'){IDENTITY=doc;renderGroups();if(M)adopt(await get('/api/meeting/'+M))}else if(request.url===`/api/meeting/${M}/review`)adopt(doc);
+  status('已保存');
+ }catch(e){status(pending?'保存未确认，请重试；本次操作已留在这台设备':'操作已保存，页面刷新失败，请点重新读取',true)}finally{busy=false;lock()}}
+function expressionAction(i,field,value){cur=i;const e=E[i];mutate(`/api/meeting/${M}/review`,{action:'set',scope:'expression',expression:e.id,fingerprint:e.fingerprint,field,value,revision:DOC.revision})}
+function rowAction(id,field,value){cur=E.findIndex(e=>e.ids.includes(id));const row=U.find(u=>u.id===id);mutate(`/api/meeting/${M}/review`,{action:'set',scope:'row',id,field,value,fingerprint:row.fingerprint,revision:DOC.revision})}
+function chips(field,values,label,active,attrs){return `<span class="grp"><span>${label}</span>${values.map(v=>`<button class="c ${active===v?'on':''}" aria-pressed="${active===v}" ${attrs} data-field="${field}" data-value="${esc(v)}">${esc(SHORTN[v]||({task:'任务',decision:'决定',info:'有效',noise:'无效'}[v])||v)}</button>`).join('')}</span>`}
+function childHTML(u){const l=L[u.id]||{},batch=l.speaker_source?.mode==='voice_group';
+ const note=l.speaker?`${SHORTN[l.speaker]||l.speaker} · ${batch?'音色组关联':'单句核对'}`:l.speaker_excluded?'已移出整组，待核对':u.voice?`候选：${u.voice}，未确认`:'身份待核对';
+ return `<div class="child" data-row="${esc(u.id)}"><div class="top"><span class="t">${clock(u.start_ms)}</span><div class="txt">${esc(u.text)}</div><button class="play" data-row-play="${esc(u.id)}">▶</button></div><div class="mut">${esc(note)}${DOC.stale_ids?.includes(u.id)?' · 原话来源已变，旧标签待重核':''}${l.kind&&l.kind_source?.mode!=='expression'?' · 已单句纠错，整段标注会保留':''}</div>
+ <div class="ctl">${chips('speaker',[...PEOPLE,'other','multi','unclear'],'谁说的',l.speaker,`data-row-id="${esc(u.id)}"`)}<button class="c" data-row-id="${esc(u.id)}" data-field="speaker" data-clear="1">移出关联 / 清空</button></div>
+ <div class="ctl">${chips('kind',['task','decision','info','noise'],'内容',l.kind,`data-row-id="${esc(u.id)}"`)}<button class="c" data-row-id="${esc(u.id)}" data-field="kind" data-clear="1">清空内容</button></div>
+ ${l.kind==='task'?`<div class="ctl">${chips('owner',[...PEOPLE,'collective','unknown'],'负责人',l.owner,`data-row-id="${esc(u.id)}"`)}</div>`:''}</div>`}
+function exprState(e){const labels=e.ids.map(id=>L[id]||{}),kinds=[...new Set(labels.map(l=>l.kind||''))];return {done:labels.every(l=>l.kind&&(l.kind!=='task'||l.owner)),kind:kinds.length===1?kinds[0]:'mixed',needsOwner:labels.some(l=>l.kind==='task'&&!l.owner)}}
+function visible(e){const s=exprState(e),f=$('#filter').value;return f==='all'||f==='todo'&&(!s.done&&(e.required_for_content||e.required||e.ids.some(id=>L[id]?.kind)||e.ids.some(id=>DOC.stale_ids?.includes(id))))||f==='who'&&e.ids.some(id=>!L[id]?.speaker)||f==='marked'&&e.ids.some(id=>['task','decision'].includes(L[id]?.kind))}
+function renderList(){if(!DOC)return;$('#list').innerHTML=E.map((e,i)=>{if(!visible(e))return '';const s=exprState(e),rows=e.ids.map(id=>U.find(u=>u.id===id));
+ return `<section class="row ${s.done?'done':''} ${i===cur?'cur':''}" data-i="${i}" id="expr-${i}"><div class="top"><span class="t">${clock(e.start_ms)}</span><div class="txt">${esc(e.text)}</div><button class="play" data-expr-play="${i}">▶ 整段</button></div>
+ <div class="mut">${e.ids.length} 个原话片段 · ${e.required?'连续表达':'短句上下文，可跳过'}${s.kind==='mixed'?' · 含不同内容标签':''}${s.needsOwner?' · 任务负责人待核对':''}</div>
+ <div class="ctl">${chips('kind',['task','decision','info','noise'],'整段标注',s.kind,`data-expr="${i}"`)}</div>
+ ${e.ids.some(id=>L[id]?.kind==='task')?`<div class="ctl">${chips('owner',[...PEOPLE,'collective','unknown'],'整段任务负责人','',`data-expr="${i}"`)}</div>`:''}
+ ${e.ids.some(id=>['task','decision'].includes(L[id]?.kind))?`<div class="ctl"><label class="mut">同一件事 <select class="tool" data-expr="${i}" data-field="dup"><option value="">选择分组</option>${DUPS.split('').map(x=>`<option>${x}</option>`).join('')}</select></label></div>`:''}
+ <details class="corrections" data-expression="${esc(e.id)}" ${OPEN.has(e.id)?'open':''}><summary>展开 ${e.ids.length} 句纠错 / 不同内容分开标</summary>${rows.map(childHTML).join('')}</details></section>`}).join('')||'<div class="empty">没有符合条件的表达</div>';
+ const p=DOC.content_progress;$('#prog').textContent=`内容已核对 ${p.complete_required_expressions}/${p.required_expression_count} 段 · 短句上下文 ${p.context_expression_count} 段可跳过 · 身份另行核对`;
+ const tab=document.querySelector(`#tabs button[data-m="${M}"] small`);if(tab)tab.textContent=` ${p.complete_required_expressions}/${p.required_expression_count}`;lock()}
+function setCur(i,scroll=true){if(i<0||i>=E.length)return;cur=i;renderList();if(scroll)document.getElementById('expr-'+i)?.scrollIntoView({block:'nearest'})}
+function renderGroups(){if(!IDENTITY)return;$('#roles').hidden=!IDENTITY.groups.length;const open=IDENTITY.groups.filter(g=>!g.current).length;$('#roles-sum').textContent=`按音色确认身份 · ${open} 组待核对`;
+ $('#roles-list').innerHTML=IDENTITY.groups.map((g,i)=>`<div class="role" data-group-index="${i}"><b>${esc(g.title)} · ${g.count} 句 / ${new Set(g.members.map(m=>m.meeting)).size} 场</b>
+ <div class="mut">${g.current?`已由你批量关联为 ${esc(SHORTN[g.approval.speaker]||g.approval.speaker)}；单句纠错优先`:g.approval?'音色组已变化，请重新核对':g.suggested_person?`已有建议：${esc(g.suggested_person)}，请听录音后确认`:'听代表录音后选择身份'}。批量关联不代表逐句听过。</div>
+ ${g.clips.map(c=>`<div class="clip"><button class="play" data-group-clip="${esc(c.meeting)}/${esc(c.id)}">▶</button><span>${esc(c.meeting)}</span>${esc(c.text)}</div>`).join('')}
+ <div class="ctl"><select class="tool" data-group-speaker="${i}"><option value="">选择这组是谁</option>${[...PEOPLE,'other','multi','unclear'].map(p=>`<option value="${esc(p)}">${esc(SHORTN[p]||p)}</option>`).join('')}</select><button class="c" data-confirm-group="${i}">确认关联 ${g.count} 句</button>${g.approval?`<button class="c" data-revoke-group="${i}">撤销本组确认</button>`:''}</div>
+ <details><summary>查看关联范围 / 单句纠错</summary><div class="members">${g.members.map(m=>`<div><span class="mut">${esc(m.meeting)} ${clock(m.start_ms)}</span> ${esc(m.text)} <button class="c" data-jump-meeting="${esc(m.meeting)}" data-jump-row="${esc(m.id)}">纠错</button></div>`).join('')}</div></details></div>`).join('');lock()}
+async function openMeeting(mid,jump){if(busy||pending)return;busy=true;lock();stopCont();audio.pause();status('读取中…');try{const doc=await get('/api/meeting/'+mid);M=mid;store.set('oops-label-meeting',mid);document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.m===mid));adopt(doc);if(jump){$('#filter').value='all';const i=E.findIndex(e=>e.ids.includes(jump));if(i>=0){OPEN.add(E[i].id);cur=i;renderList();document.getElementById('expr-'+i)?.scrollIntoView({block:'center'})}}status('已保存')}catch(e){status('读取失败，请重试',true)}finally{busy=false;lock()}}
+function stopCont(){cont=false;$('#cont').textContent='▶ 连续播放'}
+function playClip(mid,first,last,ended){audio.pause();audio=new Audio(`clip/${mid}/${first}.wav?pad=0${last?'&through='+encodeURIComponent(last):''}&k=${encodeURIComponent(KEY)}`);audio.playbackRate=+$('#rate').value;audio.onended=ended||null;audio.play().catch(()=>{stopCont();status('音频读取失败，请重试',true)})}
+function playExpression(i){const e=E[i];playClip(M,e.ids[0],e.ids[e.ids.length-1],()=>{if(cont&&i+1<E.length){setCur(i+1);playExpression(i+1)}else stopCont()})}
+$('#list').addEventListener('toggle',e=>{if(e.target.matches('details.corrections')){const id=e.target.dataset.expression;if(e.target.open)OPEN.add(id);else OPEN.delete(id)}},true);
+$('#list').addEventListener('click',e=>{const section=e.target.closest('section.row');if(section){cur=+section.dataset.i;document.querySelectorAll('#list .row').forEach(row=>row.classList.toggle('cur',row===section))}const b=e.target.closest('button');if(!b)return;if(b.dataset.exprPlay!==undefined){cur=+b.dataset.exprPlay;stopCont();playExpression(cur);return}if(b.dataset.rowPlay){stopCont();playClip(M,b.dataset.rowPlay);return}if(b.dataset.field){if(b.dataset.rowId)rowAction(b.dataset.rowId,b.dataset.field,b.dataset.clear?null:b.dataset.value);else if(b.dataset.expr!==undefined)expressionAction(+b.dataset.expr,b.dataset.field,b.dataset.value)}});
+$('#list').addEventListener('change',e=>{if(e.target.dataset.field==='dup'&&e.target.value)expressionAction(+e.target.dataset.expr,'dup',e.target.value)});
+$('#roles-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.groupClip){stopCont();const [mid,id]=b.dataset.groupClip.split('/');playClip(mid,id);return}if(b.dataset.jumpMeeting){await openMeeting(b.dataset.jumpMeeting,b.dataset.jumpRow);return}const i=b.dataset.confirmGroup??b.dataset.revokeGroup;if(i===undefined)return;const g=IDENTITY.groups[+i],speaker=$(`[data-group-speaker="${i}"]`).value;if(b.dataset.confirmGroup!==undefined&&!speaker){status('先听代表片段，再选择这组是谁',true);return}await mutate('/api/identity',{action:b.dataset.confirmGroup!==undefined?'confirm':'revoke',group:g.id,fingerprint:g.fingerprint,speaker,revision:IDENTITY.revision})});
+$('#reload').onclick=async()=>{try{IDENTITY=await get('/api/identity');renderGroups();if(M)await openMeeting(M)}catch(e){status('读取失败，请重试',true)}};$('#undo-content').onclick=()=>mutate(`/api/meeting/${M}/review`,{action:'undo',revision:DOC.revision});$('#undo-identity').onclick=()=>mutate('/api/identity',{action:'undo',revision:IDENTITY.revision});$('#retry').onclick=submit;
+$('#filter').onchange=renderList;$('#cont').onclick=()=>{if(cont){audio.pause();stopCont()}else if(E.length){cont=true;$('#cont').textContent='❚❚ 暂停';playExpression(cur)}};$('#rate').onchange=()=>{audio.playbackRate=+$('#rate').value;store.set('oops-label-rate',$('#rate').value)};
+document.addEventListener('keydown',e=>{if(/SELECT|INPUT|TEXTAREA/.test(e.target.tagName)||e.metaKey||e.ctrlKey||e.altKey||busy||pending||!E.length)return;const k=e.key.toLowerCase();if(k==='arrowdown'||k==='arrowup'){e.preventDefault();setCur(cur+(k==='arrowdown'?1:-1))}else if(k===' '){e.preventDefault();stopCont();playExpression(cur)}else if({t:1,d:1,i:1,n:1}[k])expressionAction(cur,'kind',{t:'task',d:'decision',i:'info',n:'noise'}[k])});
+(async()=>{if(!KEY){$('#gate').hidden=false;return}try{ME=await get('/api/me');if(!ME.name){if(WHO){WHO='';store.set('oops-label-who','')}$('#pick').hidden=false;$('#pickers').innerHTML=ME.people.map(p=>`<button data-p="${esc(p)}">${esc(p)}</button>`).join('');$('#pickers').onclick=e=>{const b=e.target.closest('button');if(b){store.set('oops-label-who',b.dataset.p);location.reload()}};return}
+ $('#app').hidden=false;$('#me').innerHTML=esc(ME.name)+(WHO?' <button class="tool" id="switch">换人</button>':'');$('#switch')?.addEventListener('click',()=>{if(busy||pending)return;store.remove('oops-label-who');location.reload()});$('#rate').value=store.get('oops-label-rate')||'1';
+ $('#tabs').innerHTML=ME.meetings.map(m=>`<button data-m="${esc(m.id)}">${esc(m.id)}<small></small></button>`).join('');$('#tabs').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.m!==M)openMeeting(b.dataset.m)};
+ IDENTITY=await get('/api/identity');renderGroups();$('#roles').open=IDENTITY.groups.some(g=>!g.current);const last=store.get('oops-label-meeting');await openMeeting(ME.meetings.some(m=>m.id===last)?last:ME.meetings[0].id);
+ const saved=store.get(pendingKey());if(saved){pending=JSON.parse(saved);status('有一次保存尚未确认，请重试',true);lock()}
+ }catch(e){$('#gate').hidden=false;$('#gate p').textContent='读取失败或链接已失效，请重新打开原来的完整链接。'}})();
 window.addEventListener('hashchange',()=>{if(new URLSearchParams(location.hash.slice(1)).get('k'))location.reload()});
-window.addEventListener('beforeunload',e=>{if(dirty){save();e.preventDefault()}});
 </script></html>"""
 
 
