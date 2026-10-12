@@ -771,23 +771,24 @@
     const confirmed = [...decisions, ...constraints].filter((u) => u.review?.verdict === 'confirmed');
     const unconfirmed = [...decisions, ...constraints].filter((u) => u.review?.verdict !== 'confirmed');
     const todos = (h.digest?.commitment || []).filter(u => u.review?.verdict !== 'rejected');
+    // The meeting's minutes lead; per-sentence tags are only candidates for review, kept folded away.
+    const created = todos.filter((u) => u.task_status === 'created'), open = todos.filter((u) => u.task_status !== 'created');
+    const ideas = h.digest?.idea || [];
+    const rawCount = unconfirmed.length + open.length + ideas.length;
+    const minutesReady = S.minutes.get(h.session_id)?.data?.status === 'ready';
     return `<div class="stack sessions-feature">${heading}${stage}
       ${p0Grid([['sparkle', pending ? `会后核对 ${pending}` : '会后核对', 'review-start', `data-id="${esc(h.session_id)}"`], ['bell', `会议提醒 ${(h.notices || []).length}`, 'meeting-notices'],
         ['quotes', '全文与说话人', 'tab', 'data-tab="transcript"'], ['folder-simple', h.project ? `项目：${h.project}` : '所属项目', 'history-project']])}
       <div class="stack session-overview">
         ${minutesHtml(h.session_id)}
-        <section class="card session-result-card">
-          <div class="session-task-top"><span class="badge gray">${pending ? `仍有${pending}项待核对` : '已全部核对'}</span><button class="text-action" data-act="review-start" data-id="${esc(h.session_id)}">核对</button></div>
-          ${unconfirmed.length ? `<h3>Oops 整理出的候选</h3><p class="meta">逐条核对后，才成为本次确认的结论。</p>${unconfirmed.slice(0, 5).map(u => listRow({act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'constraint' ? 'flag' : 'check-circle', title: u.text, sub: `${hms(u.start_ms)} · ${u.review?.speaker || speakerLabel(u.speaker) || '说话人待确认'} · 待核对`})).join('')}${unconfirmed.length > 5 ? `<button class="text-action" data-act="review-start" data-id="${esc(h.session_id)}">查看全部 ${unconfirmed.length} 项候选</button>` : ''}` : ''}
-          <h3>本次确认的结论</h3>
-          ${confirmed.length ? confirmed.map((u) => `<p class="confirmed-line"><span class="badge ${u.tag === 'constraint' ? 'gray' : 'green'}">${u.tag === 'constraint' ? '约束' : '决定'}</span> ${esc(u.text)}</p>`).join('')
-            : '<p class="meta">还没有人工确认的结论。会后核对里点「是决定」后会出现在这里，并用于之后开会时的冲突提醒。</p>'}
-        </section>
-        ${sectionTitle('下一步行动')}
-        ${todos.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
-          sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'} · ${u.task_status === 'created' ? '已建飞书任务' : u.review?.verdict === 'confirmed' ? '人工已确认' : '待核对'}`,
-          badge: `<span class="badge ${u.task_status === 'created' ? 'green' : 'purple'}">${u.task_status === 'created' ? '已建任务' : '待承接'}</span>` })).join('') || '<p class="meta">没有识别到待办。</p>'}
-        ${(h.digest?.idea || []).length ? `${sectionTitle('想法')}${(h.digest.idea || []).slice(0, 5).map((u) => `<p class="meta">· ${esc(u.text)}</p>`).join('')}` : ''}
+        ${rawCount ? `<details class="card raw-tags"><summary><strong>Oops 整理出的候选 ${rawCount} 条</strong><span class="meta">逐句识别，逐条核对后才成为确认的结论。${minutesReady ? '纪要已从中挑出有用的内容。' : '还没有会议纪要。'}</span></summary>
+          ${unconfirmed.length ? `<h3>决定与约束候选</h3>${unconfirmed.map(u => listRow({act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'constraint' ? 'flag' : 'check-circle', title: u.text, sub: `${hms(u.start_ms)} · ${u.review?.speaker || speakerLabel(u.speaker) || '说话人待确认'} · 待核对`})).join('')}` : ''}
+          ${open.length ? `<h3>待办候选</h3>${open.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
+            sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'} · ${u.review?.verdict === 'confirmed' ? '人工已确认' : '待核对'}` })).join('')}` : ''}
+          ${ideas.length ? `<h3>想法</h3>${ideas.map((u) => `<p class="meta">· ${esc(u.text)}</p>`).join('')}` : ''}</details>` : ''}
+        ${confirmed.length ? `<section class="card session-result-card"><h3>本次确认的结论</h3>${confirmed.map((u) => `<p class="confirmed-line"><span class="badge ${u.tag === 'constraint' ? 'gray' : 'green'}">${u.tag === 'constraint' ? '约束' : '决定'}</span> ${esc(u.text)}</p>`).join('')}</section>` : ''}
+        ${created.length ? `${sectionTitle('已建飞书任务')}${created.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
+          sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'}`, badge: '<span class="badge green">已建任务</span>' })).join('')}` : ''}
         ${pending ? `<section class="card session-review-entry"><div><h3>${pending}项可以逐项核对</h3><p class="meta">待办、决定与不知道谁说的话分别处理，也可以稍后再说。</p></div>
           <button class="button primary" type="button" data-act="review-start" data-id="${esc(h.session_id)}"><span>开始 / 继续核对</span></button></section>` : ''}
         <div class="action-grid">
@@ -1473,9 +1474,16 @@
       const m = p.minutes;
       const source = (ids) => (Array.isArray(ids) ? ids : []).filter(id => p.sources?.[id]).map(id => `<button class="chip" type="button" data-act="minutes-source" data-id="${esc(id)}">查看原话 ${hms(p.sources[id].start_ms)}</button>`).join('');
       const rows = (title, items, content, ids) => Array.isArray(items) && items.length ? `<h3>${title}</h3>${items.map(item => `<div class="minutes-item"><p>${esc(content(item))}</p>${source(ids(item))}</div>`).join('')}` : '';
-      body = `${m.overview ? `<p class="minutes-overview">${esc(m.overview)}</p>` : ''}
+      // Like real minutes: the topic, the main-line work, decisions, then everything else. Older minutes have no
+      // priority; their tasks all count as main line.
+      const actions = Array.isArray(m.actions) ? m.actions : [];
+      const main = actions.filter((x) => (x.priority || 'main') === 'main'), other = actions.filter((x) => x.priority === 'other');
+      const task = (x) => `${x.owner ? `${x.owner}：` : ''}${x.task || ''}${x.due ? `（${x.due}）` : ''}${x.owner ? '' : '（负责人待定）'}`;
+      body = `${m.theme ? `<p class="minutes-theme"><small>会议主题</small><strong>${esc(m.theme)}</strong></p>` : ''}
+        ${m.overview ? `<p class="minutes-overview">${esc(m.overview)}</p>` : ''}
+        ${rows('主线任务', main, task, x => x.ids)}
         ${rows('决定', m.decisions, x => x.text, x => x.ids)}
-        ${rows('行动建议', m.actions, x => `${x.owner || '负责人待定'} · ${x.task || ''}${x.due ? ' · ' + x.due : ''}`, x => x.ids)}
+        ${rows('其他事项', other, task, x => x.ids)}
         ${rows('讨论要点', m.topics, x => `${x.topic || ''}：${Array.isArray(x.points) ? x.points.join('；') : x.points || ''}`, () => [])}
         ${rows('待确认问题', m.open_questions, x => x.question, x => [x.id])}
         ${rows('后续跟进建议', m.follow_ups, x => `${x.title || ''}${x.start ? ' · ' + x.start : ''}`, () => [])}
@@ -1488,7 +1496,7 @@
       body = `<p>${esc(p.message || messages[p.reason] || '当前没有可用的 AI 纪要。')}</p>${p.reason === 'source_changed' ? '<p class="meta">请以最新原文和人工核对结果为准；旧文档仅供查看历史。</p>' : ''}
         ${p.reason === 'source_changed' && p.historical_doc_url ? `<button class="button quiet" type="button" data-act="minutes-history-doc"><span>查看旧版历史文档</span></button>` : ''}`;
     }
-    return `<section class="card native-minutes"><div class="section-title"><h2>AI 会后纪要</h2>${entry?.loading ? '<span class="meta">读取中</span>' : refresh}</div>${body}</section>`;
+    return `<section class="card native-minutes"><div class="section-title"><h2>会议纪要</h2>${entry?.loading ? '<span class="meta">读取中</span>' : refresh}</div>${body}</section>`;
   }
   function minutesSourceHtml() {
     const p = S.minutes.get(S.sheet.sessionId)?.data;
