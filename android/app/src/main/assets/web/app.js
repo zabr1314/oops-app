@@ -1512,7 +1512,7 @@
     toast(p.title_source === 'manual' ? '已改名' : '已恢复自动名称');
   }
   function renameHtml() {
-    const h = S.history, source = { manual: '手动命名', agenda: '议程目标', generated: 'AI 概括', auto: '按原话自动取', short: '内容较少', none: '' }[h.title_source] || '';
+    const h = S.history, source = { manual: '手动命名', agenda: '议程目标', minutes: '纪要主题', generated: 'AI 概括', auto: '按原话自动取', short: '内容较少', none: '' }[h.title_source] || '';
     return frame('会议名称', `<label class="form-field"><span>会议名称（留空恢复自动名称）</span><input id="rename-input" maxlength="40" value="${esc(h.title_source === 'manual' ? h.display_title : '')}" placeholder="${esc(h.display_title || '例如：安卓版本排期')}"><small>现在的名称：${esc(meetingName(h))}${source ? ` · ${source}` : ''}</small></label>
       <button class="button primary" type="button" data-act="rename-save"><span>保存名称</span></button>`);
   }

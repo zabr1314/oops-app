@@ -259,13 +259,15 @@ def short_title(text, limit=18):
     return value[:limit] + '…' if len(value) > limit else value
 
 
-def meeting_title(row):
-    """(title, source): a person's name for it, the agenda goal, or a sentence that says what it was about."""
+def meeting_title(row, theme=None):
+    """(title, source): a person's name for it, the agenda goal, the minutes' topic, or a sentence that says what it was about."""
     if row.get('title'):
         return row['title'], 'manual'
     goal = (row.get('agenda') or {}).get('goal', '').strip()
     if goal:
         return goal, 'agenda'
+    if theme:  # read from the whole meeting, unlike a title made from its opening minutes
+        return theme, 'minutes'
     generated = row.get('auto_title') or {}
     if generated.get('title'):
         return generated['title'], 'generated'
@@ -317,7 +319,7 @@ class Meetings:
     def __init__(self, directory, ops=None, retention_days=None, owner=None, deadline=None, team=(), cited=None):
         self.dir, self.ops, self.team = directory, ops, tuple(team)
         self.owner, self.deadline = owner, deadline
-        # sid → {'tasks', 'decisions'} sentence ids of the meeting's minutes, or None; narrows the review queue.
+        # sid → {'tasks', 'decisions', 'theme'} from the meeting's minutes, or None: narrows the review queue and names it.
         self.cited = cited
         # Meeting text is a long-lived asset: 0 (default) keeps it until a user deletes the meeting.
         self.retention = int(retention_days if retention_days is not None else os.getenv('OOPS_MEETING_RETENTION_DAYS', '0'))
@@ -372,8 +374,9 @@ class Meetings:
                 task = next((t for t in row['tasks'] if u['id'] in t['evidence'].get('utterance_ids', [])), None)
                 u['task_status'] = task['status'] if task else None
                 u['task_url'] = (task.get('feishu_task') or {}).get('url') if task else None
-            row['review_queue'] = review_queue(row['utterances'], self.cited(sid) if self.cited else None)
-            row['display_title'], row['title_source'] = meeting_title(row)
+            minutes = self.cited(sid) if self.cited else None
+            row['review_queue'] = review_queue(row['utterances'], minutes)
+            row['display_title'], row['title_source'] = meeting_title(row, (minutes or {}).get('theme'))
             return row
 
     def sync(self, req):

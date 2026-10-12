@@ -38,6 +38,16 @@ class ReviewQueueTest(unittest.TestCase):
             self.assertEqual([("commitment", "u2"), ("speaker", "u2")], [(q["kind"], q["id"]) for q in row["review_queue"]])
             self.assertIn("meeting-1", asked)
 
+    def test_the_minutes_topic_names_a_meeting_nobody_named(self):
+        with tempfile.TemporaryDirectory() as folder:
+            meetings = Meetings(folder, cited=lambda sid: {"tasks": set(), "decisions": set(), "theme": "录音豆 App 的 MVP 范围"})
+            meetings.sync({"session_id": "meeting-2", "started_at": "2026-10-12T09:00:00+08:00", "time_zone": "Asia/Shanghai",
+                           "utterances": [dict(u, start_ms=i * 1000, end_ms=i * 1000 + 900) for i, u in enumerate(ROWS)]})
+            row = meetings.load("meeting-2")
+            self.assertEqual(("录音豆 App 的 MVP 范围", "minutes"), (row["display_title"], row["title_source"]))
+            meetings.rename({"session_id": "meeting-2", "title": "周会"})
+            self.assertEqual(("周会", "manual"), (meetings.load("meeting-2")["display_title"], meetings.load("meeting-2")["title_source"]))
+
 
 if __name__ == "__main__":
     unittest.main()
