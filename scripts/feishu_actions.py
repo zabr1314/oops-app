@@ -16,8 +16,10 @@ import threading
 import time
 import uuid
 from collections import Counter, deque
+from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
 
+import minutes_vote
 import question_watch
 from meeting_features import timestamp
 
@@ -476,7 +478,7 @@ class FeishuActions:
         data = self.backend.people.data or {}
         return list(dict.fromkeys([n for n in self.people] + ([data["self"]["name"]] if data.get("self") else [])))
 
-    MINUTES_VERSION = 2
+    MINUTES_VERSION = 3  # 3: voted over minutes_vote.RUNS independent runs
 
     @classmethod
     def minutes_fingerprint(cls, row):
@@ -520,6 +522,24 @@ class FeishuActions:
         return row, analysis
 
     def analyse(self, row):
+        """Minutes written minutes_vote.RUNS times independently; only what most runs agree on is kept (minutes_vote)."""
+        if not self.backend.resolver or len(row["utterances"]) < 5:
+            return self.analyse_once(row)
+        with ThreadPoolExecutor(minutes_vote.RUNS) as pool:
+            futures = [pool.submit(self.analyse_once, row) for _ in range(minutes_vote.RUNS)]
+        runs, errors = [], []
+        for f in futures:
+            try:
+                runs.append(f.result())
+            except Exception as error:  # noqa: BLE001 - the other runs still count
+                errors.append(error)
+        if len(runs) < 2:  # one run alone is no vote; the meeting is retried later
+            raise errors[0] if errors else RuntimeError("纪要没有生成")
+        if errors:
+            self.log(f"minutes {row['session_id'][:8]}: {len(errors)} of {minutes_vote.RUNS} runs failed, voting on {len(runs)}")
+        return dict(minutes_vote.vote(runs), version=self.MINUTES_VERSION)
+
+    def analyse_once(self, row):
         """The model's minutes, kept only where each item points at sentences that exist."""
         resolver = self.backend.resolver
         result = dict(version=self.MINUTES_VERSION, substantive=False, overview="", decisions=[], actions=[], topics=[],
