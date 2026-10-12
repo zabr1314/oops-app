@@ -1650,8 +1650,9 @@ class Backend:
                     return self.speakers.diagnose(pcm)
                 if req.get("consent") is not True or req.get("single_speaker") is not True:
                     raise ValueError("请由本人同意并确认录音仅包含本人声音")
-                if req.get("name") not in TEAM or req.get("source") not in ("mic", "remote"):
-                    raise ValueError("请选择团队成员，使用手机或外接麦克风现场录入")
+                # One profile per capture device: "bean" is the Anker 录音豆, which hears a room differently from a phone.
+                if req.get("name") not in TEAM or req.get("source") not in ("mic", "remote", "bean"):
+                    raise ValueError("请选择团队成员，使用手机、外接麦克风或录音豆现场录入")
                 if not isinstance(req.get("sample_id"), str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,100}", req["sample_id"]):
                     raise ValueError("录音编号无效")
                 result = self.speakers.enroll(req, pcm)

@@ -42,6 +42,7 @@ object BridgeJson {
         .put("sourceDetail", s.sourceDetail ?: NULL)
         .put("sourceReady", s.sourceReady)
         .put("remoteAddress", s.remoteAddress)
+        .put("beanSdk", com.oops.app.audio.BeanSdk.included)
         .put("asrGaps", JSONArray(s.asrGaps.map { JSONObject().put("fromMs", it.fromMs).put("toMs", it.toMs) }))
         .put("digestCounts", JSONObject(s.digestCounts)).put("agenda", s.agenda).put("notices", JSONArray(s.notices))
         .put("voiceTrigger", s.voiceTrigger).put("noticeVibrate", s.noticeVibrate).put("memorySync", s.memorySync).put("selfName", s.selfName)

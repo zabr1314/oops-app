@@ -10,7 +10,12 @@ import com.oops.app.asr.RawUtterance
 import com.oops.app.asr.VolcAsrClient
 import com.oops.app.asr.VolcRequest
 import com.oops.app.audio.AudioSource
+import com.oops.app.audio.BeanAudioSource
+import com.oops.app.audio.BeanAuth
+import com.oops.app.audio.BeanSdk
+import com.oops.app.audio.MediaCodecOpusDecoder
 import com.oops.app.audio.MicAudioSource
+import com.oops.app.audio.ReplayBeanLink
 import com.oops.app.audio.RemoteAudioSource
 import com.oops.app.audio.WavFileAudioSource
 import com.oops.app.backend.ActionDraft
@@ -77,6 +82,7 @@ object OopsEngine {
     private const val SPEAKER_MIN_MS = 1_000L
     private const val SPLIT_POLLS = 3
     private const val TEST_WAV = "test/dialog.wav"
+    private const val TEST_BEAN_STREAM = "test/dialog.opusraw" // dialog.wav through scripts/bean_opus.py encode
     private val MANUAL_OTHER = setOf("other", "multi", "unclear")
     private const val REVIEW_RETRIES = 3
     private const val REVIEW_RETRY_MS = 25_000L
@@ -393,6 +399,9 @@ object OopsEngine {
                 ?: ("127.0.0.1" to RemoteAudioSource.DEFAULT_PORT)
             RemoteAudioSource(host, port)
         }
+        Settings.SOURCE_BEAN -> BeanAudioSource(BeanSdk.link(app, BeanAuth.fromBuildConfig()), ::MediaCodecOpusDecoder, kind)
+        Settings.SOURCE_BEAN_SIM -> BeanAudioSource(
+            ReplayBeanLink("录音豆模拟（内置对话）", { app.assets.open(TEST_BEAN_STREAM) }), ::MediaCodecOpusDecoder, kind)
         else -> MicAudioSource()
     }
 
@@ -1325,7 +1334,7 @@ object OopsEngine {
             require(mode == "test" || name in Settings.TEAM) { "请先选择本人姓名" }
             require(_state.value.voiceprint.phase !in setOf("saving", "testing", "checking", "loading", "recording")) { "请等待当前操作结束" }
             val kind = source?.kind ?: Settings.SOURCE_MIC
-            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE)) { "请先切换到手机或 Mac 麦克风，不能用测试 WAV 注册" }
+            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN)) { "请先切换到手机、Mac 麦克风或录音豆，不能用测试音频注册" }
             val client = api as? HttpOopsApi ?: error("请先连接真实服务器")
             val catalog = _state.value.voiceprint.catalog ?: error("请先刷新声纹列表")
             voiceprintClient = client
@@ -1937,7 +1946,8 @@ object OopsEngine {
         val previousAddress = settings.remoteAddress
         if (json.has("source")) {
             val kind = json.getString("source")
-            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_WAV, Settings.SOURCE_REMOTE)) { "音源无效" }
+            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_WAV, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN, Settings.SOURCE_BEAN_SIM)) { "音源无效" }
+            require(kind != Settings.SOURCE_BEAN || BeanSdk.included) { "这个安装包没有包含录音豆 SDK" }
             settings.source = kind
         }
         if (json.has("remoteAddress")) {

@@ -18,7 +18,7 @@
     reconnecting: ['识别重连中…', 'warn'],
     error: ['识别出错', 'bad'],
   };
-  const SOURCE_TEXT = { mic: '手机麦克风', wav: '测试音频', remote: 'Mac 收音' };
+  const SOURCE_TEXT = { mic: '手机麦克风', wav: '测试音频', remote: 'Mac 收音', bean: '录音豆', bean_sim: '录音豆模拟' };
   const TAG_LABELS = { commitment: '待办', decision: '决定', idea: '想法', constraint: '约束', chitchat: '寒暄', uncertain: '待判断' };
   const MANUAL_OTHER = { other: '其他人', multi: '多人同时说', unclear: '听不清' };
 
@@ -959,7 +959,9 @@
         <label class="form-field"><span>音源（保存后立即切换，保留本场记录）</span><select id="set-source">
           <option value="mic" ${s.source === 'mic' ? 'selected' : ''}>手机麦克风</option>
           <option value="wav" ${s.source === 'wav' ? 'selected' : ''}>测试 WAV（预录音频）</option>
-          <option value="remote" ${s.source === 'remote' ? 'selected' : ''}>Mac 收音（经 USB 接收电脑上的麦克风）</option></select></label>
+          <option value="remote" ${s.source === 'remote' ? 'selected' : ''}>Mac 收音（经 USB 接收电脑上的麦克风）</option>
+          ${s.beanSdk ? `<option value="bean" ${s.source === 'bean' ? 'selected' : ''}>录音豆（先按录音豆的录音键）</option>` : ''}
+          <option value="bean_sim" ${s.source === 'bean_sim' ? 'selected' : ''}>录音豆模拟（内置对话，测试解码链路）</option></select></label>
         <label class="form-field"><span>Mac 收音地址</span><input id="set-remote" inputmode="url" placeholder="127.0.0.1:7790" value="${esc(s.remoteAddress || '127.0.0.1:7790')}"><small>配合 adb reverse 用 127.0.0.1</small></label>
         <p class="meta">测试音频：${esc(s.testWavName || '内置合成对话')} · 需要 PCM 16kHz / 单声道 / 16bit WAV</p>
         <div class="inline-actions"><button class="chip" data-act="pick-audio">选择测试 WAV</button><button class="chip" data-act="reset-audio">恢复内置音频</button></div>
