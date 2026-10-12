@@ -213,6 +213,7 @@ class MainActivity : ComponentActivity() {
                 "digest.openMany" -> OopsEngine.openDigestItems(p.getJSONArray("ids").strings())
                 "history.list" -> OopsEngine.history("list")
                 "history.open" -> OopsEngine.history("open", p.getString("sessionId"))
+                "history.minutes" -> OopsEngine.minutes(p.getString("sessionId"), p.optString("requestId"))
                 "history.delete" -> OopsEngine.history("delete", p.getString("sessionId"), p.optBoolean("confirm"))
                 "projects.list" -> OopsEngine.projects()
                 "project.open" -> OopsEngine.projects(p.getString("name"))

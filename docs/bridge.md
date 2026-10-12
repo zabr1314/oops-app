@@ -119,6 +119,7 @@ settings.set 增加 `speakerPreview`，默认 false；state 增加 `speakerPrevi
 | notice.feedback | {id,useful:boolean} | 记录“有用/不准” |
 | history.list | {} | 团队往期会议列表 |
 | history.open | {sessionId} | 读取历史文字与纪要 |
+| history.minutes | {sessionId,requestId?} | 只读服务器已存的 AI 会后纪要，不触发生成或发送；requestId 原样回传 |
 | history.search | {query} | 搜索往期原话 |
 | history.delete | {sessionId,confirm:true} | H5 二次确认后删除；本场收音中须先停止 |
 
@@ -129,3 +130,13 @@ settings.set 增加 `speakerPreview`，默认 false；state 增加 `speakerPrevi
 原生 → H5 的 `notice` 为 {id,kind,title,detail,atMs,evidenceIds,itemId,history?,dismissed,useful}，横幅位于遮罩上方，最多两条，12 秒后收起到“提醒 N”。history 为历史原话的 snake_case 数据。`history.list/open/delete/search` 事件直接携带对应 API 响应，search 增加 query。snapshot/state/session.summary 均可恢复提醒记录；重新载入页面不会重新震动。
 
 说 Oops 或欧普斯/哦普斯/奥普斯可触发，问句走本场问答，其他走召回；整句“把刚刚那个想法留下来”等指令也触发。开关关闭不触发，5秒内去重；语音口令仅在 ASR 定稿后响应，不是独立低功耗热词模型。
+
+## 2026-10-12：读取状态、核对保存与服务切换
+
+- `history.minutes` 回包沿用 `GET /v1/meetings/{id}/minutes`，加 `requestId`。H5 显示 ready/pending/unavailable/读取失败；`source_changed` 只显示失效原因与 `historical_doc_url`，不展示旧正文。404/501 表示此后端不支持，401/403 和网络错误保留失败语义。用户点「重新查询」才重读。
+- `review.saved` 与 `speaker.corrected.status=saved` 才确认服务器保存并推进核对队列。`status=local` 只表示本机显示已改；失败保留当前选择，重试同一条。成功更新本地 `review_queue` 和列表数量；撤销人工说话人且模型仍未知时恢复身份待核对。
+- `error` 可增加 `operation/sessionId/utteranceId/requestId/name/mine/status/selfName/serviceEpoch/backendUrl`，全部可选，旧桥仍兼容。H5 用上下文匹配具体读取或保存，关闭面板后迟到的打开结果不再强制跳转。`tasks.list` 回包增加冻结在请求时的 `selfName`，按 mine/status/selfName 区分缓存。
+- 切换后端类型、规范化服务地址或该地址的访问凭据后，原生递增 `serviceEpoch`，发 `backend.changed {backend,backendUrl,serviceEpoch}`。远端读取与核对回包可附 `serviceEpoch/backendUrl`；原生丢弃旧代请求的成功和错误，H5 清除远端列表、详情、纪要与只读历史面板。改其他设置不递增版本，不中断有效读取。事件不包含访问凭据或其摘要。
+- 已提交的行动沿用原操作的服务地址与 op_id，不因切换服务器改投新地址。收音保存规则继续沿用原设置。
+
+公开站 `/native-flow.html` 从当前 Android H5 源文件生成隔离预览，`preview=1` 不读写浏览器保存记录，不连接真实后端，不创建飞书任务。它用于验证界面流程；不代表 APK 已构建或真机验收。

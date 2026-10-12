@@ -2,6 +2,10 @@
 (() => {
   'use strict';
   if (window.OopsNative) return;
+  const preview = new URLSearchParams(location.search).get('preview') === '1';
+  const flow = preview ? new URLSearchParams(location.search).get('flow') || 'normal' : 'normal';
+  const failedOnce = new Set();
+  let minutesChanged = false;
   const team = ['Jason', '黄丽萍', '江古月', '洪玉麟', '林春源'];
   // Real device ASR observations for assets/test/dialog.wav (2026-10-06).
   const sample = [
@@ -13,11 +17,11 @@
   ];
   const key = 'oops-browser-saved-v1';
   let saved;
-  try { saved = JSON.parse(localStorage.getItem(key) || '[]'); } catch { saved = []; }
+  try { saved = preview ? [] : JSON.parse(localStorage.getItem(key) || '[]'); } catch { saved = []; }
   const state = { capturing: false, sessionId: '', source: 'wav', sessionMs: 0, bufferedMs: 0,
     retentionMs: 300000, asr: 'off', asrDetail: null, level: 0, playing: false,
     voiceTrigger: true, noticeVibrate: true, memorySync: true, syncStatus: 'synced', syncPending: 0, digestCounts: {}, notices: [], agenda: {goal: '', items: [], tracking: 'waiting'},
-    savedCount: saved.length, backend: 'mock', backendUrl: '', speakerInfo: false,
+    savedCount: saved.length, backend: 'mock', backendUrl: '', speakerInfo: false, ...(preview ? {selfName: '洪玉麟'} : {}),
     testWavName: '内置合成对话（浏览器模拟）', asrGaps: [], sourceDetail: null, sourceReady: false, remoteAddress: '127.0.0.1:7790' };
   const bridge = { onmessage: null, postMessage: (raw) => {
     try { const { type, payload = {} } = JSON.parse(raw); handle(type, payload); }
@@ -30,7 +34,7 @@
   let startedAt = 0, timer = null, transcript = [], cards = new Map(), drafts = new Map();
   let sessionTranscript = [];
   let actions = new Map(), draftOps = new Map(), recallCount = 0, playingKey = null;
-  const audio = new Audio('../test/dialog.wav');
+  const audio = preview ? null : new Audio('../test/dialog.wav');
   let clipTimer = null;
   const day = 86400000;
   const mockTasks = [
@@ -42,7 +46,7 @@
       meeting: null, overdue: false, feishu: { state: 'unknown', stale: true } },
   ];
   function stopClip() {
-    audio.pause(); clearTimeout(clipTimer);
+    audio?.pause(); clearTimeout(clipTimer);
     if (playingKey) emit('clip.state', { key: playingKey, state: 'stopped' });
     playingKey = null; state.playing = false;
   }
@@ -123,7 +127,7 @@
       message: '浏览器模拟：没有实际写入飞书', readBackConfirmed: true, mock: true, polling: false };
     actions.set(opId, r);emit('action.result', r);
   }
-  let mockMeetings = [{session_id: 'demo', started_at: '2026-10-06T09:00:00+08:00', goal: '上线方案评审（模拟）', utterance_count: 1}];
+  let mockMeetings = [{session_id: 'demo', started_at: '2026-10-06T09:00:00+08:00', ended_at: '2026-10-06T10:00:00+08:00', project: 'Oops 首版', goal: '上线方案评审（模拟）', utterance_count: 3}];
   const historicalRows = [{id: 'u1', text: '预算不能超过10万。', start_ms: 0, end_ms: 4482, tag: 'constraint', speaker: null},
     {id: 'u2', text: '那我周五前把新方案发你。', start_ms: 17162, end_ms: 20181, tag: 'commitment', speaker: null, owner_hint: null, when_raw: '周五前'},
     {id: 'u3', text: '这个想法不错，不过方案A要时上线，大概要13万。', start_ms: 11442, end_ms: 16841, tag: 'decision', speaker: '林春源'}]
@@ -134,6 +138,16 @@
     ...rows.filter((u) => u.tag === 'decision' && !u.review?.verdict).map((u) => ({kind: 'decision', id: u.id})),
     ...rows.filter((u) => !u.speaker && !u.review?.speaker && u.text.replace(/[^\p{L}\p{N}]/gu, '').length >= 4).map((u) => ({kind: 'speaker', id: u.id}))];
   function handle(type, p) {
+    const listFailure = flow === 'list-failure' && ['history.list', 'projects.list', 'project.open', 'tasks.list'].includes(type);
+    const reviewFailure = flow === 'review-failure' && ['review.set', 'speaker.correct'].includes(type);
+    const minutesFailure = flow === 'minutes-failure' && type === 'history.minutes';
+    if ((listFailure || reviewFailure || minutesFailure) && !failedOnce.has(type)) {
+      failedOnce.add(type);
+      const scope = type === 'history.list' ? 'history' : type === 'tasks.list' ? 'tasks' : type.startsWith('project') ? 'projects' : type === 'history.minutes' ? 'minutes' : type === 'review.set' ? 'review' : 'speaker';
+      const selfName = state.selfName || '';
+      setTimeout(() => emit('error', {...p, selfName, scope, operation: type, message: '模拟：本次连接失败，重试会恢复。'}), 180);
+      return;
+    }
     switch (type) {
       case 'hello': queueMicrotask(() => emit('snapshot', { state, transcript, summary: summary(), team, insets: { top: 0, bottom: 0 } }));break;
       case 'capture.start':
@@ -164,6 +178,14 @@
         emit('history.open', {...meeting, project: meeting.project || null, display_title: meeting.manualTitle || meeting.goal, title_source: meeting.manualTitle ? 'manual' : 'generated', utterances: historicalRows, review_queue: reviewQueue(historicalRows),
           digest: {constraint: historicalRows.filter(u => u.tag === 'constraint'), commitment: historicalRows.filter(u => u.tag === 'commitment' && u.review?.verdict !== 'rejected'),
             decision: historicalRows.filter(u => u.tag === 'decision' && u.review?.verdict !== 'rejected'), idea: []}, notices: []}); break;
+      }
+      case 'history.minutes': {
+        const changed = minutesChanged || flow === 'minutes-source-changed';
+        const payload = {session_id: p.sessionId, requestId: p.requestId || ''};
+        if (flow === 'minutes-pending') Object.assign(payload, {status: 'pending', reason: 'writing'});
+        else if (changed) Object.assign(payload, {status: 'unavailable', reason: 'source_changed', message: '核对结果已变化，旧纪要需重新核对。', historical_doc_url: 'https://example.com/historical-minutes'});
+        else Object.assign(payload, {status: 'ready', doc_url: null, minutes: {version: 1, substantive: true, overview: '首版围绕两周内上线展开，预算上限与方案成本需要核对。', decisions: [{text: '预算上限为10万', ids: ['u1']}], actions: [{owner: '洪玉麟', task: '核对并提交新方案', due: '周五前', ids: ['u2']}], topics: [{topic: '上线计划与预算', points: ['先明确首版体验与预算范围']}], open_questions: [{question: '13万方案如何满足10万预算？', quote: historicalRows.find(u => u.id === 'u3').text, id: 'u3'}], follow_ups: []}, sources: Object.fromEntries(historicalRows.map(u => [u.id, {text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}]))});
+        setTimeout(() => emit('history.minutes', payload), 220); break;
       }
       case 'history.delete': if (p.confirm) {mockMeetings = mockMeetings.filter(i => i.session_id !== p.sessionId); emit('history.delete', {deleted: true});} break;
       case 'projects.list': {
@@ -205,6 +227,7 @@
       }
       case 'clip.play':
         stopClip();
+        if (preview) { emit('clip.state', {key:p.key,state:'unavailable'});emit('toast',{message:'此示例只演示文字流程，未提供原声。'});break; }
         if (p.startMs < state.sessionMs - state.retentionMs && !sessionTranscript.some((u) => u.tag === 'commitment' && u.startMs <= p.startMs && u.endMs >= p.endMs)) { emit('clip.state', { key: p.key, state: 'expired' });break; }
         playingKey = p.key;audio.currentTime = Math.max(0, p.startMs / 1000);state.playing = true;
         emit('clip.state', { key: p.key, state: 'playing' });
@@ -213,6 +236,7 @@
       case 'clip.stop': stopClip();break;
       case 'clip.remote': emit('clip.state', { key: p.key, state: 'unavailable' }); emit('toast', { message: '浏览器没有服务器录音，请在 Android App 中回听' }); break;
       case 'speaker.correct': {
+        minutesChanged = true;
         const u = sessionTranscript.find((x) => x.id === p.utteranceId);
         if (p.sessionId === state.sessionId && u) { u.manualSpeaker = p.speaker; emit('speaker.corrected', { ...p, status: 'local' }); }
         const h = historicalRows.find((x) => x.id === p.utteranceId);
@@ -220,20 +244,22 @@
         setTimeout(() => emit('speaker.corrected', { ...p, status: 'saved' }), 300); break;
       }
       case 'review.set': {
+        minutesChanged = true;
         const u = historicalRows.find((x) => x.id === p.utteranceId);
         if (u) u.review = {...(u.review || {}), ...p.fields};
         setTimeout(() => emit('review.saved', {sessionId: p.sessionId, utteranceId: p.utteranceId, review: u?.review || p.fields}), 200); break;
       }
       case 'tasks.list': {
         if (p.mine && !state.selfName) throw new Error('请先在设置里选择本人');
+        const selfName = state.selfName || '';
         const all = mockTasks.filter((t) => (!p.mine || t.who === state.selfName) && (p.status === 'all' || t.feishu.state === p.status || (p.status === 'open' && t.feishu.state === 'unknown')));
-        setTimeout(() => emit('tasks.list', { items: all, mine: p.mine, status: p.status }), 300); break;
+        setTimeout(() => emit('tasks.list', { items: all, mine: p.mine, status: p.status, selfName }), 300); break;
       }
       case 'recall.dismiss': cards.delete(p.cardId);break;
       case 'recall.save': {
         const c = cards.get(p.cardId);if (!c) throw new Error('卡片已失效');
         const item = { id: c.id, saved_at: new Date().toISOString(), utterances: c.pool.filter((u) => p.utteranceIds.includes(u.id)), audio_expired: false };
-        saved = saved.filter((x) => x.id !== c.id);saved.unshift(item);localStorage.setItem(key, JSON.stringify(saved));
+        saved = saved.filter((x) => x.id !== c.id);saved.unshift(item);if (!preview) localStorage.setItem(key, JSON.stringify(saved));
         state.savedCount = saved.length;emit('recall.saved', { cardId: c.id, savedCount: saved.length });break;
       }
       case 'saved.list': emit('saved.items', { items: saved });break;
@@ -257,7 +283,7 @@
         emit('state', { ...state });emit('toast', { message: '浏览器只模拟后端；真实配置请在 Android App 中设置' });break;
       case 'testAudio.pick': emit('toast', { message: '外部 WAV 导入请在 Android App 中使用' });break;
       case 'testAudio.reset': state.testWavName = '内置合成对话（浏览器模拟）';emit('state', { ...state });break;
-      case 'open.url': if (/^https?:\/\//.test(p.url)) window.open(p.url, '_blank', 'noopener');break;
+      case 'open.url': if (preview) emit('toast', {message: '模拟历史链接，没有打开真实文档或任务。'}); else if (/^https?:\/\//.test(p.url)) window.open(p.url, '_blank', 'noopener');break;
       default: break;
     }
   }

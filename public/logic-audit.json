@@ -1,7 +1,7 @@
 {
-  "revision": "feedback-20261012",
+  "revision": "service-adaptation-20261012",
   "reviewedAt": "2026-10-12",
-  "scope": "飞书26条意见分项落实、前端联动与后端兼容修复",
+  "scope": "飞书26条意见分项落实、前端联动、Android现有接口适配与异常闭环",
   "browserVerified": true,
   "changedViews": [
     "assistant",
@@ -51,11 +51,24 @@
     "boardTestsPassed": 6,
     "hostingTestsPassed": 4,
     "protectedRuntimeFiles": 28,
-    "nativeUITestEntriesPassed": 3,
+    "nativeUITestEntriesPassed": 20,
     "backendMeetingTestsPassed": 15,
     "screenshotsCaptured": 155,
     "interactiveEntries": 178,
     "backendSourceChangeTestsPassed": 12,
-    "backendFakeFeishuTestsPassed": 11
+    "backendFakeFeishuTestsPassed": 11,
+    "nativePreviewTestsPassed": 7,
+    "backendReadRouteTestsPassed": 6
+  },
+  "nativeFlow": {
+    "entry": "native-flow.html",
+    "mode": "isolated-browser-mock",
+    "source": "android/app/src/main/assets/web",
+    "sourceFiles": 85,
+    "stateScreenshots": 6,
+    "browserVerified": true,
+    "apkBuilt": false,
+    "kotlinTestsRun": false,
+    "realBackendDeployed": false
   }
 }

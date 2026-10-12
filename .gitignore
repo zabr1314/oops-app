@@ -44,3 +44,6 @@ evidence/
 # Voiceprint prototype: venv, downloaded models, enrolled embeddings
 .venv-voice/
 models/
+
+# Generated from the current Android H5 sources before preview/build.
+/public/native-preview/

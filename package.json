@@ -9,13 +9,14 @@
     "test:runtime": "playwright test",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:logic": "node --test tests/domain-workflows.test.mjs tests/session-regressions.test.mjs tests/task-flow-regressions.test.mjs tests/memory-privacy.test.mjs tests/home-regressions.test.mjs tests/listening-p0.test.mjs tests/p0-memory-voice.test.mjs tests/p0-intelligence.test.mjs tests/p0-task-suggestions.test.mjs tests/audit29-sessions.test.mjs tests/audit29-actions.test.mjs tests/audit29-memory.test.mjs tests/audit29-identity-links.test.mjs tests/feedback-home-memory.test.mjs tests/feedback-sessions-20261012.test.mjs tests/task-feedback.test.mjs",
-    "predev": "npm run check:runtime",
+    "predev": "npm run check:runtime && node scripts/prepare-native-preview.mjs",
     "dev": "vite",
-    "prebuild": "npm run check:runtime",
+    "prebuild": "npm run check:runtime && node scripts/prepare-native-preview.mjs",
     "build": "tsc && vite build && node scripts/prepare-sites-build.mjs",
     "test:boards": "node --test tests/boards-integrity.test.mjs",
     "build:boards": "node scripts/build-boards.mjs",
-    "test:native-ui": "node --test android/app/src/test/js/*.test.js"
+    "test:native-ui": "node --test android/app/src/test/js/*.test.js",
+    "test:native-preview": "node --test tests/native-preview.test.mjs"
   },
   "dependencies": {
     "@fontsource/roboto": "5.2.10",

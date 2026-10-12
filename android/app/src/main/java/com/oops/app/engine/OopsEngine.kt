@@ -114,6 +114,8 @@ object OopsEngine {
 
     @Volatile private var api: OopsApi = MockOopsApi(Settings.TEAM)
     @Volatile private var previewApi: OopsApi = api
+    @Volatile private var serviceEpoch = 0L
+    private var configuredService: Triple<Boolean, String, String>? = null
 
     private val _state = MutableStateFlow(EngineState())
     val state: StateFlow<EngineState> = _state.asStateFlow()
@@ -905,6 +907,7 @@ object OopsEngine {
         drafts.values.filter { utteranceId in it.evidence.utteranceIds && !submitted.containsKey(it.draftId) }.forEach { draft ->
             val revision = suggestionEpochs.merge(draft.draftId, draft.modelRevision + 1) { a, b -> maxOf(a + 1, b) }!!
             val client = api
+            val service = serviceEpoch
             val policy = optionalRequests
             val reservation = policy.tryReserve("draft-suggestion") ?: return@forEach
             scope.launch {
@@ -915,7 +918,7 @@ object OopsEngine {
                         chosen.map { it.toCandidate() }, sessionIndex.neighbors(draft.evidence.utteranceIds, 4, 1)
                             .filter { it.id !in draft.evidence.utteranceIds }.map { it.toCandidate() })) }
                     synchronized(pipeline) {
-                        if (result == null || session != sessionId || submitted.containsKey(draft.draftId) ||
+                        if (service != serviceEpoch || result == null || session != sessionId || submitted.containsKey(draft.draftId) ||
                             suggestionEpochs[draft.draftId] != revision || "confirm:${draft.draftId}" in inFlight) return@synchronized
                         drafts.computeIfPresent(draft.draftId) { _, current ->
                             com.oops.app.backend.DraftPolicy.updateModel(current, result, revision).also {
@@ -1154,6 +1157,8 @@ object OopsEngine {
     fun draftAction(cardId: String, utteranceIds: List<String>) {
         val card = cards[cardId] ?: return fail("action", "这张卡片已失效")
         if (!inFlight.add("draft:$cardId")) return
+        val client = api
+        val epoch = serviceEpoch
         scope.launch {
             try {
                 val pool = card.pool().map { sessionIndex.get(it.id) ?: it }
@@ -1167,9 +1172,10 @@ object OopsEngine {
                     .distinctBy { it.id }
                     .filter { it.id !in chosenIds }
                     .sortedBy { it.startMs }
-                val response = api.draftAction(
+                val response = client.draftAction(
                     DraftRequest(sessionId, chosen.map { it.toCandidate() }, context.map { it.toCandidate() }),
                 )
+                if (epoch != serviceEpoch) return@launch
                 val draft = ActionDraft(
                     draftId = "d" + UUID.randomUUID().toString().take(8),
                     cardId = cardId,
@@ -1198,7 +1204,7 @@ object OopsEngine {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail("action", "生成行动草稿失败：${e.message ?: e.javaClass.simpleName}")
+                if (epoch == serviceEpoch) fail("action", "生成行动草稿失败：${e.message ?: e.javaClass.simpleName}")
             } finally {
                 inFlight.remove("draft:$cardId")
             }
@@ -1691,6 +1697,9 @@ object OopsEngine {
 
     fun history(action: String, value: String = "", confirm: Boolean = false) {
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "history.$action")
+        if (action in setOf("open", "delete")) context.put("sessionId", value)
         scope.launch {
             try {
                 val result = when (action) {
@@ -1700,16 +1709,36 @@ object OopsEngine {
                         require(confirm) { "请确认删除会议文字" }
                         require(value != sessionId || !_state.value.capturing) { "请先停止收音，再删除本场文字" }
                         val result = client.historyDelete(value)
+                        if (epoch != serviceEpoch) return@launch
                         if (result != null) syncContexts.filter { it.queue.sessionId == value }.forEach { it.queue.halt(endToo = true); it.job?.cancel() }
                         result
                     }
                     "search" -> { require(value.isNotBlank() && value.length <= 500); client.historySearch(value) }
                     else -> error("未知往期操作")
                 }
-                if (result == null) fail("history", "当前后端不支持往期会议")
-                else emit(OopsEvent.Json("history.$action", result.put("query", if (action == "search") value else "")))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("history", "当前后端不支持往期会议", context)
+                else emit(OopsEvent.Json("history.$action", result.put("query", if (action == "search") value else "")
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("history", "往期会议请求失败：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("history", "往期会议请求失败：${error.message}", context) }
+        }
+    }
+
+    /** Read already stored minutes; this endpoint never generates or sends external results. */
+    fun minutes(sessionId: String, requestId: String = "") {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "history.minutes").put("sessionId", sessionId).put("requestId", requestId)
+        scope.launch {
+            try {
+                val result = client.historyMinutes(sessionId)
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("minutes", "当前后端不支持 AI 纪要", context)
+                else emit(OopsEvent.Json("history.minutes", result.put("session_id", sessionId).put("requestId", requestId)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("minutes", "纪要读取失败：${error.message}", context) }
         }
     }
 
@@ -1721,6 +1750,8 @@ object OopsEngine {
      */
     fun correctSpeaker(session: String, utteranceId: String, speaker: String?) {
         require(speaker == null || speaker in Settings.TEAM || speaker in MANUAL_OTHER) { "说话人无效" }
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "speaker.correct").put("sessionId", session).put("utteranceId", utteranceId)
         val live = synchronized(pipeline) {
             if (session != sessionId) return@synchronized null
             sessionIndex.setManual(session, utteranceId, speaker)?.also { transcript.setManual(utteranceId, speaker) }
@@ -1729,7 +1760,7 @@ object OopsEngine {
             emit(OopsEvent.Json("speaker.corrected", corrected(session, utteranceId, speaker, "local")))
             publishSessionSummary(session)
             if (!settings.memorySync) {
-                emit(OopsEvent.Toast("会议文字同步已关闭，只改了本机显示"))
+                fail("review", "会议文字同步已关闭，只改了本机显示，尚未保存到团队服务器", context)
                 return
             }
         }
@@ -1743,10 +1774,12 @@ object OopsEngine {
                 var tries = 0
                 while (result == null && live != null && tries++ < REVIEW_RETRIES) {
                     delay(REVIEW_RETRY_MS)
+                    if (epoch != serviceEpoch) return@launch
                     result = client.reviewMeeting(body)
                 }
+                if (epoch != serviceEpoch) return@launch
                 if (result == null) {
-                    fail("review", if (live != null) "服务器还没有这场会议的文字，改动只在本机" else "当前后端不支持修改说话人")
+                    fail("review", if (live != null) "服务器还没有这场会议的文字，改动只在本机" else "当前后端不支持修改说话人", context)
                     return@launch
                 }
                 emit(OopsEvent.Json("speaker.corrected", corrected(session, utteranceId, speaker, "saved")))
@@ -1756,12 +1789,14 @@ object OopsEngine {
                     refreshDraftSuggestions(session, utteranceId)
                 }
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("review", "说话人修改没有保存到服务器：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("review", "说话人修改没有保存到服务器：${error.message}", context) }
         }
     }
 
     /** After-meeting check of one sentence: verdict (confirmed/rejected) and owner; null clears that field. */
     fun review(session: String, utteranceId: String, fields: JSONObject) {
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "review.set").put("sessionId", session).put("utteranceId", utteranceId)
         val body = JSONObject().put("session_id", session).put("utterance_id", utteranceId)
             .put("by", settings.selfName.ifEmpty { JSONObject.NULL })
         for (key in fields.keys()) {
@@ -1778,26 +1813,31 @@ object OopsEngine {
         scope.launch {
             try {
                 val result = client.reviewMeeting(body)
-                if (result == null) fail("review", "服务器上没有这场会议，核对没有保存")
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("review", "服务器上没有这场会议，核对没有保存", context)
                 else emit(OopsEvent.Json("review.saved", JSONObject().put("sessionId", session).put("utteranceId", utteranceId)
-                    .put("review", result.opt("review") ?: JSONObject.NULL)))
+                    .put("review", result.opt("review") ?: JSONObject.NULL).put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("review", "核对没有保存到服务器：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("review", "核对没有保存到服务器：${error.message}", context) }
         }
     }
 
     private fun corrected(session: String, id: String, speaker: String?, status: String) = JSONObject()
         .put("sessionId", session).put("utteranceId", id).put("speaker", speaker ?: JSONObject.NULL).put("status", status)
+        .put("serviceEpoch", serviceEpoch).put("backendUrl", _state.value.backendUrl)
 
     fun projects(name: String? = null) {
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", if (name == null) "projects.list" else "project.open").put("name", name ?: JSONObject.NULL)
         scope.launch {
             try {
                 val result = if (name == null) client.projects() else client.project(name)
-                if (result == null) fail("projects", "当前后端不支持项目")
-                else emit(OopsEvent.Json(if (name == null) "projects.list" else "project.open", result))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("projects", "当前后端不支持项目", context)
+                else emit(OopsEvent.Json(if (name == null) "projects.list" else "project.open", result.put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("projects", "项目请求失败：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("projects", "项目请求失败：${error.message}", context) }
         }
     }
 
@@ -1807,44 +1847,54 @@ object OopsEngine {
         require(name.length <= 30) { "项目名称最多 30 个字" }
         val live = session == sessionId
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "meeting.project").put("sessionId", session)
         scope.launch {
             try {
                 var result = client.setMeetingProject(session, name)
                 var tries = 0
                 while (result == null && live && tries++ < REVIEW_RETRIES) {
                     delay(REVIEW_RETRY_MS)
+                    if (epoch != serviceEpoch) return@launch
                     result = client.setMeetingProject(session, name)
                 }
-                if (result == null) fail("projects", if (live) "服务器还没有这场会议的文字，稍后再设项目" else "当前后端不支持项目")
-                else emit(OopsEvent.Json("meeting.project", result))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("projects", if (live) "服务器还没有这场会议的文字，稍后再设项目" else "当前后端不支持项目", context)
+                else emit(OopsEvent.Json("meeting.project", result.put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("projects", "项目没有保存：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("projects", "项目没有保存：${error.message}", context) }
         }
     }
 
     fun renameMeeting(session: String, title: String) {
         require(title.trim().length <= 40) { "会议名称最多 40 个字" }
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "history.rename").put("sessionId", session)
         scope.launch {
             try {
                 val result = client.renameMeeting(session, title.trim())
-                if (result == null) fail("history", "当前后端不支持改会议名称")
-                else emit(OopsEvent.Json("history.renamed", result))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("history", "当前后端不支持改会议名称", context)
+                else emit(OopsEvent.Json("history.renamed", result.put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("history", "改名没有保存：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("history", "改名没有保存：${error.message}", context) }
         }
     }
 
     /** Plays a sentence from the server's archive (a past meeting, or this one once its recording is uploaded). */
     fun playRemoteClip(key: String, session: String, startMs: Long, endMs: Long) {
         val client = api
+        val epoch = serviceEpoch
         scope.launch {
             try {
                 emit(OopsEvent.Clip(key, "loading"))
                 val pcm = client.recordingClip(session, startMs, endMs)
+                if (epoch != serviceEpoch) return@launch
                 if (pcm == null || pcm.isEmpty()) emit(OopsEvent.Clip(key, "unavailable")) else player.play(key, pcm)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
+                if (epoch != serviceEpoch) return@launch
                 emit(OopsEvent.Clip(key, "unavailable"))
                 fail("clip", "原声取不到：${error.message}")
             }
@@ -1853,15 +1903,19 @@ object OopsEngine {
 
     fun tasks(mine: Boolean, status: String) {
         val client = api
+        val epoch = serviceEpoch
+        val self = settings.selfName.ifEmpty { null }
+        val context = serviceContext(epoch).put("operation", "tasks.list").put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL)
         scope.launch {
             try {
-                val self = settings.selfName.ifEmpty { null }
                 require(!mine || self != null) { "请先在设置里选择本人" }
                 val result = client.tasks(if (mine) self else null, status)
-                if (result == null) fail("tasks", "当前后端不支持任务列表")
-                else emit(OopsEvent.Json("tasks.list", result.put("mine", mine).put("status", status)))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("tasks", "当前后端不支持任务列表", context)
+                else emit(OopsEvent.Json("tasks.list", result.put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("tasks", "任务列表请求失败：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("tasks", "任务列表请求失败：${error.message}", context) }
         }
     }
 
@@ -1939,6 +1993,10 @@ object OopsEngine {
 
     private fun rebuildApi() {
         val url = settings.backendBaseUrl
+        val nextService = Triple(settings.mockBackend, url, settings.backendToken)
+        val serviceChanged = configuredService != null && configuredService != nextService
+        if (serviceChanged) serviceEpoch += 1
+        configuredService = nextService
         api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken)
         val previewUrl = if (com.oops.app.BuildConfig.DEBUG) settings.speakerPreviewUrl else ""
         previewApi = if (previewUrl.isBlank()) api else HttpOopsApi(http, previewUrl, settings.backendTokenFor(previewUrl))
@@ -1954,14 +2012,18 @@ object OopsEngine {
                 remoteAddress = settings.remoteAddress,
             )
         }
+        if (serviceChanged) emit(OopsEvent.Json("backend.changed", JSONObject().put("backend", api.name).put("backendUrl", url).put("serviceEpoch", serviceEpoch)))
     }
+
+    private fun serviceContext(epoch: Long) = JSONObject().put("serviceEpoch", epoch).put("backendUrl", _state.value.backendUrl)
 
     private fun emit(event: OopsEvent) {
         _events.tryEmit(event)
     }
 
-    private fun fail(scope: String, message: String) {
+    private fun fail(scope: String, message: String, context: JSONObject? = null) {
         Log.w(TAG, "$scope: $message")
-        emit(OopsEvent.Failure(scope, message))
+        if (context == null) emit(OopsEvent.Failure(scope, message))
+        else emit(OopsEvent.Json("error", context.put("scope", scope).put("message", message)))
     }
 }

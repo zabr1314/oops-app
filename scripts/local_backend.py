@@ -2008,9 +2008,9 @@ class Handler(BaseHTTPRequestHandler):
                 feishu = getattr(self.backend, "feishu", None)
                 value = dict(session_id=sid, **(feishu.minutes_view(row) if feishu else dict(status="unavailable", reason="bot_off")))
                 summary = f"minutes {value['status']}"
-            elif method == "GET" and self.path.startswith('/v1/meetings/'):
+            elif method == "GET" and re.fullmatch(r"/v1/meetings/[^/]+", urlsplit(self.path).path):
                 try:
-                    value = self.backend.meetings.load(self.path.rsplit('/', 1)[1])
+                    value = self.backend.meetings.load(urlsplit(self.path).path.rsplit('/', 1)[1])
                 except FileNotFoundError:
                     raise ApiError(404, 'NOT_FOUND', '会议不存在或已过保留期') from None
                 except ValueError as error:

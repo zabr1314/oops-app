@@ -104,3 +104,12 @@ body { -webkit-tap-highlight-color: transparent; }
 .native-current-topic { display: grid; gap: 6px; padding: 14px 16px; border-left: 3px solid var(--brand); background: var(--soft); border-radius: 12px; }
 .native-current-topic small, .native-current-topic span { color: var(--muted); font-size: 12px; }
 .session-result-card > h3 { margin-top: 18px; }
+.review-answer { min-width: 0; margin: 0; padding: 0; border: 0; }
+.review-answer:disabled { opacity: .55; }
+.review-save-state { padding: 12px; border-radius: 12px; background: #f7f5ff; }
+.service-error { border-color: #eed4d4; }
+.native-minutes h3 { margin-top: 14px; }
+.native-minutes .section-title h2 { margin: 0; }
+.minutes-item { padding: 10px 0; border-bottom: 1px solid #eeeaf4; }
+.minutes-item p, .minutes-overview { white-space: pre-wrap; overflow-wrap: anywhere; }
+.minutes-item .chip { margin: 6px 6px 0 0; }

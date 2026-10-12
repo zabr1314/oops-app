@@ -15,6 +15,12 @@
 
 仓库同时包含 Oops Android 原生 App（`android/`）及其后端、飞书机器人和 Mac 助手（`deploy/`、`scripts/`），负责实际收音、豆包流式 ASR、本场纪要和飞书任务。构建、部署和真机运行说明见 [ANDROID.md](ANDROID.md)。
 
+## 2026-10-12 接口适配与异常闭环
+
+沿用已有 Android/后端契约，补齐会后核对「服务器保存后才推进」、失败保留选择并重试、列表读取错误与筛选缓存隔离、AI 会后纪要只读及来源变化提示。切换服务器或访问凭据时清除远端缓存并拒绝旧请求，撤销人工身份后仍未知的原话重新进入待核对。完整范围和验收边界见 [接口适配记录](docs/service-adaptation-20261012.md)。
+
+[安卓流程（浏览器模拟）](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/native-flow.html) 使用同一份 Android H5 源文件，提供六种正常与异常场景和实屏截图。统一体验中心及两份画板已增加入口；原有 React 的155张截图、178项交互入口保持有效。公开示例不连接团队服务器，不含团队访问凭据，也不创建真实飞书任务。Android 编译和真机验收尚未完成，宿主缺少所需 JDK 与 Android SDK。
+
 ## 2026-10-12 意见优化
 
 以飞书当前26条意见为准，优先落实P0，完整分项与剩余范围见 [意见落实记录](docs/feedback-implementation-20261012.md)。首页按记录状态切换；会话先显示重点、候选结果与行动草稿；任务使用统一列表、独立日期/状态/助手筛选；成果正文与预览优先；Unknown、项目背景、个人理解和自定义偏好补齐上下文及纠正入口。行动草稿的交付要求沿用后端 constraint 语义，原话独立留存。
@@ -81,6 +87,8 @@ npm run check:runtime
 npm run build
 npm run test:sites
 npm run test:logic
+npm run test:native-ui
+npm run test:native-preview
 ```
 
 当前使用 React、TypeScript 和 Vite。应用页面位于 `src/features/`，导航和状态入口位于 `src/Prototype.tsx`，共享数据与演示种子位于 `src/store.tsx`，品牌素材和画板位于 `public/`。修改页面前请阅读 `AGENTS.md`，保留其规定的移动运行时。
