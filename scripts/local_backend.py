@@ -42,6 +42,7 @@ from meeting_features import Meetings, judge_notice
 from voiceprint_registry import VoiceprintRegistry, audio_quality, person_profiles
 from voiceprint_invites import invite_person
 from recordings import RecordingError, Recordings
+from archive_policy import ArchivePolicies, ArchivePolicyError
 from task_resolver import load_deepseek, owner_for, resolve_all
 from feishu_actions import FeishuActions
 from speaker_attribution import (attribute, calibrated_probability, owner_features, OWNER_EVENT,
@@ -183,10 +184,12 @@ class TagCache:
     """Bounded per-session/id successful-result cache; serialize duplicate in-flight calls."""
     def __init__(self, limit=20000):
         self.limit, self.values = limit, {}
+        self.saved_at = {}
         self.inflight, self.condition = set(), threading.Condition()
 
     def get_or_compute(self, key, compute):
         with self.condition:
+            self.prune()
             while key in self.inflight:
                 self.condition.wait()
             if key in self.values:
@@ -196,13 +199,22 @@ class TagCache:
             value = compute()  # exceptions do not populate the cache
             with self.condition:
                 if len(self.values) >= self.limit:
-                    self.values.pop(next(iter(self.values)))
+                    oldest = next(iter(self.values))
+                    self.values.pop(oldest); self.saved_at.pop(oldest, None)
                 self.values[key] = value
+                self.saved_at[key] = time.monotonic()
             return dict(value)
         finally:
             with self.condition:
                 self.inflight.remove(key)
                 self.condition.notify_all()
+
+    def prune(self, now=None):
+        now = time.monotonic() if now is None else now
+        with self.condition:
+            for key in list(self.values):
+                if now - self.saved_at.get(key, 0) >= 300:
+                    self.values.pop(key, None); self.saved_at.pop(key, None)
 
 
 class SplitJobs:
@@ -218,6 +230,7 @@ class SplitJobs:
 
     def submit(self, key, work):
         with self.condition:
+            self.prune()
             if key in self.records:
                 return
             record = {"state": "pending", "segments": [], "submitted": time.monotonic()}
@@ -234,13 +247,14 @@ class SplitJobs:
     def run(self, record, work):
         started = time.monotonic()
         try:
-            segments, state = work(), "done"
+            segments, state = (work(), 'done') if started - record['submitted'] < 300 else ([], 'failed')
         except Exception as error:  # noqa: BLE001
             log("句内拆分试验失败：" + type(error).__name__)
             segments, state = [], "failed"
         finished = time.monotonic()
         with self.condition:
             self.queued -= 1
+            if finished - record['submitted'] >= 300: segments, state = [], 'failed'
             record.update(state=state, segments=segments, queue_ms=int((started - record["submitted"]) * 1000),
                           split_ms=int((finished - started) * 1000))
             self.condition.notify_all()
@@ -249,6 +263,7 @@ class SplitJobs:
         """The record (a copy) once finished or after `timeout`; None when the key is unknown."""
         deadline = time.monotonic() + timeout
         with self.condition:
+            self.prune()
             record = self.records.get(key)
             while record is not None and record["state"] == "pending":
                 left = deadline - time.monotonic()
@@ -256,6 +271,14 @@ class SplitJobs:
                     break
                 self.condition.wait(left)
             return dict(record) if record is not None else None
+
+    def prune(self, now=None):
+        now = time.monotonic() if now is None else now
+        with self.condition:
+            for key, record in list(self.records.items()):
+                if now - record['submitted'] >= 300:
+                    record['segments'] = []
+                    self.records.pop(key, None)
 
 
 class ApiError(Exception):
@@ -1170,10 +1193,12 @@ class Backend:
         state = args.state_dir
         self.people = People(os.path.join(state, "people.json"))
         self.ops = Operations(os.path.join(state, "operations"))
+        self.archive_policies = ArchivePolicies(os.path.join(state, 'archive-policies'), self.legacy_archive)
         self.meetings = Meetings(os.path.join(state, "meetings"), self.ops,
             owner=lambda value: commitment_evidence(value)[1], deadline=lambda value: WHEN.search(value).group(0) if WHEN.search(value) else None,
-            team=TEAM)
-        self.recordings = Recordings(os.path.join(state, "recordings"), deleted=self.meeting_deleted)
+            team=TEAM, policies=self.archive_policies, require_storage_policy=True)
+        self.recordings = Recordings(os.path.join(state, "recordings"), deleted=self.meeting_deleted,
+                                     policies=self.archive_policies, require_storage_policy=True)
         # The Oops bot: private meeting summaries, task notices, follow-up events, the ledger and Mac helper jobs.
         self.feishu = (FeishuActions(self, state, self.lark, run_lark, log, dry_run=args.feishu == "dry-run")
                        if os.environ.get("OOPS_FEISHU_BOT") == "1" else None)
@@ -1254,6 +1279,7 @@ class Backend:
             return old["speaker"]
 
     def remember_speaker(self, req, segments):
+        self.prune_transient_caches()
         session, utterance_id = req.get("session_id"), req.get("utterance_id")
         if not isinstance(session, str) or not session or not isinstance(utterance_id, str) or not utterance_id:
             return
@@ -1293,8 +1319,63 @@ class Backend:
         except ValueError:
             return False
 
+    def legacy_archive(self, sid):
+        """Only an already-persisted legacy asset is grandfathered; a client flag cannot bypass consent."""
+        for path in (os.path.join(self.args.state_dir, 'meetings', sid + '.json'),
+                     os.path.join(self.args.state_dir, 'recordings', sid, 'manifest.json')):
+            if os.path.isfile(path):
+                with open(path, encoding='utf-8') as source:
+                    if json.load(source).get('storage_policy') is None: return True
+        return False
+
+    def cleanup_storage(self):
+        """Also callable by an offline scheduler; content is not placed in logs."""
+        result = dict(transcripts=self.meetings.cleanup(), recording_files=self.recordings.cleanup())
+        feishu = getattr(self, 'feishu', None)
+        if feishu:
+            for name in os.listdir(self.meetings.dir):
+                if name.endswith('.json'):
+                    try:
+                        with open(os.path.join(self.meetings.dir, name), encoding='utf-8') as source:
+                            is_expired = json.load(source).get('transcript_status') == 'expired'
+                        if is_expired: feishu.expire_meeting_sources(name[:-5])
+                    except (OSError, ValueError, KeyError, TypeError) as error:
+                        log('辅助输入清理跳过无效存档：' + type(error).__name__)
+        self.prune_transient_caches()
+        return result
+
+    def start_storage_cleanup(self):
+        stop = threading.Event()
+        self.cleanup_storage()
+        def run():
+            while not stop.wait(5):
+                try:
+                    self.cleanup_storage()
+                except (OSError, ValueError, KeyError) as error:
+                    log('存档期限清理失败：' + type(error).__name__)
+        threading.Thread(target=run, name='archive-retention', daemon=True).start()
+        return stop
+
+    def prune_transient_caches(self, now=None):
+        """Analysis is temporary processing, not a second transcript archive."""
+        now = time.monotonic() if now is None else now
+        with self.__dict__.setdefault('speaker_state_lock', threading.RLock()):
+            for name in ('speaker_evidence', 'trial_evidence'):
+                cache = self._state(name)
+                for key, value in list(cache.items()):
+                    if now - value.get('at', 0) >= 300: cache.pop(key, None)
+            cache = self._state('task_cache')
+            stamps = self._state('task_cache_at')
+            for key in set(cache) | set(stamps):
+                if key not in cache or now - stamps.get(key, 0) >= 300:
+                    cache.pop(key, None); stamps.pop(key, None)
+        for name in ('tags', 'speaker_cache', 'split_jobs'):
+            cache = getattr(self, name, None)
+            if cache: cache.prune(now)
+
     def recording_call(self, action, sid, body=None, name=None, offset=None, data=None, sha=None, start=None, end=None):
         try:
+            if getattr(self, 'meetings', None): self.meetings.cleanup()
             if action == "clip": return self.recordings.clip(sid, start, end)
             if action == "manifest": return self.recordings.manifest(sid, body)
             if action == "chunk": return self.recordings.chunk(sid, name, offset, data, sha)
@@ -1326,6 +1407,7 @@ class Backend:
                     self.recordings.delete(body.get('session_id'))
                 return result
             if action == 'rename': return self.meetings.rename(body)
+            if action == 'retain': return self.meetings.retain(body)
             if action == 'project': return self.meetings.set_project(body)
             if action == 'review':
                 with self.meetings.lock:
@@ -1342,6 +1424,8 @@ class Backend:
                 except Exception:
                     if not self.jev: raise
                     return self.meetings.search(body.get('query'), None, overlap, jev_recall)
+        except ArchivePolicyError as error:
+            raise ApiError(error.status, 'ARCHIVE_POLICY', str(error), **error.extra) from None
         except FileNotFoundError:
             raise ApiError(404, 'NOT_FOUND', '会议不存在或已删除') from None
         except (ValueError, KeyError, TypeError) as error:
@@ -1550,6 +1634,7 @@ class Backend:
         return self.__dict__.setdefault(name, {})
 
     def remember_trial(self, req, segments):
+        self.prune_transient_caches()
         session, utterance_id = req.get("session_id"), req.get("utterance_id")
         if isinstance(session, str) and session and isinstance(utterance_id, str) and utterance_id:
             with self.speaker_state_lock:
@@ -1571,6 +1656,7 @@ class Backend:
         """Suggested speaker of the task clause: server-computed split first, then the sentence label."""
         if offset is None:
             return None
+        self.prune_transient_caches()
         with self.speaker_state_lock:
             key = (session, utterance.get("id"))
             if key in self._state('manual_speakers'):
@@ -1589,6 +1675,7 @@ class Backend:
         return speaker if speaker in TEAM else None
 
     def resolve_tasks(self, req, utterances, context):
+        self.prune_transient_caches()
         if not self.resolver or not utterances:
             return []
         target = max(utterances, key=lambda u: len(u.get("text", "")))
@@ -1606,8 +1693,11 @@ class Backend:
         for task in tasks:
             task["utterance"] = target
         self._state('task_cache')[key] = tasks
+        self._state('task_cache_at')[key] = time.monotonic()
         while len(self._state('task_cache')) > 2000:
-            self._state('task_cache').pop(next(iter(self._state('task_cache'))))
+            oldest = next(iter(self._state('task_cache')))
+            self._state('task_cache').pop(oldest)
+            self._state('task_cache_at').pop(oldest, None)
         return tasks
 
     def preview_speakers(self, req):
@@ -1673,6 +1763,7 @@ class Backend:
         return rules_recall(req)
 
     def draft(self, req):
+        self.prune_transient_caches()
         utterances = req.get("utterances") or []
         if not utterances:
             raise ApiError(400, "BAD_REQUEST", "缺少 utterances")
@@ -1952,7 +2043,7 @@ class Handler(BaseHTTPRequestHandler):
                          "strict_a_enabled": getattr(self.backend, "strict_a_enabled", False),
                          "self_owner_enabled": getattr(self.backend, "self_owner_enabled", False),
                          "named_owner_enabled": getattr(self.backend, "named_owner_enabled", False),
-                         "notices": True, "meetings": True, "recordings": True,
+                         "notices": True, "meetings": True, "recordings": True, "archive_policy_version": 1,
                          "feishu_bot": getattr(self.backend, "feishu", None) is not None,
                          "mac_agent_online": bool(getattr(self.backend, "feishu", None) and self.backend.feishu.jobs.online())}
                 summary = "health"
@@ -2036,7 +2127,7 @@ class Handler(BaseHTTPRequestHandler):
                     _, _, _, sid, action = self.path.split("/")
                     value = self.backend.recording_call(action, sid, body)
                     summary = f"recording {action} complete={value.get('complete')}"
-                elif self.path in ('/v1/meetings/sync', '/v1/meetings/delete', '/v1/meetings/search', '/v1/meetings/review', '/v1/meetings/rename', '/v1/meetings/project'):
+                elif self.path in ('/v1/meetings/sync', '/v1/meetings/delete', '/v1/meetings/search', '/v1/meetings/review', '/v1/meetings/rename', '/v1/meetings/project', '/v1/meetings/retain'):
                     value = self.backend.meeting_call(self.path.rsplit('/', 1)[1], body)
                     if self.path == '/v1/meetings/sync':
                         utterances = body.get('utterances')
@@ -2287,6 +2378,7 @@ def main():
     Handler.api_token = os.environ.get("OOPS_API_TOKEN", "").strip()
     Handler.enroll_secret = os.environ.get("OOPS_ENROLL_SECRET", "").strip()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    storage_cleanup_stop = backend.start_storage_cleanup()
     people = backend.people.data or {"people": {}, "self": {"name": "dry-run"}}
     mapped = ", ".join(name for name, open_id in people["people"].items() if open_id) or "无"
     log(f"Oops 本地后端 http://127.0.0.1:{args.port}  Jev={'on ' + args.jev_model if backend.jev else 'off（规则）'}  "
@@ -2300,6 +2392,9 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        storage_cleanup_stop.set()
+        server.server_close()
 
 
 if __name__ == "__main__":

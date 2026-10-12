@@ -36,7 +36,8 @@ class CaptureService : Service() {
         }
         startInForeground()
         acquireWakeLock()
-        OopsEngine.startCapture(intent?.getStringExtra(EXTRA_SOURCE) ?: OopsEngine.settings.source)
+        val policy = intent?.getStringExtra("recording_policy")?.let { com.oops.app.store.RecordingPolicy.fromBridge(org.json.JSONObject(it)) } ?: com.oops.app.store.RecordingPolicy()
+        OopsEngine.startCapture(intent?.getStringExtra(EXTRA_SOURCE) ?: OopsEngine.settings.source, policy)
         // Android 14+ forbids restarting a microphone service from the background anyway.
         return START_NOT_STICKY
     }
@@ -93,8 +94,10 @@ class CaptureService : Service() {
         private const val EXTRA_SOURCE = "source"
 
         /** Must be called while the app is in the foreground (microphone FGS rule). */
-        fun start(context: Context, source: String) {
+        fun start(context: Context, source: String, policy: com.oops.app.store.RecordingPolicy = com.oops.app.store.RecordingPolicy()) {
             val intent = Intent(context, CaptureService::class.java).setAction(ACTION_START).putExtra(EXTRA_SOURCE, source)
+                .putExtra("recording_policy", org.json.JSONObject().put("recordingMode", policy.mode).put("cloudSaveConfirmed", policy.archives)
+                    .put("audioRetentionDays", policy.audioDays).put("transcriptRetentionDays", policy.transcriptDays).toString())
             ContextCompat.startForegroundService(context, intent)
         }
 

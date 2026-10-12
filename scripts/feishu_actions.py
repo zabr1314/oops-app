@@ -427,6 +427,9 @@ class FeishuActions:
 
     def tick_meeting(self, row, since, now):
         sid = row["session_id"]
+        if row.get('transcript_status') == 'expired':
+            self.expire_meeting_sources(sid)
+            return
         ended, source = effective_end(row, now)
         if ended is None:
             last = row.get("last_sync_at")
@@ -504,6 +507,7 @@ class FeishuActions:
 
     def minutes_current(self, row):
         sid = row["session_id"]
+        if row.get('transcript_status') == 'expired': return False
         if self.state.get("meetings", sid, "analysis_invalidated"):
             return False
         fingerprint = self.state.get("meetings", sid, "analysis_fingerprint")
@@ -587,6 +591,12 @@ class FeishuActions:
     def minutes_view(self, row, now=None):
         """The minutes as the app sees them: what the bot wrote, or why there is none yet. Never asks the model."""
         sid = row["session_id"]
+        if row.get('transcript_status') == 'expired':
+            self.expire_meeting_sources(sid)
+            return dict(status='unavailable', reason='source_expired',
+                        message='完整转写已到期；已确认摘要、任务及独立短依据仍可查看。',
+                        retained_summaries=row.get('retained_summaries', []), retained_evidence=row.get('retained_evidence', []),
+                        historical_doc_url=self.state.get('meetings', sid, 'doc_url'))
         analysis = self.state.get("meetings", sid, "analysis")
         if analysis:
             if not self.minutes_current(row):
@@ -689,6 +699,9 @@ class FeishuActions:
             analysis = self.analyse(row)
             with self.backend.meetings.lock:
                 current = self.backend.meetings.load(sid)
+                if current.get('transcript_status') == 'expired':
+                    self.log(f"meeting {sid[:8]} expired while writing minutes; candidate discarded")
+                    return
                 changed = fingerprint != self.minutes_fingerprint(current)
                 with self.state.lock:
                     self.state.put(analysis, "meetings", sid, "analysis")
@@ -1080,10 +1093,43 @@ class FeishuActions:
 
     # results from the Mac helper ---------------------------------------------------------
 
+    def expire_meeting_sources(self, sid):
+        """Purge auxiliary full-text inputs too; preserve independent task/result records."""
+        with self.state.lock:
+            entry = self.state.data.get('meetings', {}).get(sid)
+            if entry is not None and (not entry.get('transcript_expired') or 'analysis' in entry or 'analysis_fingerprint' in entry):
+                entry.pop('analysis', None)
+                entry.pop('analysis_fingerprint', None)
+                entry.update(analysis_invalidated=True, transcript_expired=True)
+                self.state.save()
+        with self.jobs.lock:
+            for job in self.jobs.all():
+                payload = job.get('payload') or {}
+                if payload.get('session_id') != sid: continue
+                has_inputs = any(key in payload for key in ('transcript', 'context', 'summary'))
+                has_long_quote = isinstance(payload.get('quote'), str) and len(payload['quote']) > 280
+                if payload.get('source_expired') and not has_inputs and not has_long_quote: continue
+                payload.pop('transcript', None)
+                payload.pop('context', None)
+                payload.pop('summary', None)
+                if isinstance(payload.get('quote'), str): payload['quote'] = payload['quote'][:280]
+                payload['source_expired'] = True
+                if job.get('status') in ('queued', 'running'):
+                    job.update(status='failed', finished_at=now_utc().isoformat(), reason='source_expired',
+                               error='完整转写已到期，原依据不再可用于执行或交付')
+                self.jobs.save(job)
+
     def current_job_minutes(self, job):
         """Manual card work must still refer to the minutes that supplied its input."""
         payload = job.get("payload") or {}
         sid = payload.get("session_id")
+        if payload.get('source_expired'):
+            raise MinutesSourceChanged('完整转写已到期，旧成果仅作为历史保留')
+        if sid:
+            row = self.backend.meetings.load(sid)
+            if row.get('transcript_status') == 'expired':
+                self.expire_meeting_sources(sid)
+                raise MinutesSourceChanged('完整转写已到期，旧成果不能继续交付')
         # Automatic in-meeting look-ups retain their existing, independent rules.
         if not sid or payload.get("auto"):
             return

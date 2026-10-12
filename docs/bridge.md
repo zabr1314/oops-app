@@ -140,3 +140,14 @@ settings.set 增加 `speakerPreview`，默认 false；state 增加 `speakerPrevi
 - 已提交的行动沿用原操作的服务地址与 op_id，不因切换服务器改投新地址。收音保存规则继续沿用原设置。
 
 公开站 `/native-flow.html` 从当前 Android H5 源文件生成隔离预览，`preview=1` 不读写浏览器保存记录，不连接真实后端，不创建飞书任务。它用于验证界面流程；不代表 APK 已构建或真机验收。
+
+## 2026-10-12：日常临时聆听与会议保存合同
+
+此节替代上文旧的全场默认存盘/文字同步说明；旧记录不套新期限。新 `capture.start` 可带 `recordingMode:"daily"|"meeting"`、`cloudSaveConfirmed`、`audioRetentionDays`、`transcriptRetentionDays`，默认日常；正式会议必须本次明确确认，原音与全文分别7/30/90天、默认30天。`capture.meeting` 采用相同合同，把正在运行的日常结束并从切换时新建会议，不自动复制之前缓冲。真实后端能力不足或未确认时不能静默退回旧的全场归档。
+
+- `state` 增加 `recordingMode/cloudSaveConfirmed/audioRetentionDays/transcriptRetentionDays/audioExpired/transcriptExpired`；`transcript.pruned {ids}` 清除对应原句、旧卡片、临时草稿与提醒。日常停止发 `capture.cleared {mode:"daily"}`，完整内容不能重新显示为已存会话。
+- `daily.candidates {}` 读取私人待核对短依据，返回同名事件 `{items}`。`daily.candidate.confirm {sessionId,id,quote,confirmed:true}` 仅保存本次核对的短文字，不恢复原音/全文、不自动创建任务或共享。`daily.candidate.discard {sessionId,id}` 舍弃候选。
+- `meeting.retain {sessionId,requestId,confirm:true,evidence:[{id,quote,sourceText}],summaries:[{id,text,source_ids}]}` 对应已有会议的独立保留接口。H5 本地桥接携带当前来源供原生计算 UTF-8 SHA256；HTTP 正文只发送短 quote 和 `expected_text_hash`，不发送 `sourceText`。短 quote 最多280字、摘要最多2000字，摘要只能引用本次选择的依据，默认不选、不勾确认。
+- `meeting.retained` 回传 `sessionId/requestId/retained_evidence/retained_summaries`；只有匹配回执才显示已保留。普通错误在 `error.scope=retention` 保留选择并重试同一请求；409来源变化要求重新读取核对，不能重复提交旧确认。
+
+公开安卓浏览器预览继续隔离示例，原生保存与服务端清理需新版后端和实际 APK 部署验证。代码测试、模拟回执不证明真机已经执行。

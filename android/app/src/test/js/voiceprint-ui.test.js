@@ -31,7 +31,7 @@ for (const fn of element('sheet').listeners.change) fn({ target: element('vp-nam
 assert.equal(selected(), '林春源');
 element('vp-consent').checked = true;
 const record = { disabled: false, dataset: { act: 'vp-record' } };
-for (const fn of element('sheet').listeners.click) fn({ target: { closest: () => record } });
+for (const fn of element('sheet').listeners.click) fn({ stopPropagation() {}, target: { closest: () => record } });
 assert.equal(messages.at(-1).type, 'voiceprint.record');
 assert.equal(messages.at(-1).payload.name, '林春源');
 

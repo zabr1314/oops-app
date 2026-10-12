@@ -14,6 +14,12 @@ data class EngineState(
     val source: String = "mic",
     val sessionId: String = "",
     val sessionMs: Long = 0,
+    val recordingMode: String = "daily",
+    val cloudSaveConfirmed: Boolean = false,
+    val audioRetentionDays: Int = 30,
+    val transcriptRetentionDays: Int = 30,
+    val audioExpired: Boolean = false,
+    val transcriptExpired: Boolean = false,
     val bufferedMs: Long = 0,
     /** off | unconfigured | connecting | live | reconnecting | error */
     val asr: String = "off",

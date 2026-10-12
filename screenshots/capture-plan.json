@@ -831,7 +831,7 @@
   },
   {
     "key": "u14-settings-spaces",
-    "title": "工作空间",
+    "title": "内容范围与共享",
     "group": "我的",
     "route": {
       "view": "settings-spaces"
@@ -840,7 +840,7 @@
   },
   {
     "key": "u15-settings-members",
-    "title": "团队成员与邀请",
+    "title": "协作与共享 · 兼容入口",
     "group": "我的",
     "route": {
       "view": "settings-members"
@@ -2270,6 +2270,114 @@
       "view": "home"
     },
     "scene": "tasks-failure",
+    "actions": []
+  },
+  {
+    "key": "f26-daily-buffer",
+    "title": "日常 · 五分钟临时缓冲",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "actions": []
+  },
+  {
+    "key": "f27-daily-stop",
+    "title": "日常 · 停止并清除全文",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "结束当前记录",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f28-daily-finished",
+    "title": "日常 · 候选与短证据",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "概览"
+    },
+    "scene": "p0-daily-finished",
+    "actions": []
+  },
+  {
+    "key": "f29-daily-to-meeting",
+    "title": "日常转会议 · 单独选择云保存",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "切换为正式会议",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f30-meeting-cloud-choice",
+    "title": "正式会议 · 独立期限与云保存",
+    "group": "会话",
+    "route": {
+      "view": "session-mode",
+      "mode": "会议"
+    },
+    "scene": "default",
+    "actions": []
+  },
+  {
+    "key": "f31-meeting-retention",
+    "title": "正式会议 · 原音与全文期限",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-meeting-retention",
+    "actions": []
+  },
+  {
+    "key": "f32-meeting-expired",
+    "title": "会议到期 · 仅独立短证据",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "原文"
+    },
+    "scene": "p0-meeting-expired",
+    "actions": []
+  },
+  {
+    "key": "f33-project-sharing",
+    "title": "项目 · 上下文与同一任务",
+    "group": "记忆",
+    "route": {
+      "view": "memory-project",
+      "id": "project-1"
+    },
+    "scene": "default",
     "actions": []
   }
 ]

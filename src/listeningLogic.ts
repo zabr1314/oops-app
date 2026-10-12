@@ -1,5 +1,6 @@
 import type { AppData, Session, Transcript } from './store';
 import { sessionVisible } from './sourceAccess';
+import { newStoragePolicy } from './storagePolicy';
 import type { SaveScope } from './recordingLogic';
 
 export type ListeningConfig = {
@@ -27,7 +28,7 @@ export const listeningConfigKey = (space: string) => 'listening-config:' + space
 export const defaultListeningConfig: ListeningConfig = {
   wakeWord: '你好 Oops', minSeconds: 18, silenceSeconds: 120,
   startMode: 'confirm', endMode: 'confirm', quietEnabled: false,
-  quietStart: '22:00', quietEnd: '08:00', saveScope: '完整保存', shared: false,
+  quietStart: '22:00', quietEnd: '08:00', saveScope: '手动选择片段', shared: false,
 };
 
 export function validateListeningConfig(config: ListeningConfig): string {
@@ -77,25 +78,24 @@ export function startListeningSession(data: AppData, signal: ListeningSignal, op
   if (data.sessions.some(s => s.id === options.sessionId) || data.settings.retention['listening-accepted:' + signal.id]) return { data, error: '这段示例已经处理过，请体验新的声音。' };
   if (validateListeningConfig(config)) return { data, error: validateListeningConfig(config) };
   if (inListeningQuietHours(config, options.date) && !options.allowQuietOnce) return { data, error: '现在处于安静时段，可以明确选择本次手动开始。' };
-  if (data.settings.space !== '我的空间' && !config.shared) return { data, error: '先确认允许当前项目查看共同纪要，或到我的空间开始。' };
   const judgment = judgeListeningSignal(signal, config);
   if (judgment === 'noise' || judgment === 'wake-missed') return { data, error: '这段声音没有形成有效对话，不创建记录。' };
   if ((judgment === 'uncertain' || judgment === 'wake' || config.startMode === 'confirm') && !options.confirmed) return { data, error: '请先确认这段声音是否需要记录。' };
   const date = options.date || new Date();
   const textTurns = signal.turns.filter(t => t.text.trim());
-  const transcript: Transcript[] = textTurns.map((t, index) => ({ ...t, id: `listen-${options.sessionId}-${index}`, time: `00:00:${String(index * 6).padStart(2, '0')}` }));
+  const transcript: Transcript[] = textTurns.map((t, index) => ({ ...t, receivedAt: date.getTime(), id: `listen-${options.sessionId}-${index}`, time: `00:00:${String(index * 6).padStart(2, '0')}` }));
   const duration = judgment === 'wake' ? 0 : signal.seconds;
   const session: Session = {
     id: options.sessionId, title: `智能聆听 · ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' })}`,
-    kind: '会议', date: date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' }),
+    kind: '日常', storage: newStoragePolicy(data, 'daily', false, date.getTime()), date: date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' }),
     duration: `${String(Math.floor(duration / 60)).padStart(2, '0')}:${String(duration % 60).padStart(2, '0')}`,
     status: '进行中', transcript, summary: [], agenda: ['确认本次讨论目标'],
     participants: [...new Set(['我', ...transcript.map(t => t.speaker)])], attachments: [], privateNotes: [], project: '个人记录',
   };
   return { sessionId: session.id, data: { ...data, sessions: [session, ...data.sessions], activeSessionId: session.id,
-    settings: { ...data.settings, toggles: { ...data.settings.toggles, ['shared-' + session.id]: data.settings.space !== '我的空间' && config.shared },
-      retention: { ...data.settings.retention, ['session-' + session.id]: config.saveScope,
-        ['session-space:' + session.id]: data.settings.space,
+    settings: { ...data.settings, space: '我的空间', toggles: { ...data.settings.toggles, ['shared-' + session.id]: false },
+      retention: { ...data.settings.retention, ['session-' + session.id]: '手动选择片段',
+        ['session-space:' + session.id]: '我的空间',
         ['listening-source:' + session.id]: JSON.stringify({ signalId: signal.id, kind: signal.kind, confidence: signal.confidence, source: '本地示例声音文本', startedAt: date.toISOString() }),
         ['listening-accepted:' + signal.id]: session.id,
       } },
@@ -111,5 +111,5 @@ export function listeningEndEligible(data: AppData, sessionId: string): boolean 
 export function listeningArchivePreview(data: AppData, sessionId: string): { title: string; turns: number; scope: string; memory: boolean; space: string } | undefined {
   const session = data.sessions.find(s => s.id === sessionId);
   if (!session || !sessionVisible(data, sessionId)) return undefined;
-  return { title: session.title, turns: session.transcript.length, scope: data.settings.retention['session-' + session.id] || '完整保存', memory: data.settings.toggles.memory !== false, space: data.settings.retention['session-space:' + session.id] || '我的空间' };
+  return { title: session.title, turns: session.transcript.length, scope: session.storage?.mode === 'daily' ? '最近5分钟临时缓冲，停止清除全文' : data.settings.retention['session-' + session.id] || '完整保存', memory: data.settings.toggles.memory !== false, space: data.settings.retention['session-space:' + session.id] || '我的空间' };
 }

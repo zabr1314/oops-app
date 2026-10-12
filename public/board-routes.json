@@ -1284,23 +1284,24 @@
   },
   {
     "id": "U17",
-    "title": "工作空间",
+    "title": "内容范围与共享",
     "module": "我的",
     "route": {
       "view": "settings-spaces"
     },
     "scene": "default",
-    "note": "个人与团队空间、新建／加入本机示例、切换和成员入口；与首页空间选择共用设置。"
+    "note": "查看已有内容范围；不创建或加入团队，不改变资料归属、共享许可与分范围草稿。项目背景和同一任务从记忆→项目继续。"
   },
   {
     "id": "U18",
-    "title": "成员、邀请与权限",
+    "title": "协作与共享 · 兼容入口",
     "module": "我的",
     "route": {
       "view": "settings-members"
     },
     "scene": "default",
-    "note": "成员角色、邀请和移除本机示例；不真实发送邀请消息，个人／当前团队可见范围由同一空间状态判断。"
+    "note": "旧成员链接保留兼容承接；成员邀请和本地角色模拟已撤下，改从项目上下文和具体对象管理共享。",
+    "merged": true
   },
   {
     "id": "U19",
@@ -2517,5 +2518,129 @@
     "shot": "f25-home-failed",
     "actions": [],
     "note": "首页官方形象显示本人准备任务中断及可继续处理的入口。失败与准备中区别呈现；按任务重新核对范围与来源后再继续，不扩大权限、不把草稿状态等同实际工作完成。"
+  },
+  {
+    "id": "F26",
+    "title": "日常 · 五分钟临时缓冲",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "shot": "f26-daily-buffer",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F27",
+    "title": "日常 · 停止并清除全文",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "shot": "f27-daily-stop",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "结束当前记录",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F28",
+    "title": "日常 · 候选与短证据",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "概览"
+    },
+    "scene": "p0-daily-finished",
+    "shot": "f28-daily-finished",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F29",
+    "title": "日常转会议 · 单独选择云保存",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "shot": "f29-daily-to-meeting",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "切换为正式会议",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F30",
+    "title": "正式会议 · 独立期限与云保存",
+    "module": "会话",
+    "route": {
+      "view": "session-mode",
+      "mode": "会议"
+    },
+    "scene": "default",
+    "shot": "f30-meeting-cloud-choice",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F31",
+    "title": "正式会议 · 原音与全文期限",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-meeting-retention",
+    "shot": "f31-meeting-retention",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F32",
+    "title": "会议到期 · 仅独立短证据",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "原文"
+    },
+    "scene": "p0-meeting-expired",
+    "shot": "f32-meeting-expired",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F33",
+    "title": "项目 · 上下文与同一任务",
+    "module": "记忆",
+    "route": {
+      "view": "memory-project",
+      "id": "project-1"
+    },
+    "scene": "default",
+    "shot": "f33-project-sharing",
+    "actions": [],
+    "note": "保留项目背景、历史决定、获准资料及同一任务引用；不另建团队门户。"
   }
 ]

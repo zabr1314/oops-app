@@ -170,11 +170,12 @@ test('an unreadable or removed history never replaces a current turn with an emp
 const sessionsText = await readFile(new URL('../src/features/Sessions.tsx', import.meta.url), 'utf8');
 const createComponent = sessionsText.slice(sessionsText.indexOf('function CreateSession'));
 const saveHandler = createComponent.slice(createComponent.indexOf('  function save(start: boolean)'), createComponent.indexOf('  return <form'));
-const prepareCode = `import { setSessionShared } from '${new URL('../src/sessionLogic.ts', import.meta.url).href}';
+const prepareCode = `import { newStoragePolicy, retentionDays } from '${new URL('../src/storagePolicy.ts', import.meta.url).href}';
+import { setSessionShared } from '${new URL('../src/sessionLogic.ts', import.meta.url).href}';
 const uid = () => 'new-session'; const dateLabel = () => '今天'; const untitled = kind => kind;
 export function saveExisting(data, existing, allowShare, start = false) {
   let next = data; const update = fn => { next = fn(next); }; const navigate = () => {}, toast = () => {}, setError = () => {};
-  const kind = existing.kind, project = existing.project, members = existing.participants, agenda = existing.agenda.join('\\n'), title = existing.title, scope = '完整保存', busy = false;
+  const kind = existing.kind, project = existing.project, members = existing.participants, agenda = existing.agenda.join('\\n'), title = existing.title, scope = '完整保存', busy = false, cloudSave = true, audioDays = '30', textDays = '30';
   ${saveHandler}
   save(start); return next;
 }`;

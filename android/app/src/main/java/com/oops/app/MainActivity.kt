@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var bridge: WebBridge
     private var insets = JSONObject().put("top", 0).put("bottom", 0)
     private var pendingSource: String? = null
+    private var pendingRecordingPolicy = com.oops.app.store.RecordingPolicy()
     private var pendingVoiceprintPage = false
 
     private val permissionLauncher =
@@ -46,7 +47,7 @@ class MainActivity : ComponentActivity() {
             val source = pendingSource ?: return@registerForActivityResult
             pendingSource = null
             if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
-                CaptureService.start(this, source)
+                CaptureService.start(this, source, pendingRecordingPolicy)
             } else {
                 OopsEngine.cancelVoiceprintRecording()
                 bridge.send("error", JSONObject().put("scope", "permission").put("message", "需要麦克风权限才能收音"))
@@ -202,7 +203,8 @@ class MainActivity : ComponentActivity() {
                         bridge.send("voiceprint.open")
                     }
                 }
-                "capture.start" -> requestCapture(p.optString("source").ifBlank { OopsEngine.settings.source })
+                "capture.start" -> requestCapture(p.optString("source").ifBlank { OopsEngine.settings.source }, com.oops.app.store.RecordingPolicy.fromBridge(p))
+                "capture.meeting" -> recordingRequest(com.oops.app.store.RecordingPolicy.fromBridge(p)) { OopsEngine.startMeeting(it) }
                 "capture.stop" -> CaptureService.stop(this)
                 "recall.trigger" -> OopsEngine.triggerRecall("button", p.optString("query").ifBlank { null })
                 "ask.session" -> OopsEngine.askSession(p.getString("query"))
@@ -213,6 +215,7 @@ class MainActivity : ComponentActivity() {
                 "digest.openMany" -> OopsEngine.openDigestItems(p.getJSONArray("ids").strings())
                 "history.list" -> OopsEngine.history("list")
                 "history.open" -> OopsEngine.history("open", p.getString("sessionId"))
+                "meeting.retain" -> OopsEngine.retainMeeting(p)
                 "history.minutes" -> OopsEngine.minutes(p.getString("sessionId"), p.optString("requestId"))
                 "history.delete" -> OopsEngine.history("delete", p.getString("sessionId"), p.optBoolean("confirm"))
                 "projects.list" -> OopsEngine.projects()
@@ -233,6 +236,9 @@ class MainActivity : ComponentActivity() {
                     p.getString("cardId"), p.getJSONArray("utteranceIds").strings(), p.getLong("startMs"), p.getLong("endMs"),
                 )
                 "recall.dismiss" -> OopsEngine.dismissRecall(p.optString("cardId"))
+                "daily.candidates" -> OopsEngine.dailyCandidates()
+                "daily.candidate.discard" -> OopsEngine.discardDailyCandidate(p.getString("sessionId"), p.getString("id"))
+                "daily.candidate.confirm" -> OopsEngine.confirmDailyCandidate(p.getString("sessionId"), p.getString("id"), p.getString("quote"), p.optBoolean("confirmed"))
                 "saved.list" -> bridge.send("saved.items", BridgeJson.saved(OopsEngine.savedItems()))
                 "action.draft" -> OopsEngine.draftAction(p.getString("cardId"), p.getJSONArray("utteranceIds").strings())
                 "action.ownerFeedback" -> OopsEngine.recordOwnerFeedback(p)
@@ -272,11 +278,25 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Only the mic is required; the notification permission is asked for alongside but never blocks. */
-    private fun requestCapture(source: String) {
+    private fun recordingRequest(policy: com.oops.app.store.RecordingPolicy, ready: (com.oops.app.store.RecordingPolicy) -> Unit) {
+        lifecycleScope.launch {
+            try {
+                if (policy.archives) OopsEngine.requireRecordingPolicySupport()
+                ready(policy)
+            } catch (e: Exception) { bridge.send("error", JSONObject().put("scope", "capture").put("message", e.message ?: "保存方式暂不可用")) }
+        }
+    }
+
+    private fun requestCapture(source: String, policy: com.oops.app.store.RecordingPolicy = com.oops.app.store.RecordingPolicy()) {
+        recordingRequest(policy) { requestCaptureReady(source, it) }
+    }
+
+    private fun requestCaptureReady(source: String, policy: com.oops.app.store.RecordingPolicy) {
+        pendingRecordingPolicy = policy
         val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) Manifest.permission.POST_NOTIFICATIONS else null
         if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
-            CaptureService.start(this, source)
+            CaptureService.start(this, source, policy)
             notifications?.let { permissionLauncher.launch(arrayOf(it)) }
         } else {
             pendingSource = source

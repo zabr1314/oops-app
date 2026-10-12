@@ -7,6 +7,7 @@ import { setSessionShared, type SessionReviewItem } from './sessionLogic';
 import { refreshTaskSuggestions } from './taskSuggestionsLogic';
 import { refreshSessionIntelligence, saveNoticePlan, readSessionIntelligence, updateIntelligenceItem } from './sessionIntelligenceLogic';
 import { SELF_VOICE_ID, addVoiceSample, bindVoiceSample, runVoiceMatch } from './voiceIdentityLogic';
+import { applyStorageDeadlines, finishDailySession, newStoragePolicy, pinSessionEvidence } from './storagePolicy';
 
 const PERSONAL = '我的空间';
 const TEAM = 'Oops 产品团队';
@@ -133,6 +134,26 @@ function p0VoiceData(data: AppData, scenario?: '匹配' | '低置信度' | '识�
 export function boardPreviewData(scene: string): AppData {
   let data = baseData();
   switch (scene) {
+    case 'p0-daily-active':
+    case 'p0-daily-finished':
+    case 'p0-meeting-retention':
+    case 'p0-meeting-expired': {
+      const daily = scene.startsWith('p0-daily');
+      const now = Date.now();
+      const turns = [{ id: 'policy-turn-1', speaker: '我', time: '00:00:08', text: '下午和同事核对素材准备的进度。', receivedAt: now - 12000 },
+        { id: 'policy-turn-2', speaker: '同事', time: '00:00:16', text: '先把两个方案的差别列出来，明天再确认。', receivedAt: now - 4000 }];
+      data.sessions = [{ id: 'session-policy', title: daily ? '午后沟通' : '首版项目会议', kind: daily ? '日常' : '会议', date: '今天 14:00', duration: '00:20', status: '暂停',
+        transcript: turns, summary: [], agenda: ['方案比较'], participants: ['我', '同事'], attachments: [], privateNotes: [], project: 'Oops 首版',
+        storage: { ...newStoragePolicy(data, daily ? 'daily' : 'meeting', !daily, scene === 'p0-meeting-expired' ? now - 31 * 86400000 : now - 20000), audioRetentionDays: 7, transcriptRetentionDays: 30 } }, ...data.sessions];
+      data.activeSessionId = 'session-policy';
+      if (scene === 'p0-daily-finished') data = finishDailySession(data, 'session-policy', [], now);
+      if (scene === 'p0-meeting-expired') {
+        data = pinSessionEvidence(data, 'session-policy', turns[0]).data;
+        data.sessions[0].status = '已结束'; data.activeSessionId = undefined;
+        data = applyStorageDeadlines(data, now);
+      }
+      break;
+    }
     case 'feedback-facts-live':
     case 'feedback-facts-finished': {
       const live=scene==='feedback-facts-live';

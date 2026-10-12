@@ -10,6 +10,7 @@ class AudioRingBuffer(val capacitySamples: Int) {
     init { require(capacitySamples > 0 && capacitySamples <= Int.MAX_VALUE / 2) { "Invalid ring capacity" } }
     private val data = ByteArray(capacitySamples * 2)
     private var end = 0L
+    private var clearedBefore = 0L
 
     /** Exclusive end of what has been written, i.e. total samples this session. */
     val endSample: Long
@@ -17,7 +18,10 @@ class AudioRingBuffer(val capacitySamples: Int) {
 
     /** Oldest sample still held. */
     val startSample: Long
-        @Synchronized get() = maxOf(0L, end - capacitySamples)
+        @Synchronized get() = maxOf(clearedBefore, end - capacitySamples)
+
+    /** Erases audio without changing the source's absolute timeline. */
+    @Synchronized fun discardAudio() { Arrays.fill(data, 0); clearedBefore = end }
 
     @Synchronized
     fun append(pcm: ByteArray, offset: Int = 0, length: Int = pcm.size - offset) {
@@ -99,6 +103,8 @@ class AudioRingBuffer(val capacitySamples: Int) {
 
     @Synchronized
     fun reset() {
+        Arrays.fill(data, 0)
         end = 0
+        clearedBefore = 0
     }
 }

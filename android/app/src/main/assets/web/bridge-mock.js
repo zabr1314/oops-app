@@ -6,6 +6,7 @@
   const flow = preview ? new URLSearchParams(location.search).get('flow') || 'normal' : 'normal';
   const failedOnce = new Set();
   let minutesChanged = false;
+  let retainedEvidence=[],retainedSummaries=[];
   const team = ['Jason', '黄丽萍', '江古月', '洪玉麟', '林春源'];
   // Real device ASR observations for assets/test/dialog.wav (2026-10-06).
   const sample = [
@@ -19,7 +20,7 @@
   let saved;
   try { saved = preview ? [] : JSON.parse(localStorage.getItem(key) || '[]'); } catch { saved = []; }
   const state = { capturing: false, sessionId: '', source: 'wav', sessionMs: 0, bufferedMs: 0,
-    retentionMs: 300000, asr: 'off', asrDetail: null, level: 0, playing: false,
+    retentionMs: 300000, recordingMode: 'daily', cloudSaveConfirmed: false, audioRetentionDays: 30, transcriptRetentionDays: 30, asr: 'off', asrDetail: null, level: 0, playing: false,
     voiceTrigger: true, noticeVibrate: true, memorySync: true, syncStatus: 'synced', syncPending: 0, digestCounts: {}, notices: [], agenda: {goal: '', items: [], tracking: 'waiting'},
     savedCount: saved.length, backend: 'mock', backendUrl: '', speakerInfo: false, ...(preview ? {selfName: '洪玉麟'} : {}),
     testWavName: '内置合成对话（浏览器模拟）', asrGaps: [], sourceDetail: null, sourceReady: false, remoteAddress: '127.0.0.1:7790' };
@@ -32,7 +33,8 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const id = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   let startedAt = 0, timer = null, transcript = [], cards = new Map(), drafts = new Map();
-  let sessionTranscript = [];
+  let sessionTranscript = [], dailyCandidates = [];
+  const emitted = new Set();
   let actions = new Map(), draftOps = new Map(), recallCount = 0, playingKey = null;
   const audio = preview ? null : new Audio('../test/dialog.wav');
   let clipTimer = null;
@@ -57,11 +59,14 @@
     state.level = state.sessionMs < 25000 ? (Math.sin(state.sessionMs / 90) + 1) * 0.2 : 0;
     sample.forEach((u, i) => {
       const uid = `${state.sessionId}-u${i + 1}`;
-      if (state.sessionMs >= u.endMs + 300 && !transcript.some((x) => x.id === uid)) {
+      if (state.sessionMs >= u.endMs + 300 && !emitted.has(uid)) {
         const final = { ...u, id: uid, speaker: null };
-        transcript.push(final); sessionTranscript.push(final); emit('asr.final', final);
+        emitted.add(uid); transcript.push(final); sessionTranscript.push(final); emit('asr.final', final);
         final.tag = ['constraint', 'idea', 'decision', 'commitment', 'uncertain'][i];
         final.tagEngine = 'rules-mock';
+        if (state.recordingMode === 'daily' && ['constraint','idea','decision','commitment'].includes(final.tag)) {
+          dailyCandidates = [...dailyCandidates, {id:final.id,session_id:state.sessionId,quote:final.text.slice(0,280),start_ms:final.startMs,end_ms:final.endMs,tag:final.tag,visibility:'private',confirmed:false,original_available:false,updated_at:new Date().toISOString()}].slice(-50);
+        }
         emit('asr.tag', { ...final });
         state.commitmentCount = sessionTranscript.filter((u) => u.tag === 'commitment').length;
         state.tagsSupported = true; state.analysisPending = 0; state.analysisFailed = 0;
@@ -77,6 +82,12 @@
       }
     });
     const expired = transcript.filter((u) => u.endMs < state.sessionMs - state.retentionMs);
+    if (state.recordingMode === 'daily') {
+      sessionTranscript = sessionTranscript.filter(u => u.endMs >= state.sessionMs - state.retentionMs);
+      state.notices = state.notices.filter(n => n.atMs >= state.sessionMs - state.retentionMs && n.evidenceIds.every(id => sessionTranscript.some(u => u.id === id)));
+      for (const [key,card] of cards) if (card.pool.some(u => !sessionTranscript.some(x => x.id === u.id))) cards.delete(key);
+      for (const [key,draft] of drafts) if (draft.evidence.utteranceIds.some(id => !sessionTranscript.some(u => u.id === id))) drafts.delete(key);
+    }
     if (expired.length) { transcript = transcript.filter((u) => !expired.includes(u));emit('transcript.pruned', { ids: expired.map((u) => u.id) }); }
     emit('state', { ...state });
   }
@@ -84,7 +95,7 @@
     return { sessionId: state.sessionId, ...Object.fromEntries([['commitments','commitment'],['decisions','decision'],['constraints','constraint'],['ideas','idea']].map(([key, tag]) => [key, sessionTranscript.filter(u => u.tag === tag).map(u => ({...u, audioExpired: false, whenRaw: tag === 'commitment' ? '周五前' : null}))])), notices: state.notices };
   }
   async function recall(p) {
-    emit('recall.pending', { trigger: 'button' }); await sleep(350);
+    const session = state.sessionId; emit('recall.pending', { trigger: 'button' }); await sleep(350); if (session !== state.sessionId) return;
     const pool = (p.ask ? sessionTranscript : transcript).filter((u) => !/oops|欧普斯|哦普斯|奥普斯|把刚刚那个想法留下来/i.test(u.text));
     if (!pool.length) return emit('recall.notFound', { reason: '最近 5 分钟内还没有可召回的原话' });
     const ideas = pool.filter((u) => /想法|觉得|方案|周五/.test(u.text));
@@ -150,13 +161,30 @@
     }
     switch (type) {
       case 'hello': queueMicrotask(() => emit('snapshot', { state, transcript, summary: summary(), team, insets: { top: 0, bottom: 0 } }));break;
+      case 'capture.meeting':
+        if (!state.capturing || state.recordingMode !== 'daily') throw new Error('请先开始日常聆听，再切换正式会议');
+        if (p.recordingMode !== 'meeting' || p.cloudSaveConfirmed !== true) throw new Error('须明确选择本次云端保存');
+        // A separate session begins now, with no implicit import of the previous buffer.
+        clearInterval(timer); state.capturing = false;
+        // fall through
       case 'capture.start':
         if (state.capturing) break;
-        stopClip();transcript = [];sessionTranscript = [];cards.clear();state.sessionId = id('session');
+        if (!['daily','meeting'].includes(p.recordingMode || 'daily')) throw new Error('记录方式无效');
+        if (p.recordingMode === 'meeting' && p.cloudSaveConfirmed !== true) throw new Error('须明确选择本次云端保存');
+        if (![7,30,90].includes(p.audioRetentionDays ?? 30) || ![7,30,90].includes(p.transcriptRetentionDays ?? 30)) throw new Error('保存期限无效');
+        Object.assign(state,{recordingMode:p.recordingMode || 'daily',cloudSaveConfirmed:p.recordingMode==='meeting',audioRetentionDays:p.audioRetentionDays ?? 30,transcriptRetentionDays:p.transcriptRetentionDays ?? 30,memorySync:p.recordingMode==='meeting'});
+        stopClip();transcript = [];sessionTranscript = [];cards.clear();drafts.clear();emitted.clear();state.sessionId = id('session');
         state.notices = []; state.digestCounts = {};
         Object.assign(state, { capturing: true, sourceReady: true, sessionMs: 0, bufferedMs: 0, asr: 'simulated', commitmentCount: 0, analysisPending: 0, analysisFailed: 0, tagsSupported: null });
         startedAt = performance.now();emit('state', { ...state });clearInterval(timer);timer = setInterval(tick, 100);break;
-      case 'capture.stop': state.capturing = false;state.sourceReady = false;state.asr = 'off';state.level = 0;clearInterval(timer);stopClip();emit('state', { ...state });break;
+      case 'capture.stop':
+        state.capturing = false;state.sourceReady = false;state.asr = 'off';state.level = 0;clearInterval(timer);stopClip();
+        if (state.recordingMode === 'daily') {
+          const ids=transcript.map(u=>u.id); transcript=[];sessionTranscript=[];cards.clear();drafts.clear();
+          Object.assign(state,{sessionId:'',sessionMs:0,bufferedMs:0,notices:[],digestCounts:{},commitmentCount:0});
+          emit('transcript.pruned',{ids});emit('capture.cleared',{mode:'daily'});emit('session.summary',summary());
+        }
+        emit('state', { ...state });break;
       case 'ask.session': void recall({...p, ask: true}); break;
       case 'agenda.set':
         state.agenda = {goal: p.goal, items: p.items.map((i,n) => ({id: 'a'+(n+1), title: i.title, plannedMs: i.minutes ? i.minutes * 60000 : null, coveredMs: 0})), plannedMs: p.minutes ? p.minutes * 60000 : null, tracking: 'supported'}; emit('state', {...state}); break;
@@ -166,6 +194,19 @@
       case 'digest.openMany': {
         const rows = sessionTranscript.filter(u => p.ids.includes(u.id));
         const card = {id: id('c'), trigger: 'conflict', single: rows.length === 1, engine: 'browser-mock', latencyMs: 0, items: rows.map(u => ({...u, prob: 1})), pool: rows}; cards.set(card.id, card); emit('recall.card', card); break;
+      }
+      case 'meeting.retain': {
+        const fail=(message,sourceChanged=false)=>emit('error',{scope:'retention',operation:'meeting.retain',sessionId:p.sessionId,requestId:p.requestId,message,sourceChanged});
+        if(p.confirm!==true || !p.evidence?.length || p.evidence.length>50 || (p.summaries || []).length>20) return fail('请先核对并选择必要短依据');
+        if(p.sessionId!==state.sessionId && !mockMeetings.some(m=>m.session_id===p.sessionId)) return fail('会议不存在');
+        const rows=p.sessionId===state.sessionId?sessionTranscript:historicalRows;
+        if(p.evidence.some(x=>!rows.some(u=>u.id===x.id && u.text===x.sourceText && x.quote?.trim() && x.quote.length<=280 && u.text.includes(x.quote))))return fail('来源已变化，请重新打开并核对',true);
+        const ids=p.evidence.map(x=>x.id);
+        if((p.summaries || []).some(x=>!x.text?.trim() || x.text.length>2000 || !x.source_ids?.length || x.source_ids.length>10 || x.source_ids.some(id=>!ids.includes(id))))return fail('摘要须绑定本次选定短依据');
+        retainedEvidence=[...retainedEvidence.filter(x=>!ids.includes(x.id)),...p.evidence.map(x=>({id:x.id,text:x.quote,confirmed:true,excerpt:true,source_status:'available',confirmed_at:new Date().toISOString()}))];
+        const summaryIds=(p.summaries || []).map(x=>x.id);
+        retainedSummaries=[...retainedSummaries.filter(x=>!summaryIds.includes(x.id)),...(p.summaries || []).map(x=>({...x,confirmed:true,source_status:'available'}))];
+        emit('meeting.retained',{sessionId:p.sessionId,session_id:p.sessionId,requestId:p.requestId,retained_evidence:retainedEvidence,retained_summaries:retainedSummaries});break;
       }
       case 'history.list': emit('history.list', {count: mockMeetings.length, items: mockMeetings.map((m) => ({...m, title: m.manualTitle || m.goal, review_pending: {all: reviewQueue(historicalRows).length}}))}); break;
       case 'history.open': {
@@ -177,7 +218,7 @@
         const meeting = mockMeetings.find(i => i.session_id === p.sessionId); if (!meeting) return emit('error', {scope: 'history', message: '会议已删除'});
         emit('history.open', {...meeting, project: meeting.project || null, display_title: meeting.manualTitle || meeting.goal, title_source: meeting.manualTitle ? 'manual' : 'generated', utterances: historicalRows, review_queue: reviewQueue(historicalRows),
           digest: {constraint: historicalRows.filter(u => u.tag === 'constraint'), commitment: historicalRows.filter(u => u.tag === 'commitment' && u.review?.verdict !== 'rejected'),
-            decision: historicalRows.filter(u => u.tag === 'decision' && u.review?.verdict !== 'rejected'), idea: []}, notices: []}); break;
+            decision: historicalRows.filter(u => u.tag === 'decision' && u.review?.verdict !== 'rejected'), idea: []}, notices: [],retained_evidence:retainedEvidence,retained_summaries:retainedSummaries}); break;
       }
       case 'history.minutes': {
         const changed = minutesChanged || flow === 'minutes-source-changed';
@@ -261,6 +302,19 @@
         const item = { id: c.id, saved_at: new Date().toISOString(), utterances: c.pool.filter((u) => p.utteranceIds.includes(u.id)), audio_expired: false };
         saved = saved.filter((x) => x.id !== c.id);saved.unshift(item);if (!preview) localStorage.setItem(key, JSON.stringify(saved));
         state.savedCount = saved.length;emit('recall.saved', { cardId: c.id, savedCount: saved.length });break;
+      }
+      case 'daily.candidate.discard': dailyCandidates=dailyCandidates.filter(x=>x.id!==p.id || x.session_id!==p.sessionId);emit('daily.candidates',{items:dailyCandidates});break;
+      case 'daily.candidates': emit('daily.candidates',{items:dailyCandidates});break;
+      case 'daily.candidate.confirm': {
+        if (p.confirmed !== true || !p.quote?.trim() || p.quote.length > 280) throw new Error('请先核对1–280字短依据');
+        const candidate=dailyCandidates.find(x=>x.id===p.id && x.session_id===p.sessionId);
+        if (!candidate) throw new Error('候选已失效');
+        const savedId=`daily-${p.sessionId}-${p.id}`;
+        saved=saved.filter(x=>x.id!==savedId);
+        saved.push({id:savedId,session_id:p.sessionId,saved_at:new Date().toISOString(),visibility:'private',confirmed:true,audio_expired:true,original_available:false,utterances:[{id:p.id,text:p.quote,start_ms:candidate.start_ms,end_ms:candidate.end_ms}]});
+        dailyCandidates=dailyCandidates.filter(x=>x!==candidate);state.savedCount=saved.length;
+        if (!preview) localStorage.setItem(key,JSON.stringify(saved));
+        emit('recall.saved',{cardId:savedId,savedCount:saved.length});break;
       }
       case 'saved.list': emit('saved.items', { items: saved });break;
       case 'action.draft': void draft(p).catch((e) => emit('error', { scope: 'action', message: e.message }));break;

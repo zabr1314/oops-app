@@ -24,6 +24,8 @@ object BridgeJson {
         .put("sessionId", s.sessionId)
         .put("source", s.source)
         .put("sessionMs", s.sessionMs)
+        .put("recordingMode", s.recordingMode).put("cloudSaveConfirmed", s.cloudSaveConfirmed)
+        .put("audioRetentionDays", s.audioRetentionDays).put("transcriptRetentionDays", s.transcriptRetentionDays).put("audioExpired", s.audioExpired).put("transcriptExpired", s.transcriptExpired)
         .put("bufferedMs", s.bufferedMs)
         .put("retentionMs", OopsEngine.RETENTION_MS)
         .put("asr", s.asr)
