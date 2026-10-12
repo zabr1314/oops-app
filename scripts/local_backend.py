@@ -1179,6 +1179,8 @@ class Backend:
         self.boards = task_board.Boards(os.path.join(state, "boards"), self.resolver, log)
         self.feishu = (FeishuActions(self, state, self.lark, run_lark, log, dry_run=args.feishu == "dry-run")
                        if os.environ.get("OOPS_FEISHU_BOT") == "1" else None)
+        # With minutes, post-meeting review covers the sentences they rest on, not every line the live tagging flagged.
+        self.meetings.cited = self.feishu.cited_sentences if self.feishu else None
         self.speakers = Speakers(args.speaker_accept, args.speaker_margin, os.path.join(state, "voiceprints.json"))
         self.speaker_preview, self.preview_error = None, None
         if getattr(args, 'speaker_preview', False) and self.speakers.ready:

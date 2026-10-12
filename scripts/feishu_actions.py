@@ -497,6 +497,15 @@ class FeishuActions:
         body = dict(started_at=row.get("started_at"), time_zone=row.get("time_zone"), utterances=utterances)
         return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
+    def cited_sentences(self, sid):
+        """Sentences the latest minutes rest on, for the review queue (Meetings.cited). Kept after a review changes the
+        source: the review is about exactly these sentences, so the queue must not grow back to every tagged line."""
+        analysis = self.state.get("meetings", sid, "analysis")
+        if not analysis:
+            return None
+        return {"tasks": {i for a in analysis.get("actions", []) for i in a.get("ids", [])},
+                "decisions": {i for d in analysis.get("decisions", []) for i in d.get("ids", [])}}
+
     def invalidate_minutes(self, sid):
         """Withdraw further use, retaining sent cards, documents and the cached historical body."""
         with self.state.lock:

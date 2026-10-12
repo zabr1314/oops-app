@@ -8,9 +8,11 @@
 
 Only stores the minutes (the same voted analysis the bot writes, with its source fingerprint); nothing is sent to
 Feishu, and meetings that already have minutes are left alone. A meeting qualifies when its id is a random UUID
-(real, not a smoke test), it has at least 5 sentences, it is over, and it has no stored minutes.
+(real, not a smoke test), it has at least 5 sentences, it is over (reported ended, or started more than a day ago),
+and it has no stored minutes.
 """
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -47,7 +49,9 @@ def main():
         if not name.endswith(".json") or not UUID.fullmatch(sid) or state.get("meetings", sid, "analysis"):
             continue
         row = meetings.load(sid)
-        if len(row["utterances"]) < 5 or not (row.get("ended_at") or row.get("last_sync_at")):
+        started = fa.parse_ts(row["started_at"]) if row.get("started_at") else None
+        old = started is not None and started < dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
+        if len(row["utterances"]) < 5 or not (row.get("ended_at") or row.get("last_sync_at") or old):
             continue
         print(f"{sid[:8]} {row.get('started_at', '')[:16]} {len(row['utterances'])} 句", flush=True)
         if args.dry_run:
