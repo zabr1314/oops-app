@@ -22,6 +22,7 @@ import re
 import shutil
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -134,12 +135,14 @@ def merge(rows, by_person):
                 groups.setdefault((p, l["dup"]), []).append(u["id"])
     dup_sets = sorted({tuple(ids) for ids in groups.values() if len(ids) >= 2})
     # Pre-filled voiceprint names nobody overwrote; kept apart so they never pass as human speaker labels.
-    voice_only = {u["id"]: u["voice"] for u in rows if u.get("voice") and u["id"] not in speakers
+    voice_only = {u["id"]: u["voice"] for u in rows if u.get("voice") and not u.get("claimed") and u["id"] not in speakers
                   and not any(ls.get(u["id"], {}).get("speaker") for ls in by_person.values())}
+    role_only = {u["id"]: u["voice"] for u in rows if u.get("claimed") and u["id"] not in speakers
+                 and not any(ls.get(u["id"], {}).get("speaker") for ls in by_person.values())}
     voice_overruled = {u["id"]: {"voice": u["voice"], "human": speakers[u["id"]]} for u in rows
                        if u.get("voice") and speakers.get(u["id"]) and speakers[u["id"]] != u["voice"]}
     return {"tasks": tasks, "decisions": decisions, "non_tasks": non_tasks, "kinds": kinds, "speakers": speakers,
-            "voice_prefill_unreviewed": voice_only, "voice_prefill_overruled": voice_overruled,
+            "voice_prefill_unreviewed": voice_only, "role_claim_unreviewed": role_only, "voice_prefill_overruled": voice_overruled,
             "duplicates": [list(g) for g in dup_sets], "disputes": disputes, "labelers": sorted(by_person)}
 
 
@@ -149,6 +152,7 @@ class Data:
     def __init__(self, folder):
         self.folder = folder
         self.meetings = {}
+        self.roles = {}
         for mid in sorted(os.listdir(os.path.join(folder, "meetings"))):
             path = os.path.join(folder, "meetings", mid)
             if not MEETING.fullmatch(mid) or not os.path.isfile(os.path.join(path, "audio.wav")):
@@ -159,9 +163,17 @@ class Data:
             if os.path.isfile(os.path.join(path, "voice.json")):  # voice_prefill.py: speakers the voiceprints are sure of
                 with open(os.path.join(path, "voice.json"), encoding="utf-8") as f:
                     voice = json.load(f)["rows"]
+            roles = {}
+            if os.path.isfile(os.path.join(path, "roles.json")):  # voice_roles.py: unknown voices grouped for claiming
+                with open(os.path.join(path, "roles.json"), encoding="utf-8") as f:
+                    found = json.load(f)
+                roles = found["rows"]
+                self.roles = found["roles"]
             for u in meeting["utterances"]:
                 if voice.get(u["id"], {}).get("name") in PEOPLE:
                     u["voice"] = voice[u["id"]]["name"]
+                elif u["id"] in roles:
+                    u["role"] = roles[u["id"]]["role"]
             self.meetings[mid] = {"id": mid, "title": meeting.get("title", mid), "rows": meeting["utterances"],
                                   "wav": os.path.join(path, "audio.wav")}
         self.lock = threading.Lock()
@@ -186,8 +198,40 @@ class Data:
             os.replace(path + ".tmp", path)
         return labels
 
+    def claims(self):
+        path = os.path.join(self.folder, "claims.json")
+        if not os.path.isfile(path):
+            return {}
+        with open(path, encoding="utf-8") as f:
+            return {r: c for r, c in json.load(f).items() if r in self.roles}
+
+    def claim(self, role, person, by):
+        """Team-wide: whoever recognises the voice says whose it is; the last answer counts and names who gave it."""
+        if role not in self.roles or person not in PEOPLE + ["other", None]:
+            raise ValueError("unknown role or person")
+        with self.lock:
+            claims = self.claims()
+            if person is None:
+                claims.pop(role, None)
+            else:
+                claims[role] = {"person": person, "by": by, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            path = os.path.join(self.folder, "claims.json")
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(claims, f, ensure_ascii=False, indent=1)
+            os.replace(path + ".tmp", path)
+        return claims
+
+    def rows_with_claims(self, mid):
+        """Rows with `voice` also set from claimed roles (a claimed role counts like a voiceprint pre-fill)."""
+        claims = self.claims()
+        out = []
+        for u in self.meetings[mid]["rows"]:
+            person = (claims.get(u.get("role")) or {}).get("person")
+            out.append(dict(u, voice=person, claimed=True) if not u.get("voice") and person in PEOPLE else u)
+        return out
+
     def progress(self, mid):
-        rows = {u["id"]: u for u in self.meetings[mid]["rows"]}
+        rows = {u["id"]: u for u in self.rows_with_claims(mid)}
         out = {}
         for name in PEOPLE:
             labels = self.load(mid, name)
@@ -243,14 +287,16 @@ def make_handler(data, secret):
                              "minutes": round(m["rows"][-1]["end_ms"] / 60000) if m["rows"] else 0,
                              "progress": data.progress(mid)} for mid, m in data.meetings.items()]
                 return self.send(200, json.dumps({"name": name, "meetings": meetings}, ensure_ascii=False).encode())
+            if url.path == "/api/roles":
+                return self.send(200, json.dumps({"roles": data.roles, "claims": data.claims()}, ensure_ascii=False).encode())
             m = re.fullmatch(r"/api/meeting/([0-9]{4})", url.path)
             if m and name == TEAM:
                 return self.send(400, b'{"error":"who"}')
             if m and m.group(1) in data.meetings:
                 mid = m.group(1)
                 rows = [{"id": u["id"], "text": u["text"], "start_ms": u["start_ms"], "end_ms": u["end_ms"], "chars": chars(u),
-                         **({"voice": u["voice"]} if u.get("voice") else {})}
-                        for u in data.meetings[mid]["rows"]]  # blind: no model output, nobody else's labels
+                         **{k: u[k] for k in ("voice", "role", "claimed") if u.get(k)}}
+                        for u in data.rows_with_claims(mid)]  # blind: no model output, nobody else's labels
                 return self.send(200, json.dumps({"id": mid, "rows": rows, "labels": data.load(mid, name)},
                                                  ensure_ascii=False).encode())
             m = re.fullmatch(r"/clip/([0-9]{4})/([A-Za-z0-9_-]{1,40})\.wav", url.path)
@@ -265,10 +311,17 @@ def make_handler(data, secret):
             name = self.who({})
             if not name or name == TEAM:
                 return self.send(401, b'{"error":"link"}')
+            size = int(self.headers.get("Content-Length") or 0)
+            if url.path == "/api/roles":
+                try:
+                    body = json.loads(self.rfile.read(size)) if 0 < size <= 10_000 else {}
+                    claims = data.claim(body.get("role"), body.get("person"), name)
+                except (json.JSONDecodeError, ValueError, AttributeError):
+                    return self.send(400, b"{}")
+                return self.send(200, json.dumps({"claims": claims}, ensure_ascii=False).encode())
             m = re.fullmatch(r"/api/meeting/([0-9]{4})/labels", url.path)
             if not m or m.group(1) not in data.meetings:
                 return self.send(404, b"{}")
-            size = int(self.headers.get("Content-Length") or 0)
             if not 0 < size <= 1_500_000:
                 return self.send(400, b"{}")
             try:
@@ -321,7 +374,7 @@ def merge_cmd(args):
     for short in args.meetings:
         with open(os.path.join(args.data, "meetings", short, "meeting.json"), encoding="utf-8") as f:
             meeting = json.load(f)
-        rows = meeting["utterances"]
+        rows = Data(args.data).rows_with_claims(short)
         folder = os.path.join(args.data, "labels", short)
         by_person = {}
         for name in PEOPLE:
@@ -381,6 +434,7 @@ details.help summary{cursor:pointer;font-weight:600}details.help li{margin:3px 0
 .ctl{display:flex;gap:6px 12px;flex-wrap:wrap;margin-top:6px;align-items:center}
 .grp{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}.grp>span{color:var(--mut);font-size:12px;margin-right:2px}
 .c{border:1px solid var(--line);background:none;color:var(--fg);border-radius:8px;padding:3px 9px;font:inherit;font-size:13px;cursor:pointer;min-height:30px}
+.role{display:grid;gap:6px;padding:10px 0;border-top:1px solid var(--line)}.role:first-child{border-top:0}.role .clip{display:flex;gap:8px;align-items:baseline;font-size:14px}.role .clip span{color:var(--mut)}
 .c.on{background:var(--brand);border-color:var(--brand);color:#fff}.c.on.dec{background:var(--dec);border-color:var(--dec)}.c.on.vp{background:var(--brand-soft);color:var(--fg);border-style:dashed;border-color:var(--brand)}.vpnote{font-style:normal;font-size:12px;color:var(--mut);margin-left:4px}
 .c.on.neg{background:var(--mut);border-color:var(--mut)}.c.on.inf{background:#0e9f8e;border-color:#0e9f8e}
 .sep{width:1px;height:20px;background:var(--line)}
@@ -400,9 +454,10 @@ details.help summary{cursor:pointer;font-weight:600}details.help li{margin:3px 0
 <button class="tool" id="cont" title="从当前句开始连续播放，边听边标（快捷键 P）">▶ 连续播放</button>
 <select class="tool" id="rate" title="播放速度"><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option></select>
 <select class="tool" id="filter"><option value="all">全部句子</option><option value="todo">只看没标完的</option><option value="who">只看说话人待定的</option><option value="marked">只看任务/决定</option></select></div></header>
-<main><details class="help" id="help"><summary>怎么标（1 分钟看完）</summary><ul>
+<main><details class="help" id="roles" hidden><summary id="roles-sum">认领声音</summary><p class="mut" style="margin:6px 0 0">声纹还认不出的声音，按音色分成了几个角色（三场是同一个角色）。听一下代表片段，点是谁；认领后这个角色的句子会自动填上说话人（虚线框），错了照样可以改。</p><div id="roles-list"></div></details>
+<details class="help" id="help"><summary>怎么标（1 分钟看完）</summary><ul>
 <li><b>只标长句</b>：不到 10 个字的短句（「对」「可以的」）显示成灰色小字，不用标，听和看上下文就行。如果短句本身就是任务或决定（比如「你来。」「行，就这么定」），点它右边的「标」再标。</li>
-<li><b>谁说的</b>：春源、玉麟声纹有把握的句子已经预填（虚线框），听着不对就点正确的人改掉，对的不用动。其余句子请听一下，点说话人。几个人同时说选「多人」，听不出或不是我们四个人选「听不清」。</li>
+<li><b>谁说的</b>：声纹有把握的句子、以及已认领角色的句子都已经预填（虚线框），听着不对就点正确的人改掉，对的不用动。其余句子请听一下，点说话人。几个人同时说选「多人」，听不出或不是我们四个人选「听不清」。</li>
 <li><b>任务</b>：有人要去做的具体事，自己认领（“我来改”）或被安排（“你把文档发我”）都算，再选负责人；大家一起做选「大家」。</li>
 <li><b>决定</b>：大家定下来的结论，例如“那就先做声纹”。只是提想法、还在讨论的不算。</li>
 <li><b>有效</b>：不是任务也不是决定，但值得写进纪要或思维导图的内容：想法、方案、理由、问题、数据、限制条件。像“回头再看看”“可以考虑”这种听起来像任务但没人要做的，也标「有效」。</li>
@@ -425,6 +480,7 @@ const api=(p,o={})=>fetch(p.replace(/^\//,''),{...o,headers:{...(o.headers||{}),
 const shortRow=u=>u.end_ms-u.start_ms<SHORT;
 const complete=(l,u)=>!!(l&&l.kind&&(l.speaker||u.voice||shortRow(u))&&(l.kind!=='task'||l.owner));
 const whoOpen=u=>!isMini(u)&&!u.voice&&!(L[u.id]||{}).speaker;
+let ROLES={},CLAIMS={};
 function chip(k,v,label,on,cls=''){return `<button class="c ${cls} ${on?'on':''}" data-k="${k}" data-v="${v}">${label}</button>`}
 const isMini=u=>u.chars<10;const OPEN=new Set();
 function rowHTML(u,i){const l=L[u.id]||{};
@@ -436,7 +492,7 @@ function rowHTML(u,i){const l=L[u.id]||{};
   const dp=(l.kind==='task'||l.kind==='decision')?`<span class="grp"><span>同一件事</span><select class="tool" data-k="dup"><option value="">—</option>${DUPS.split('').map(c=>`<option ${l.dup===c?'selected':''}>${c}</option>`).join('')}</select></span>`:'';
   return `<div class="row ${complete(l,u)?'done':''} ${l.kind?'k-'+l.kind:''} ${i===cur?'cur':''}" data-i="${i}" id="r-${u.id}">
    <div class="top"><span class="t">${clock(u.start_ms)}</span><div class="txt">${esc(u.text)}</div><button class="play" data-play="1">▶</button></div>
-   <div class="ctl"><span class="grp"><span>谁说的</span>${sp}${vp?'<em class="vpnote">声纹已填，错了再改</em>':''}</span><span class="grp"><span>类型</span>${kd}</span>${ow}${dp}</div></div>`}
+   <div class="ctl"><span class="grp"><span>谁说的</span>${sp}${vp?`<em class="vpnote">${u.claimed?esc(u.role)+'已认领，错了再改':'声纹已填，错了再改'}</em>`:(!l.speaker&&u.role?`<em class="vpnote">像${esc(u.role)}，认领后自动填</em>`:'')}</span><span class="grp"><span>类型</span>${kd}</span>${ow}${dp}</div></div>`}
 function visible(u){const f=$('#filter').value,l=L[u.id]||{};return f==='all'||(f==='todo'&&!isMini(u)&&!complete(l,u))||(f==='who'&&whoOpen(u))||(f==='marked'&&(l.kind==='task'||l.kind==='decision'))}
 function renderList(){const html=U.map((u,i)=>visible(u)?rowHTML(u,i):'').join('');$('#list').innerHTML=html||'<div class="empty">没有符合条件的句子</div>';renderProg()}
 function renderRow(i){const el=document.getElementById('r-'+U[i].id);if(!el)return;const tmp=document.createElement('div');tmp.innerHTML=rowHTML(U[i],i);const n=tmp.firstElementChild;if(el.classList.contains('playing'))n.classList.add('playing');el.replaceWith(n)}
@@ -474,6 +530,18 @@ document.addEventListener('keydown',e=>{if(e.target.tagName==='SELECT'||e.metaKe
   else if(k===' '){e.preventDefault();stopCont();play(cur,true)}else if(k==='p'){toggleCont()}
   else if(sp[k])setField(cur,'speaker',sp[k]);else if(kd[k])setField(cur,'kind',kd[k]);else if(ow[k]&&(L[U[cur].id]||{}).kind==='task')setField(cur,'owner',ow[k])});
 function nextVisible(i,step){for(let j=i+step;j>=0&&j<U.length;j+=step)if(visible(U[j])&&(!isMini(U[j])||OPEN.has(U[j].id)||L[U[j].id]))return j;return i}
+async function loadRoles(){const r=await api('/api/roles');if(!r.ok)return;const d=await r.json();ROLES=d.roles||{};CLAIMS=d.claims||{};
+  const names=Object.keys(ROLES);$('#roles').hidden=!names.length;if(!names.length)return;
+  const open=names.filter(n=>!CLAIMS[n]).length;$('#roles-sum').textContent=open?`认领声音：还有 ${open} 个角色没人认领`:'认领声音：都已认领';
+  $('#roles-list').innerHTML=names.map(n=>{const c=CLAIMS[n],who=c&&c.person;
+    return `<div class="role" data-role="${esc(n)}"><b>${esc(n)} <span class="mut">· ${ROLES[n].seconds} 秒${who?` · 已认领为 ${esc(who==='other'?'不是我们四个':who)}（${esc(c.by)}）`:''}</span></b>
+    ${ROLES[n].clips.map(x=>`<div class="clip"><button class="play" data-clip="${esc(x.meeting)}/${esc(x.id)}">▶</button><span>${esc(x.meeting)}</span>${esc(x.text)}</div>`).join('')}
+    <div class="ctl"><span class="grp"><span>这是</span>${PEOPLE.map(p=>`<button class="c ${who===p?'on':''}" data-claim="${p}">${SHORTN[p]}</button>`).join('')}<button class="c neg ${who==='other'?'on':''}" data-claim="other">不是我们</button>${who?'<button class="c" data-claim="">撤销</button>':''}</span></div></div>`}).join('')}
+$('#roles-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;const role=b.closest('.role').dataset.role;
+  if(b.dataset.clip){stopCont();audio.pause();audio=new Audio(`clip/${b.dataset.clip}.wav?k=${encodeURIComponent(KEY)}`);audio.play();return}
+  if(b.dataset.claim===undefined)return;
+  await api('/api/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,person:b.dataset.claim||null})});
+  await loadRoles();if(M)openMeeting(M)});
 async function openMeeting(mid){if(dirty)await save();stopCont();audio.pause();M=mid;store.set('oops-label-meeting',mid);
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.m===mid));$('#list').innerHTML='<div class="empty">加载中…</div>';
   const r=await api('/api/meeting/'+mid);const d=await r.json();U=d.rows;L=d.labels||{};
@@ -488,6 +556,7 @@ async function openMeeting(mid){if(dirty)await save();stopCont();audio.pause();M
   if(store.get('oops-label-help-seen'))$('#help').open=false;else{$('#help').open=true;store.set('oops-label-help-seen','1')}
   $('#tabs').innerHTML=ME.meetings.map(m=>`<button data-m="${m.id}" title="${esc(m.title)} · ${m.minutes} 分钟 · ${m.count} 个长句 · ${Object.entries(m.progress).map(([p,n])=>SHORTN[p]+' '+Math.round(n*100/m.count)+'%').join('，')||'还没人标'}">${m.id}<small> ${Math.round((m.progress[ME.name]||0)*100/m.count)}%</small></button>`).join('');
   $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b&&b.dataset.m!==M)openMeeting(b.dataset.m)});
+  await loadRoles();if(Object.keys(ROLES).some(n=>!CLAIMS[n]))$('#roles').open=true;
   const last=store.get('oops-label-meeting');openMeeting(ME.meetings.some(m=>m.id===last)?last:ME.meetings[0].id)})();
 window.addEventListener('hashchange',()=>{if(new URLSearchParams(location.hash.slice(1)).get('k'))location.reload()});
 window.addEventListener('beforeunload',e=>{if(dirty){save();e.preventDefault()}});

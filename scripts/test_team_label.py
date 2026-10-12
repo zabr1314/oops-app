@@ -77,6 +77,9 @@ class HttpTest(unittest.TestCase):
                        "utterances": [dict(u, speaker="林春源", tag="commitment") for u in ROWS]}, f, ensure_ascii=False)
         with wave.open(os.path.join(folder, "audio.wav"), "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b"\0\0" * 16000 * 10)
+        with open(os.path.join(folder, "roles.json"), "w", encoding="utf-8") as f:
+            json.dump({"roles": {"角色A": {"seconds": 40, "clips": [{"meeting": "0236", "id": "u1-2", "text": "x"}]}},
+                       "rows": {"u1-2": {"role": "角色A", "score": 0.6}}}, f, ensure_ascii=False)
         server = ThreadingHTTPServer(("127.0.0.1", 0), tl.make_handler(tl.Data(self.dir.name), SECRET))
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
@@ -125,6 +128,18 @@ class HttpTest(unittest.TestCase):
             self.assertEqual(200, r.status)
         mine = json.loads(self.call("/api/meeting/0236", tl.make_key(SECRET, "江古月"))[1])
         self.assertEqual({"u1-1": {"kind": "noise"}}, mine["labels"])
+
+    def test_a_claimed_role_fills_its_sentences_for_everyone(self):
+        a, b = tl.make_key(SECRET, "江古月"), tl.make_key(SECRET, "林春源")
+        rows = lambda key: {r["id"]: r for r in json.loads(self.call("/api/meeting/0236", key)[1])["rows"]}
+        self.assertEqual(("角色A", None), (rows(b)["u1-2"]["role"], rows(b)["u1-2"].get("voice")))
+        self.assertEqual(400, self.call("/api/roles", a, {"role": "角色Z", "person": "江古月"})[0])
+        self.assertEqual(200, self.call("/api/roles", a, {"role": "角色A", "person": "江古月"})[0])
+        claims = json.loads(self.call("/api/roles", b)[1])["claims"]
+        self.assertEqual(("江古月", "江古月"), (claims["角色A"]["person"], claims["角色A"]["by"]))
+        self.assertEqual(("江古月", True), (rows(b)["u1-2"]["voice"], rows(b)["u1-2"]["claimed"]))
+        self.call("/api/roles", a, {"role": "角色A", "person": None})
+        self.assertIsNone(rows(b)["u1-2"].get("voice"))
 
 
 if __name__ == "__main__":
