@@ -81,6 +81,8 @@ object OopsEngine {
     /** Shorter sentences carry too little voice to identify reliably. */
     private const val SPEAKER_MIN_MS = 1_000L
     private const val SPLIT_POLLS = 3
+    private const val BOARD_POLL_MS = 6_000L
+    private const val BOARD_POLLS = 6
     private const val TEST_WAV = "test/dialog.wav"
     private const val TEST_BEAN_STREAM = "test/dialog.opusraw" // dialog.wav through scripts/bean_opus.py encode
     private val MANUAL_OTHER = setOf("other", "multi", "unclear")
@@ -159,6 +161,9 @@ object OopsEngine {
     private val cards = ConcurrentHashMap<String, RecallCard>()
     private val drafts = ConcurrentHashMap<String, ActionDraft>()
     private val ownerHints = ConcurrentHashMap<String, com.oops.app.backend.DraftResponse>()
+    /** The server's running task list for this session (P0–P3); display only, confirming still goes through drafts. */
+    @Volatile private var taskBoard: JSONObject? = null
+    private var boardPoll: Job? = null
     private val hintEpochs = ConcurrentHashMap<String, Long>()
     private val suggestionEpochs = ConcurrentHashMap<String, Long>()
     private val opIds = ConcurrentHashMap<String, String>() // draftId → op_id, reused on retry
@@ -278,6 +283,7 @@ object OopsEngine {
             cards.clear()
             drafts.keys.removeAll { !submitted.containsKey(it) }
             ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear()
+            taskBoard = null; boardPoll?.cancel()
             sessionId = UUID.randomUUID().toString()
             sessionIndex.reset(sessionId)
             recorder?.closeAudio()
@@ -901,16 +907,44 @@ object OopsEngine {
             try {
                 val hintStart = SystemClock.elapsedRealtime()
                 val result = policy.request(reservation) { client.draftAction(DraftRequest(session,
-                    listOf(utterance.toCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toCandidate() })) }
+                    listOf(utterance.toCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toCandidate() }, board = true)) }
                 timing(session, utterance.id, "draft", "http_ms" to (SystemClock.elapsedRealtime() - hintStart))
                 if (result != null && session == sessionId && hintEpochs[utterance.id] == epoch) {
                     ownerHints[utterance.id] = result
                     publishSessionSummary(session)
                 }
+                result?.board?.let { updateTaskBoard(session, it) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { Log.w(TAG, "owner hint unavailable: ${error.javaClass.simpleName}") }
         }.invokeOnCompletion { reservation.close() }
     }
+
+    /** The draft answer carries the list before this sentence; the server folds it in meanwhile, so read it again shortly. */
+    private fun updateTaskBoard(session: String, board: JSONObject) {
+        if (session != sessionId) return
+        val previous = taskBoard
+        if (previous == null || previous.optString("updated_at") != board.optString("updated_at")) {
+            taskBoard = board
+            emit(OopsEvent.Json("tasks.board", JSONObject(board.toString()).put("session_id", session)))
+        }
+        if (!board.optBoolean("pending") || boardPoll?.isActive == true) return
+        val client = api
+        boardPoll = scope.launch {
+            repeat(BOARD_POLLS) {
+                delay(BOARD_POLL_MS)
+                val fresh = try { client.meetingBoard(session) } catch (error: CancellationException) { throw error }
+                    catch (error: Exception) { null } ?: return@repeat
+                if (session != sessionId) return@launch
+                if (taskBoard?.optString("updated_at") != fresh.optString("updated_at")) {
+                    taskBoard = fresh
+                    emit(OopsEvent.Json("tasks.board", JSONObject(fresh.toString()).put("session_id", session)))
+                }
+                if (!fresh.optBoolean("pending")) return@launch
+            }
+        }
+    }
+
+    fun taskBoardSnapshot(): JSONObject? = taskBoard?.let { JSONObject(it.toString()).put("session_id", sessionId) }
 
     private fun refreshDraftSuggestions(session: String, utteranceId: String) {
         drafts.values.filter { utteranceId in it.evidence.utteranceIds && !submitted.containsKey(it.draftId) }.forEach { draft ->

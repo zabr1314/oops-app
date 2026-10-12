@@ -133,6 +133,7 @@
         (p.transcript || []).forEach(addLine);
         setState(p.state);
         if (p.summary) setSummary(p.summary);
+        S.board = p.board && p.board.session_id === p.state.sessionId ? p.board : null;
         if (p.pendingActions?.length) {
           openDraft(p.pendingActions[0].draft);
           onActionResult(p.pendingActions[0].result);
@@ -184,6 +185,11 @@
         }
         break;
       case 'session.summary': setSummary(p); break;
+      case 'tasks.board':
+        if (p.session_id !== S.state.sessionId) break;
+        S.board = p;
+        if (S.route.name === 'live' && S.liveTab !== 'transcript') render();
+        break;
       case 'transcript.pruned':
         (p.ids || []).forEach(removeLine);
         S.pruned = true;
@@ -253,7 +259,7 @@
     $('lines').innerHTML = '';
     S.lines.clear();
     S.records.clear();
-    S.commitments = []; S.summary = {}; S.notices.clear(); S.activeNotices = []; renderNoticeBanners();
+    S.commitments = []; S.summary = {}; S.board = null; S.notices.clear(); S.activeNotices = []; renderNoticeBanners();
     S.ownerEdits.clear();
     $('partial').textContent = '';
     S.pruned = false;
@@ -663,7 +669,7 @@
         ${s.capturing ? '' : `<button class="button secondary" type="button" data-act="capture-start">${icon('microphone', 18)}<span>开始</span></button>`}</div>
       <div class="session-live-summary">
         <button data-act="tab" data-tab="transcript">${icon('user-circle')}<strong>${speakers.size ? `${speakers.size}位发言人` : '发言人待识别'}</strong></button>
-        <button data-act="tab" data-tab="actions">${icon('check-square')}<strong>本次行动 ${counts.commitment || 0}</strong></button></div>
+        <button data-act="tab" data-tab="actions">${icon('check-square')}<strong>${boardOpen().length ? `本次任务 ${boardOpen().length} · P0 ${boardOpen().filter((t) => t.priority === 'P0').length}` : `本次行动 ${counts.commitment || 0}`}</strong></button></div>
       ${listRow({ act: 'agenda-open', ic: 'list-checks', title: '本次议程', sub: a.goal || a.items?.length
         ? `${covered}/${a.items?.length || 0} 项已讨论 · ${current?.title || a.goal || '等待讨论'}${a.plannedMs ? ` · 计划 ${clock(a.plannedMs)}` : ''}` : '没有预设议题，也可以继续记录' })}
       ${current ? `<div class="native-current-topic"><small>当前议题</small><strong>${esc(current.title)}</strong><span>已讨论不代表结论已确认</span></div>` : ''}
@@ -710,12 +716,40 @@
       <p class="meta">${hms(u.startMs ?? u.start_ms)} · ${esc(speakerLabel(u.speaker) || '说话人待确认')}${created ? '' : ' · 点开可建飞书任务'}</p></button>`;
   }
 
+  // The server's running task list (task_board): drafts merged and ranked P0–P3 as the meeting goes.
+  // Only P0 asks for confirmation now; confirming still opens the sentence and goes through the usual draft.
+  const PRIORITY_TEXT = { P0: '会上确认', P1: '会后几天内', P2: '可以排期', P3: '琐事或待定' };
+  const boardOpen = () => (S.board?.tasks || []).filter((t) => t.status === 'open');
+
+  function boardTaskCard(t) {
+    const source = (t.sources || [])[t.sources.length - 1];
+    const done = S.commitments.some((u) => (t.sources || []).includes(u.id) && u.taskStatus === 'created');
+    const badge = done ? '<span class="badge green">已建飞书任务</span>' : `<span class="badge ${t.priority === 'P0' ? 'purple' : 'gray'}">${esc(t.priority)}</span>`;
+    return `<button class="card clickable board-task" data-act="commitment-open" data-id="${esc(source || '')}"><div class="session-task-top"><h3>${esc(t.what)}</h3>${badge}</div>
+      <p class="meta">${esc(t.owner || '负责人待定')}${t.reason ? ` · ${esc(t.reason)}` : ''}</p>
+      ${t.priority === 'P0' && !done ? '<p class="meta">点开核对原话，确认后建飞书任务</p>' : ''}</button>`;
+  }
+
+  function boardHtml() {
+    const tasks = S.board?.tasks || [];
+    const open = boardOpen(), closed = tasks.filter((t) => t.status !== 'open');
+    const groups = ['P0', 'P1', 'P2', 'P3'].map((p) => [p, open.filter((t) => t.priority === p)]).filter(([, xs]) => xs.length);
+    return `<section class="session-list-group">${sectionTitle(`本场任务清单 ${open.length}`)}
+      <p class="meta">Oops 边听边合并重复的说法，按影响排出优先级；会上只请大家确认 P0，其余会后统一处理。${S.board.pending ? '正在整理刚才的话…' : ''}</p>
+      ${groups.map(([p, xs]) => `<div class="stack"><p class="meta"><strong>${p}</strong> · ${PRIORITY_TEXT[p]}</p>${xs.map(boardTaskCard).join('')}</div>`).join('')
+        || '<p class="meta">还没有需要跟进的任务。</p>'}
+      ${closed.length ? `<details><summary class="meta">已合并、作废或完成 ${closed.length} 条</summary>${closed.map((t) =>
+        `<p class="meta">${esc(t.what)}${t.reason ? ` · ${esc(t.reason)}` : ''}</p>`).join('')}</details>` : ''}</section>`;
+  }
+
   function liveActionsHtml(heading, stage) {
     const rows = S.commitments;
     const created = rows.filter((u) => u.taskStatus === 'created'), open = rows.filter((u) => u.taskStatus !== 'created');
+    const board = S.board?.tasks?.length;
     return `<div class="stack sessions-feature">${heading}${stage}
-      ${listRow({ act: 'commitments-open', ic: 'sparkle', title: '识别到的任务建议', sub: '按原话核对负责人、期限，确认后才建飞书任务' })}
-      ${open.length ? `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
+      ${board ? boardHtml() : listRow({ act: 'commitments-open', ic: 'sparkle', title: '识别到的任务建议', sub: '按原话核对负责人、期限，确认后才建飞书任务' })}
+      ${open.length ? (board ? `<details class="session-list-group"><summary class="meta">逐句识别的原始建议 ${open.length} 条</summary>${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</details>`
+        : `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>`) : ''}
       ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
       ${!rows.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>还没有识别到待办</strong><p>有人说"我来做""你周五前给我"这类话时，会出现在这里。</p></div>` : ''}
       <button class="button primary" type="button" data-act="recall">${icon('clock-counter-clockwise')}<span>从刚才的话整理行动</span></button>

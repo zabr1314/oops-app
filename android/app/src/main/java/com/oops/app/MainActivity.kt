@@ -190,6 +190,7 @@ class MainActivity : ComponentActivity() {
                         .put("state", BridgeJson.state(OopsEngine.state.value))
                         .put("transcript", JSONArray(OopsEngine.transcriptSnapshot().map(BridgeJson::utterance)))
                         .put("summary", BridgeJson.summary(OopsEngine.sessionSummary()))
+                        .put("board", OopsEngine.taskBoardSnapshot() ?: JSONObject.NULL)
                         .put("team", JSONArray(Settings.TEAM))
                         .put("pendingActions", JSONArray(OopsEngine.pendingActions().map { (draft, result) ->
                             JSONObject().put("draft", BridgeJson.draft(draft))

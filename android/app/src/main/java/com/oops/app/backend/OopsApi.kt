@@ -13,6 +13,8 @@ interface OopsApi {
     suspend fun historyOpen(id: String): org.json.JSONObject? = null
     /** Read cached AI minutes only; never generates, sends, or resumes external work. */
     suspend fun historyMinutes(id: String): org.json.JSONObject? = null
+    /** GET /v1/meetings/{id}/board: the running task list, ranked P0–P3 by the server. */
+    suspend fun meetingBoard(id: String): org.json.JSONObject? = null
     suspend fun historyDelete(id: String): org.json.JSONObject? = null
     suspend fun historySearch(query: String): org.json.JSONObject? = null
     /** A person's correction of one sentence; null when the server does not have that meeting (yet). */
@@ -146,6 +148,8 @@ data class DraftRequest(
     val context: List<Candidate>,
     val referenceTime: String = java.time.Instant.now().toString(),
     val timeZone: String = java.time.ZoneId.systemDefault().id,
+    /** Also fold the resolved tasks into the meeting's running task list (P0–P3) and return that list. */
+    val board: Boolean = false,
 )
 
 data class DraftResponse(
@@ -162,6 +166,8 @@ data class DraftResponse(
     val reason: String = "负责人待确认",
     val ownerCandidates: List<com.oops.app.buffer.SpeakerCandidate> = emptyList(),
     val context: TaskContext? = null,
+    /** The meeting's running task list as the server had it, when the request asked for it; display only. */
+    val board: org.json.JSONObject? = null,
 )
 
 /** Server-verified context resolution of the task wording: display only, never confirmed data. */
