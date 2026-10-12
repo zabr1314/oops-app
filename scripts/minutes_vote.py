@@ -45,6 +45,8 @@ def vote_items(runs, text_key, quorum):
             merged["ids"] = sorted({i for it in items for i in it.get("ids") or []}, key=lambda i: int(re.sub(r"\D", "", i) or 0))
         if text_key == "task" and not merged.get("owner"):  # an owner any agreeing run named is kept
             merged["owner"] = next((it["owner"] for it in items if it.get("owner")), "")
+        if text_key == "task" and "priority" in best:  # main line when most agreeing runs say so
+            merged["priority"] = "main" if sum(it.get("priority") == "main" for it in items) * 2 > len(items) else "other"
         kept.append(merged)
     return kept
 
