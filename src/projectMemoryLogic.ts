@@ -26,10 +26,11 @@ export function projectMemorySummary(data: AppData, projectId: string) {
     };
     return items.filter(item => item && typeof item.id === 'string' && item.kind === 'conclusion' && item.confirmed === true && typeof item.text === 'string' && item.text.trim() && currentConfirmation(item) && (personal || item.shared === true) && (item.sourceId === undefined || typeof item.sourceId === 'string' && sourceAvailable(data, { sourceSession: session.id, sourceId: item.sourceId }, { publicOnly: !personal, requireShared: !personal }))).map(item => ({ session, item }));
   });
-  const belongs = (memory: Memory) => !memory.deleted && (memory.tags.includes(project.name) || !!memory.sourceSession && sessionIds.has(memory.sourceSession)) && provenanceAvailable(data, [{ kind: 'memory', id: memory.id }]);
+  const belongs = (memory: Memory) => !memory.deleted && (memory.tags.includes(project.name) || !!memory.sourceSession && sessionIds.has(memory.sourceSession)) && (provenanceAvailable(data, [{ kind: 'memory', id: memory.id }]) || personal && !!memory.needsReview);
   const tasks = data.tasks.filter(task => {
     const linked = !!task.sourceSession && sessionIds.has(task.sourceSession) || !!task.relatedSessionId && sessionIds.has(task.relatedSessionId) || !!task.sourceMemoryId && data.memories.some(memory => memory.id === task.sourceMemoryId && belongs(memory)) || task.sources?.some(ref => ref.kind === 'session' && sessionIds.has(ref.id) || ref.kind === 'memory' && data.memories.some(memory => memory.id === ref.id && belongs(memory)) || ref.kind === 'project' && ref.id === project.id);
-    return !!linked && taskVisible(data, task) && provenanceAvailable(data, task.sources) && (!task.sourceMemoryId || provenanceAvailable(data, [{ kind: 'memory', id: task.sourceMemoryId }]));
+    const pendingReview = personal && (task.needsReview || task.sourceNeedsReview);
+    return !!linked && taskVisible(data, task) && (pendingReview || provenanceAvailable(data, task.sources) && (!task.sourceMemoryId || provenanceAvailable(data, [{ kind: 'memory', id: task.sourceMemoryId }])));
   });
   return { sessions, decisions, tasks };
 }

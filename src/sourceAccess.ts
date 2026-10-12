@@ -68,7 +68,7 @@ export function selectedTaskMaterials(task: Task): TaskMaterial[] {
 export function generationConfigurationFingerprint(task: Task): string {
   const scope = task.scope;
   const mode = task.outputMode === '完整框架与PPT' ? '文档与PPT' : task.outputMode === '仅提纲' ? '文档' : task.outputMode;
-  return fingerprint([task.title, task.description, task.owner, task.due, task.version, task.workKind, task.criteria, mode, task.sourceSession, task.sourceId, task.sourceTime, scope ? [scope.sources, scope.destination, scope.space, scope.materialIds === undefined ? null : [...scope.materialIds].sort(), scope.includeSource !== false] : null]);
+  return fingerprint([task.title, task.description, task.owner, task.ownerPersonId, task.requester, task.requesterPersonId, task.due, task.version, task.workKind, task.criteria, mode, task.sourceSession, task.sourceId, task.sourceTime, scope ? [scope.sources, scope.destination, scope.space, scope.materialIds === undefined ? null : [...scope.materialIds].sort(), scope.includeSource !== false] : null]);
 }
 
 export function generationMaterialFingerprint(materials: TaskMaterial[]): string {

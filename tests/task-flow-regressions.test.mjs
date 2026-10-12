@@ -25,7 +25,7 @@ const uiSource = readFileSync(new URL('../src/features/Tasks.tsx', import.meta.u
 function taskData() {
   return {
     sessions: [], tasks: [{ id: 'plain', title: '核实库存', description: '核实可售数量', owner: '我', requester: '我', due: '无固定期限', priority: '中', status: '已承接', aiStatus: '未启动', workKind: '行动', activities: [], results: [], version: 1 }],
-    memories: [], people: [], projects: [], receipts: [], settings: { name: '林', space: '我的空间', retention: {}, toggles: {}, connections: {}, devices: {}, tone: '', avatar: '', role: '' }, messages: [], notifications: [], recallCleared: false,
+    memories: [], people: [{ id: 'alex', name: 'Alex', role: '已核对身份', company: '', note: '', voice: false, shared: false }], projects: [], receipts: [], settings: { name: '林', space: '我的空间', retention: {}, toggles: {}, connections: {}, devices: {}, tone: '', avatar: '', role: '' }, messages: [], notifications: [], recallCleared: false,
   };
 }
 

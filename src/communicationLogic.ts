@@ -21,7 +21,7 @@ export function latestCommunicationArtifacts(task: CommunicationTask): TaskArtif
   return latestTaskArtifacts(task);
 }
 export function communicationTaskSnapshot(task: CommunicationTask): string {
-  return communicationFingerprint([task.id, task.version, task.title, task.description, task.owner, task.requester, task.due, task.status, task.transferTo, task.sourceSession, task.sourceId, task.sourceTime, task.sources, task.materialRefs, task.criteria, task.inquiries, task.questions]);
+  return communicationFingerprint([task.id, task.version, task.title, task.description, task.owner, task.ownerPersonId, task.requester, task.requesterPersonId, task.due, task.status, task.transferTo, task.transferRequest?.toPersonId, task.sourceSession, task.sourceId, task.sourceTime, task.sources, task.materialRefs, task.criteria, task.inquiries, task.questions]);
 }
 export function artifactSelectionFingerprint(task: CommunicationTask): string { return communicationFingerprint(taskArtifacts(task).map(artifact => [artifact.id, artifact.version, artifactFingerprint(artifact)])); }
 function sourcesFor(task: CommunicationTask, selected: TaskArtifact[], data?: AppData): SourceReference[] {
@@ -43,9 +43,9 @@ export function formatDraftAttachments(task: CommunicationTask, draft: Draft): s
 }
 export function buildCommunicationDraft(task: CommunicationTask, kind: CommunicationKind, myName = '我', selectedIds?: string[], options: CommunicationOptions = {}): Draft {
   const all = taskArtifacts(task), selected = selectedIds === undefined ? latestCommunicationArtifacts(task) : all.filter(artifact => selectedIds.includes(artifact.id));
-  const external = (name?: string) => !!name && usable(name) && !['我', myName].includes(name.trim());
+  const external = (name?: string, personId?: string) => !!name && usable(name) && (!!personId || !['我', myName].includes(name.trim()));
   const inquiry = options.replyToInquiryId ? task.inquiries?.find(item => item.id === options.replyToInquiryId) : undefined;
-  const target = external(inquiry?.target) ? inquiry!.target! : external(task.transferTo) && task.status === '待转交' ? task.transferTo! : external(task.owner) ? task.owner : external(task.requester) ? task.requester : '';
+  const target = external(inquiry?.target) ? inquiry!.target! : external(task.transferTo, task.transferRequest?.toPersonId) && task.status === '待转交' ? task.transferTo! : external(task.owner, task.ownerPersonId) ? task.owner : external(task.requester, task.requesterPersonId) ? task.requester : '';
   const detail = selected.map(formatArtifactBody).join('\n\n');
   const questionBody = inquiry ? `需要核对的问题：${inquiry.question}${inquiry.answer?.trim() ? '\n答复：' + inquiry.answer.trim() : '\n请帮忙确认上述问题。'}` : '';
   const body = kind === '日程' ? `讨论「${task.title}」。\n${questionBody || '要求：' + task.description}${detail ? '\n\n本次讨论的成果版本：\n' + detail : '\n核对目标、资料和下一步。'}` : `${target ? target + '，你好。' : '你好。'}\n${questionBody || `关于「${task.title}」，请核对以下${selected.length ? '成果内容' : '要求'}。\n要求：${task.description}`}${detail ? '\n\n' + detail : ''}${!inquiry ? '\n\n需核对：' + (task.criteria?.join('；') || '资料、结果和下一步') : ''}\n谢谢。`;

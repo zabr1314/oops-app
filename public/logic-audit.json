@@ -1,0 +1,39 @@
+{
+  "revision": "logic-audit-20261009",
+  "reviewedAt": "2026-10-09",
+  "scope": "29项前端代码路径、状态及跨模块逻辑验收",
+  "browserVerified": false,
+  "browserBlock": "本轮已获用户授权，保存的浏览器权限设置仍阻止站点访问。尚未完成本轮实屏操作与重拍。",
+  "changedViews": [
+    "assistant",
+    "session-review",
+    "session-review-queue",
+    "session-understanding",
+    "session-notices",
+    "session-agenda",
+    "session-reminders",
+    "task-edit",
+    "task-transfer",
+    "task-transfer-response",
+    "memory-candidate",
+    "memory-conflict",
+    "memory-project",
+    "memory-project-edit",
+    "memory-person-edit"
+  ],
+  "screenshotRefreshPending": true,
+  "fixedIssueGroups": 10,
+  "coverage": {
+    "localFlow": 20,
+    "partialFrontend": 7,
+    "concept": 2,
+    "total": 29
+  },
+  "verification": {
+    "logicTestsPassed": 175,
+    "newLogicTests": 32,
+    "boardTestsPassed": 6,
+    "hostingTestsPassed": 4,
+    "protectedRuntimeFiles": 28
+  }
+}

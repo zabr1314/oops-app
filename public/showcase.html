@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#795cf4">
+  <meta name="description" content="在一个入口体验 Oops App、浏览真实页面与完整交互画板。">
+  <title>Oops · 产品体验中心</title>
+  <link rel="stylesheet" href="./showcase.css">
+  <script src="./showcase.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#showcase-content">跳到展示内容</a>
+  <header class="showcase-header">
+    <div class="brand"><img class="wordmark" src="./brand/wordmark.png" alt="Oops"><span class="brand-caption">产品体验中心</span></div>
+    <nav class="modes" role="tablist" aria-label="展示方式">
+      <button id="tab-app" role="tab" type="button" aria-controls="panel-app" aria-selected="true" data-mode="app">体验 App</button>
+      <button id="tab-pages" role="tab" type="button" aria-controls="panel-pages" aria-selected="false" tabindex="-1" data-mode="pages">页面总览 <span class="count" data-count="screenshots">149</span></button>
+      <button id="tab-board" role="tab" type="button" aria-controls="panel-board" aria-selected="false" tabindex="-1" data-mode="board">交互画板 <span class="count" data-count="coverage">172</span></button>
+    </nav>
+    <div class="header-actions">
+      <button class="tour-entry" id="tour-toggle" type="button" aria-expanded="false" aria-controls="trial-guide">10 分钟试用</button>
+      <a class="feedback" href="https://my.feishu.cn/wiki/GYaFwtc0YiDzQAklboycqA9tnmd?sheet=OwB85z&amp;table=tblA91ZI7FPkrK8z&amp;view=vewEQZC540" target="_blank" rel="noopener">提建议 <span aria-hidden="true">↗</span></a>
+      <button class="share" id="share" type="button">分享链接</button>
+    </div>
+  </header>
+  <div class="mode-bar">
+    <p id="mode-description">像使用 App 一样，直接点击体验完整流程。</p>
+    <button id="return-app" class="return-app" type="button" hidden>返回自由体验</button>
+    <span class="prototype-note">前端原型 · AI 与录音为演示</span>
+  </div>
+  <main id="showcase-content" tabindex="-1">
+    <aside id="trial-guide" class="trial-guide" aria-label="10 分钟试用引导" hidden>
+      <div class="trial-top"><span class="trial-eyebrow">第一次认识 Oops</span><button id="tour-collapse" class="trial-text-button" type="button">收起引导</button></div>
+      <h2>用 10 分钟，走一遍</h2>
+      <p class="trial-intro">你正在参加「产品头脑风暴」。试着把讨论变成可核对的决定和下一步。</p>
+      <p class="trial-scope">准备好的示例数据 · 无需麦克风<br>AI、录音与执行均为前端演示；本轮修改只留在示例中，刷新后重新开始。</p>
+      <p class="trial-mobile-hint">点击下面的页面入口后，引导会收起。点顶部「试用引导」可继续下一步。</p>
+      <nav id="trial-steps" class="trial-steps" aria-label="试用步骤"></nav>
+      <section id="trial-detail" class="trial-detail" aria-live="polite"></section>
+      <div class="trial-controls"><button id="tour-prev" class="trial-secondary" type="button">上一步</button><button id="tour-next" class="share" type="button">下一步</button></div>
+      <p class="trial-footer">时间仅供参考，卡住也可以跳过。观察问题不用逐项填，最后留一条最有价值的建议即可。</p>
+    </aside>
+    <div class="showcase-stage">
+    <section id="panel-app" class="panel" role="tabpanel" aria-labelledby="tab-app"></section>
+    <section id="panel-pages" class="panel" role="tabpanel" aria-labelledby="tab-pages" hidden></section>
+    <section id="panel-board" class="panel" role="tabpanel" aria-labelledby="tab-board" hidden></section>
+    </div>
+  </main>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <dialog id="share-dialog" class="share-dialog" aria-labelledby="share-title">
+    <h2 id="share-title">分享当前页面</h2>
+    <p>复制这个链接，朋友就能从这里开始查看。</p>
+    <input id="share-url" type="text" readonly aria-label="分享网址">
+    <button id="close-share" class="share" type="button">完成</button>
+  </dialog>
+  <noscript><p class="noscript">请开启浏览器的 JavaScript，或直接打开：<a href="./#home">App</a> · <a href="./board.html">页面总览</a> · <a href="./interactive-board.html">交互画板</a></p></noscript>
+</body>
+</html>

@@ -8,7 +8,7 @@ async function load(code){return import('data:text/javascript;base64,'+Buffer.fr
 const store=readFileSync(new URL('../src/store.tsx',import.meta.url),'utf8');
 const {initialData}=await load(store.slice(store.indexOf('export function initialData')));
 const home=readFileSync(new URL('../src/features/Home.tsx',import.meta.url),'utf8');
-const imports=`import {sharedMemoryEligible} from '${url('../src/memoryAccess.ts')}';import {makeSourceReference,materialVisible,provenanceAvailable,sourceAvailable,taskSourceAvailable,taskVisible as scopedTaskVisible,sessionVisible as scopedSessionVisible} from '${url('../src/sourceAccess.ts')}';import {taskIsMyAttention} from '${url('../src/taskWorkflow.ts')}';`;
+const imports=`import {sharedMemoryEligible} from '${url('../src/memoryAccess.ts')}';import {makeSourceReference,materialVisible,provenanceAvailable,sourceAvailable,taskSourceAvailable,taskVisible as scopedTaskVisible,sessionVisible as scopedSessionVisible} from '${url('../src/sourceAccess.ts')}';import {taskIsMyAttention,taskBelongsToMe} from '${url('../src/taskWorkflow.ts')}';`;
 const model=await load(imports+home.slice(home.indexOf('export function homeTitle'),home.indexOf('export function Home()'))+home.slice(home.indexOf('type LocalAnswer'),home.indexOf('function referenceRoute'))+home.slice(home.indexOf('export function notificationVisible'),home.indexOf('export function Notifications')));
 const {migrateStoredData}=await import('../src/stateMigrations.ts');
 function stock(){const d=initialData(),t=d.tasks.find(t=>t.id==='TASK-032');t.needsReview=false;t.sourceNeedsReview=false;t.results=['旧库存999件'];t.artifacts=[{id:'old',kind:'资料',title:'旧库存',version:1,created:'昨天',body:['旧库存999件'],reviewedAt:'昨天',needsReview:false,sourceNeedsReview:true},{id:'new',kind:'资料',title:'已核对库存',version:2,created:'今天',body:['新库存18件'],reviewedAt:'今天',needsReview:false}];return d;}
@@ -19,3 +19,11 @@ test('shared search cannot expose a private raw turn',()=>{const d=initialData()
 test('an unrelated question cannot cite an arbitrary first conversation',()=>{const a=model.buildLocalAnswer('想讨论银河旅行',initialData(),true);assert.equal(a.sources.length,0);assert.match(a.text,/哪段会话/);});
 test('resolved memory and cancelled-task notifications are not active reminders',()=>{const d=initialData();d.memories.find(m=>m.id==='MEM-003').confirmed=true;assert.equal(model.notificationVisible(d,{view:'memory-conflict',id:'MEM-003'}),false);d.tasks[0].status='已取消';assert.equal(model.notificationVisible(d,{view:'task-detail',id:d.tasks[0].id}),false);});
 test('migration binds only verified exact turns and archives stale completion',()=>{const d=initialData();delete d.sessions[0].transcript[1].personId;d.sessions[0].transcript.push({id:'same',time:'00:24:00',speaker:'Alex',text:'尚未核对'});d.tasks[0].completion={summary:'旧完成',date:'昨天',remaining:'',actor:'我'};d.tasks[0].due='2026/10/09 17:00';const m=migrateStoredData(d);assert.equal(m.sessions[0].transcript[1].personId,'p2');assert.equal(m.sessions[0].transcript.at(-1).personId,undefined);assert.equal(m.tasks[0].completion,undefined);assert.equal(m.tasks[0].completionHistory[0].summary,'旧完成');assert.equal(m.tasks[0].due,'2026-10-09T17:00');});
+
+
+test('my todo answers exclude other owners and namesakes while project queries retain visible work',()=>{
+ const data=initialData();data.tasks=data.tasks.slice(0,1);data.tasks[0].sourceSession=undefined;data.tasks[0].sourceTime=undefined;
+ const other={...data.tasks[0],id:'other',title:'另一位同名联系人的工作',owner:data.settings.name,ownerPersonId:'namesake',sourceId:undefined,sources:[]};data.tasks.push(other);
+ const personal=model.buildLocalAnswer('我的待办有哪些？',data,true);assert.equal(personal.sources.length,1);assert.doesNotMatch(personal.text,/另一位同名联系人的工作/);
+ assert.equal(model.buildLocalAnswer('项目所有人的任务有哪些？',data,true).sources.length,2);
+});

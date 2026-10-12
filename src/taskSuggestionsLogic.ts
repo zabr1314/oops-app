@@ -30,7 +30,7 @@ const put = (data: AppData, sessionId: string, items: TaskSuggestion[]): AppData
 /** Name confirmation is separate from voice consent; legacy checked voice cards stay compatible. */
 export function taskSuggestionOwners(data: AppData): TaskSuggestionOwner[] {
   if (data.settings.space !== PERSONAL_SPACE) return [];
-  const names = data.people.filter(person => !anonymous(person.name) && person.name !== data.settings.name && (data.settings.toggles[`person-name-confirmed:${person.id}`] === true || person.voice || ['本次手动确认', '已核对身份'].includes(person.role) || data.sessions.some(session => sessionVisible(data, session.id) && session.transcript.some(turn => turn.personId === person.id && data.settings.toggles[`speaker-confirmed:${session.id}:${turn.id}`] === true))));
+  const names = data.people.filter(person => !anonymous(person.name) && (data.settings.toggles[`person-name-confirmed:${person.id}`] === true || person.voice || ['本次手动确认', '已核对身份'].includes(person.role) || data.sessions.some(session => sessionVisible(data, session.id) && session.transcript.some(turn => turn.personId === person.id && data.settings.toggles[`speaker-confirmed:${session.id}:${turn.id}`] === true))));
   return [{ id: 'me', name: '我', label: `我 · ${data.settings.name}` }, ...names.map(person => ({ id: `person:${person.id}`, personId: person.id, name: person.name, label: `${person.name} · ${person.role || person.company || '已核对联系人'}${names.filter(other => other.name === person.name).length > 1 ? ` · ${person.id}` : ''}` }))];
 }
 
@@ -66,8 +66,8 @@ function proposedOwner(data: AppData, session: Session, turn: Transcript): strin
   if (named.length === 1) return named[0].id;
   if (named.length > 1) return '';
   if (/(?:我来|由我|我负责|我会|我准备|我核实|我整理|我跟进)/.test(turn.text)) {
+    if (turn.personId) return data.settings.toggles[`speaker-confirmed:${session.id}:${turn.id}`] === true ? choices.find(choice => choice.personId === turn.personId)?.id || '' : '';
     if (turn.speaker === '我' || turn.speaker === data.settings.name) return 'me';
-    if (turn.personId && data.settings.toggles[`speaker-confirmed:${session.id}:${turn.id}`] === true) return choices.find(choice => choice.personId === turn.personId)?.id || '';
   }
   return '';
 }
@@ -142,8 +142,9 @@ export function createTaskFromSuggestion(data: AppData, sessionId: string, id: s
   const taskId = options.taskId || `TASK-SUG-${hash([sessionId, value.sourceId])}`;
   if (data.tasks.some(task => task.id === taskId)) return { data, error: '任务编号已存在，请重新核对' };
   const original = sourceTurn(data, { sourceSession: sessionId, sourceId: value.sourceId })!;
-  const knownSpeaker = original.speaker === '我' || original.speaker === data.settings.name ? '我' : original.personId && data.settings.toggles[`speaker-confirmed:${sessionId}:${original.id}`] === true && !anonymous(original.speaker) ? original.speaker : '待确认';
-  const task: Task = { id: taskId, title: fields.title, description: original.text, owner: owner.name, requester: knownSpeaker, due: fields.due, priority: fields.priority, status: '待承接', aiStatus: '未启动', workKind: /PPT|文档|报告|框架|方案|交付/.test(fields.title) ? '交付' : '行动', origin: '会话建议', relatedSessionId: sessionId, sourceSession: sessionId, sourceId: original.id, sourceTime: original.time || undefined, sources: value.sources, results: [], activities: [`${options.created || '本次核对'} · 本人核对会话建议并建立待承接任务；未开启助手`], authorized: false, version: 1 };
+  const knownPerson = original.personId && data.settings.toggles[`speaker-confirmed:${sessionId}:${original.id}`] === true ? data.people.find(person => person.id === original.personId && !anonymous(person.name)) : undefined;
+  const knownSpeaker = knownPerson ? knownPerson.name : !original.personId && (original.speaker === '我' || original.speaker === data.settings.name) ? '我' : '待确认';
+  const task: Task = { id: taskId, title: fields.title, description: original.text, owner: owner.name, ownerPersonId: owner.personId, requester: knownSpeaker, requesterPersonId: knownPerson?.id, due: fields.due, priority: fields.priority, status: '待承接', aiStatus: '未启动', workKind: /PPT|文档|报告|框架|方案|交付/.test(fields.title) ? '交付' : '行动', origin: '会话建议', relatedSessionId: sessionId, sourceSession: sessionId, sourceId: original.id, sourceTime: original.time || undefined, sources: value.sources, results: [], activities: [`${options.created || '本次核对'} · 本人核对会话建议并建立待承接任务；未开启助手`], authorized: false, version: 1 };
   const updated = stored!.items.map(row => row.id === id ? { ...row, ...fields, edited: true, state: 'created' as const, taskId } : row);
   const next = put({ ...data, tasks: [task, ...data.tasks], settings: { ...data.settings, retention: { ...data.settings.retention, [`task-space:${taskId}`]: PERSONAL_SPACE, [`task-follow:${taskId}`]: '我', ...(owner.personId ? { [`task-owner-person:${taskId}`]: owner.personId } : {}) } } }, sessionId, updated);
   return { data: next, taskId };

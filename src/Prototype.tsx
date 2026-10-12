@@ -93,6 +93,9 @@ export default function Prototype() {
     restorePosition.current = null;
   }, [route.view, route.id, route.mode, data.settings.space, screenRef]);
   useEffect(() => {
+    if (window.parent !== window) window.parent.postMessage({ type: 'oops:route', href: window.location.href }, window.location.origin);
+  }, [route.view, route.id, route.mode]);
+  useEffect(() => {
     document.title = 'Oops · 日常陪伴 App';
     const onHash = () => { keyboard.hide(); setRoute(initialRoute()); };
     window.addEventListener('hashchange', onHash);

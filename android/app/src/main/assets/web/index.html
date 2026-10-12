@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Oops</title>
+  <!-- proto.css is the design prototype's own stylesheet, used unchanged; app.css only adds what the prototype lacks. -->
+  <link rel="stylesheet" href="proto.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="oops-root" id="root" data-route="home">
+    <header class="app-header" id="hdr"></header>
+    <div class="session-fixed-tabs" id="tabs" hidden></div>
+    <section class="mobile-page oops-scroll" id="scroll">
+      <main class="screen-content" id="screen"></main>
+    </section>
+    <nav class="app-nav" id="nav" aria-label="主导航"></nav>
+    <aside class="recording-controls" id="rc" aria-label="当前记录控制" hidden></aside>
+    <div id="notices" aria-live="polite"></div>
+    <div class="sheet-overlay" id="backdrop" hidden></div>
+    <div class="bottom-sheet" id="sheet" role="dialog" hidden></div>
+    <div class="app-toast" id="toast" hidden></div>
+  </div>
+  <!-- The live transcript is appended to one sentence at a time; it lives here and is moved into the page that shows it. -->
+  <div id="holder" hidden>
+    <div id="lines"></div>
+    <p class="meta live-partial" id="partial"></p>
+  </div>
+
+  <script src="bridge-mock.js"></script>
+  <script src="draft-state.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

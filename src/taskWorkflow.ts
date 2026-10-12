@@ -8,9 +8,10 @@ const stamp = () => new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'n
 const uid = () => `task-op-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export type TaskMutation = { data: AppData; error?: string; token?: string; cost?: number };
 const me = (data: AppData, value: string) => value === '我' || value === data.settings.name;
-export function taskBelongsToMe(data: AppData, task: Task): boolean { return me(data, task.owner); }
+export function taskRequestedByMe(data: AppData, task: Task): boolean { return !task.requesterPersonId && me(data, task.requester); }
+export function taskBelongsToMe(data: AppData, task: Task): boolean { return !task.ownerPersonId && !data.settings.retention['task-owner-person:' + task.id] && me(data, task.owner); }
 export function taskFollowedByMe(data: AppData, task: Task): boolean {
-  return !taskBelongsToMe(data, task) && (me(data, task.requester) || !!task.transferRequest && me(data, task.transferRequest.fromOwner) || data.settings.retention['task-follow:' + task.id] === data.settings.name || data.settings.retention['task-follow:' + task.id] === '我');
+  return !taskBelongsToMe(data, task) && (taskRequestedByMe(data, task) || !!task.transferRequest && me(data, task.transferRequest.fromOwner) || data.settings.retention['task-follow:' + task.id] === data.settings.name || data.settings.retention['task-follow:' + task.id] === '我');
 }
 export function taskIsMyAttention(data: AppData, task: Task, now: number | Date = Date.now()): boolean {
   if (taskClosed(task)) return false;
@@ -141,15 +142,23 @@ export function createDeliveryCompletion(data: AppData, id: string, input: { art
   const completion: TaskCompletion = { id: uid(), kind: '交付验收', summary: input.summary.trim(), completedAt: stamp(), artifactIds: selected.map(artifact => artifact.id), remaining: input.remaining?.trim() };
   return { data: changeTask(data, task, { status: '已完成', completion, deliveryArtifactIds: completion.artifactIds, needsReview: false, authorized: false, generationToken: undefined, generationSnapshot: undefined, aiStatus: task.aiStatus === '准备中' ? '已停止' : task.aiStatus }, '本人验收指定交付版本：' + selected.map(artifact => `${artifact.title} v${artifact.version}`).join('、')) };
 }
-export function beginTransfer(data: AppData, id: string, input: { to: string; reason: string; nextFollowUp?: string }): TaskMutation {
+export function taskTransferPeople(data: AppData) {
+  return data.people.filter(person => person.name.trim() && !/未知|待确认|未确认|匿名|说话人|候选|unknown|anonymous/i.test(person.name) &&
+    (data.settings.toggles['person-name-confirmed:' + person.id] === true || person.voice || ['本次手动确认', '已核对身份'].includes(person.role) || data.sessions.some(session => session.transcript.some(turn => turn.personId === person.id && data.settings.toggles['speaker-confirmed:' + session.id + ':' + turn.id] === true))) &&
+    (data.settings.space === PERSONAL_SPACE || person.shared && (data.settings.retention['person-space:' + person.id] || 'Oops 产品团队') === data.settings.space));
+}
+export function beginTransfer(data: AppData, id: string, input: { to: string; toPersonId?: string; reason: string; nextFollowUp?: string }): TaskMutation {
   const task = data.tasks.find(current => current.id === id); const error = workError(data, task);
   if (error || !task) return { data, error };
   if (task.status === '待转交' || task.transferRequest?.status === '待回应') return { data, error: '已有转交请求，先等待回应或撤回' };
-  if (!input.to.trim() || me(data, input.to.trim()) || input.to.trim() === task.owner || /待确认|待选择|请选择/.test(input.to)) return { data, error: '选择另一位明确的接收人' };
+  if (!taskSourceAvailable(data, task)) return { data, error: '先核对当前任务来源与资料，再建议转交' };
+  const choices = taskTransferPeople(data), matches = choices.filter(person => person.name === input.to.trim());
+  const recipient = input.toPersonId ? choices.find(person => person.id === input.toPersonId && person.name === input.to.trim()) : matches.length === 1 ? matches[0] : undefined;
+  if (!recipient || !input.toPersonId && data.people.filter(person => person.name === input.to.trim()).length > 1) return { data, error: '选择明确且已核对的人物卡；同名人物需重新选择身份' };
   if (!input.reason.trim()) return { data, error: '补充转交说明' };
   const nextFollowUp = normalizeMoment(input.nextFollowUp || '');
   if (input.nextFollowUp?.trim() && !nextFollowUp) return { data, error: '填写有效的本地跟进时间' };
-  const request = { id: uid(), fromOwner: task.owner, fromStatus: task.status, to: input.to.trim(), status: '待回应' as const, reason: input.reason.trim(), created: stamp(), nextFollowUp };
+  const request = { id: uid(), fromOwner: task.owner, fromStatus: task.status, to: recipient.name, toPersonId: recipient.id, status: '待回应' as const, reason: input.reason.trim(), created: stamp(), nextFollowUp };
   return { data: changeTask(data, task, { status: '待转交', transferRequest: request, transferTo: request.to, nextFollowUp, authorized: false, generationToken: undefined, generationSnapshot: undefined, aiStatus: task.aiStatus === '未启动' ? '未启动' : '已停止' }, '建议转交给' + request.to + '，收到确认前保留原责任') };
 }
 export function resolveTransfer(data: AppData, id: string, requestId: string, response: '同意'|'婉拒'|'撤回'): TaskMutation {
@@ -158,7 +167,12 @@ export function resolveTransfer(data: AppData, id: string, requestId: string, re
   if (!taskVisible(data, task)) return { data, error: '这项工作不在当前空间' };
   if (!me(data, request.fromOwner)) return { data, error: '这条转交请求由原负责人管理' };
   const agreed = response === '同意';
-  return { data: changeTask(data, task, { owner: agreed ? request.to : request.fromOwner, status: agreed ? '已承接' : request.fromStatus, transferTo: undefined, transferRequest: { ...request, status: agreed ? '已同意' : response === '婉拒' ? '已婉拒' : '已撤回' }, authorized: false, generationToken: undefined, generationSnapshot: undefined, aiStatus: agreed ? '未启动' : task.aiStatus }, agreed ? `${request.to}接受转交（演示回应），原负责人可继续跟进` : `${response}转交，恢复原工作状态，助手需重新允许`) };
+  const choices = taskTransferPeople(data), matching = choices.filter(person => person.name === request.to);
+  const recipient = request.toPersonId ? choices.find(person => person.id === request.toPersonId) : matching.length === 1 && data.people.filter(person => person.name === request.to).length === 1 ? matching[0] : undefined;
+  if (agreed && !taskSourceAvailable(data, task)) return { data, error: '任务来源已变化，先核对后再确认转交；也可撤回请求' };
+  if (agreed && (!recipient || request.toPersonId && recipient.name !== request.to)) return { data, error: '接收人物身份已变化，撤回后重新核对人物卡' };
+  const next = changeTask(data, task, { owner: agreed ? recipient!.name : request.fromOwner, ...(agreed ? { ownerPersonId: recipient!.id } : {}), status: agreed ? '已承接' : request.fromStatus, transferTo: undefined, transferRequest: { ...request, status: agreed ? '已同意' : response === '婉拒' ? '已婉拒' : '已撤回' }, authorized: false, generationToken: undefined, generationSnapshot: undefined, aiStatus: agreed ? '未启动' : task.aiStatus }, agreed ? `${request.to}接受转交（演示回应），原负责人可继续跟进` : `${response}转交，恢复原工作状态，助手需重新允许`);
+  return { data: agreed ? { ...next, settings: { ...next.settings, retention: { ...next.settings.retention, ['task-owner-person:' + task.id]: recipient!.id } } } : next };
 }
 export function setInquiry(data: AppData, id: string, inquiry: TaskInquiry): TaskMutation {
   const task = data.tasks.find(current => current.id === id);

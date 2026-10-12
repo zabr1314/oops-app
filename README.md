@@ -2,11 +2,18 @@
 
 这是可连续操作的移动 App 交互原型，包含首页、会话、任务、记忆、我的五个主入口。完整源码、素材、画板与运行说明都保存在这个仓库中。
 
-- [在线体验完整 App](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/)
+- **[统一体验中心：App / 真实页面 / 交互画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/showcase.html)**（推荐分享此链接）
+- [直接体验完整 App](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/)
 - [在线查看记录体验改进画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/record-improved.html)
 - [在线查看新版真实页面总览（149个页面与状态）](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/board.html)
 
 新版真实总览收录 **149 个实际页面与状态**，全部由当前 App 重新截图；[172 项功能交互画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/interactive-board.html) 保留原 131 项编号，新增 41 项 P0 页面与状态，并连接当前入口。合并页面明确标注实际入口，尚未接通的旧细分能力也在页面说明中标明。两份画板可搜索、分组、缩放、查看实拍或打开对应可操作 App，使用独立示例，不读取或覆盖已保存数据。
+
+统一体验中心在同页切换三个模式，保留 App 当前页面与草稿、画板筛选和滚动位置。从画板进入对应 App 示例后，可返回原来的自由体验；示例与已保存个人数据隔离。支持分享当前模式、页面和示例场景，顶部也可直接进入原飞书意见表。旧三个链接继续可用。
+
+## Android 原生 App
+
+仓库同时包含 Oops Android 原生 App（`android/`）及其后端、飞书机器人和 Mac 助手（`deploy/`、`scripts/`），负责实际收音、豆包流式 ASR、本场纪要和飞书任务。构建、部署和真机运行说明见 [ANDROID.md](ANDROID.md)。
 
 ## 2026-10-09 P0 前端补齐
 
@@ -121,3 +128,7 @@ npm run test:logic
 转交等待时可记录进展，但不重复承接；重开工作归档旧完成结果，下一轮表单清空；问题和转交按各自跟进时间提醒。所有任务时间统一存储。另存成果停止运行中的准备；旧成果个人确认后可备份历史，团队不能导出失效版本。资料回答只引用已核对且来源有效的具体成果，搜索可直接定位原话。
 
 通过92项真实逻辑用例、TypeScript、28项移动运行时完整性与部署资源检查，并使用内置浏览器重新捕获108张实屏。截图清单位于screenshots/capture-plan.json，131项路线映射位于public/board-routes.json。scripts/build-boards.mjs由同一组当前截图与路线映射生成两份画板。录音、AI和外部服务仍是本地示例。
+
+## 10 分钟试用路线（2026-10-09）
+
+统一体验中心的「10 分钟试用」提供六步路线：记录状态（1分钟）、说话人（1分钟）、提醒与决定（2分钟）、任务（2分钟）、记忆（2分钟）、私人复盘与问答及反馈（2分钟）。从 `showcase.html?view=app&tour=1` 可直接开始，各步提供真实页面入口、操作提示和观察问题。试用 iframe 使用独立内存数据，与自由体验和画板示例隔离；切换保留本轮操作，刷新重置示例。试用中分享链接始终指向路线起点，反馈沿用原飞书意见表。真实页面总览仍为149张，交互画板仍为172项；本次增加外层引导和演示数据，不改已有 App 页面或截图。

@@ -1,6 +1,26 @@
 {
   "metadata": {
-    "revision": "p0-20261009",
+    "revision": "logic-audit-20261009",
+    "logicReviewedAt": "2026-10-09",
+    "browserVerified": false,
+    "screenshotRefreshPending": true,
+    "changedViews": [
+      "assistant",
+      "session-review",
+      "session-review-queue",
+      "session-understanding",
+      "session-notices",
+      "session-agenda",
+      "session-reminders",
+      "task-edit",
+      "task-transfer",
+      "task-transfer-response",
+      "memory-candidate",
+      "memory-conflict",
+      "memory-project",
+      "memory-project-edit",
+      "memory-person-edit"
+    ],
     "capturedAt": "2026-10-09T03:04:04.555Z",
     "capturedFrom": "2026-10-09T03:02:30.099Z",
     "app": "https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/",

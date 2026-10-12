@@ -2,6 +2,7 @@ import type { AppData, Route, Session, SourceReference, Transcript } from './sto
 import type { SessionReviewItem } from './sessionLogic';
 import { findSourceTask, makeSourceReference, PERSONAL_SPACE, provenanceAvailable, sessionVisible, sourceAvailable, sourceTurn, taskSourceAvailable, taskVisible } from './sourceAccess';
 import { taskBelongsToMe } from './taskWorkflow';
+import { budgetAmounts } from './budgetLogic';
 
 export type IntelligenceKind = 'understanding' | 'decisions' | 'notices' | 'personal';
 export type IntelligenceState = 'pending' | 'accepted' | 'rejected' | 'handled' | 'ignored' | 'deferred';
@@ -52,7 +53,10 @@ function snapshot(data: AppData, sessionId: string, kind: IntelligenceKind): Int
 /** A stored fingerprint is checked, never replaced by the latest raw passage on read. */
 export function intelligenceItemAvailable(data: AppData, sessionId: string, value: IntelligenceItem): boolean {
   const session = data.sessions.find(row => row.id === sessionId);
-  return canUse(data, sessionId) && provenanceAvailable(data, value.sources) && publicEvidenceAvailable(data, value.sources) && (value.kind !== 'my-focus' && value.kind !== 'my-todo' && value.kind !== 'my-insight' || value.note === hash(readPersonalContext(data, sessionId))) && (value.basis === undefined || !!session && value.basis === (value.kind === 'my-todo' ? personalTodoBasis(data, session, value.action) : noticeBasis(data, session)));
+  const basisAvailable = value.kind === 'topic'
+    ? !!session && value.basis === understandingTopicBasis(data, session)
+    : value.basis === undefined || !!session && value.basis === (value.kind === 'my-todo' ? personalTodoBasis(data, session, value.action) : noticeBasis(data, session));
+  return canUse(data, sessionId) && provenanceAvailable(data, value.sources) && publicEvidenceAvailable(data, value.sources) && (value.kind !== 'my-focus' && value.kind !== 'my-todo' && value.kind !== 'my-insight' || value.note === hash(readPersonalContext(data, sessionId))) && basisAvailable;
 }
 
 export function readSessionIntelligence(data: AppData, sessionId: string, kind: IntelligenceKind): IntelligenceRead {
@@ -61,7 +65,8 @@ export function readSessionIntelligence(data: AppData, sessionId: string, kind: 
   const available = (stored?.items || []).filter(value => intelligenceItemAvailable(data, sessionId, value));
   const items = kind === 'decisions' ? available.map(value => value.state === 'accepted' && !decisionStillConfirmed(data, sessionId, value) ? { ...value, state: 'pending' as const } : value) : available;
   const session = data.sessions.find(value => value.id === sessionId);
-  return { items, staleCount: (stored?.items.length || 0) - items.length, generated: !!stored && (kind !== 'personal' || !!session && stored.basis === personalBasis(data, session)) };
+  const generated = !!stored && (kind === 'personal' ? !!session && stored.basis === personalBasis(data, session) : kind === 'understanding' ? !!session && stored.basis === understandingTopicBasis(data, session) : true);
+  return { items, staleCount: (stored?.items.length || 0) - items.length, generated };
 }
 
 export function intelligencePendingCount(data: AppData, sessionId: string, kind: IntelligenceKind): number {
@@ -122,6 +127,11 @@ export function saveNoticePlan(data: AppData, sessionId: string, values: { meeti
   return { data: refreshSessionIntelligence(next, sessionId, 'notices') };
 }
 
+function understandingTopicBasis(data: AppData, session: Session): string {
+  const index = readNoticePlan(data, session).topicIndex;
+  return hash([index, session.agenda[index] || session.title]);
+}
+
 function understanding(data: AppData, session: Session): IntelligenceItem[] {
   const turns = safeTurns(data, session);
   if (!turns.length) return [];
@@ -134,7 +144,7 @@ function understanding(data: AppData, session: Session): IntelligenceItem[] {
   const contextSources = [...refs(data, session, turns.slice(0, 1)), ...(project ? [makeSourceReference(data, { kind: 'project', id: project.id })] : [])];
   const lines = (values: Transcript[]) => values.map(turn => `${turn.speaker}：${trim(turn.text, 100)}`).join('\n');
   return [
-    item(session, 'topic', '当前议题', current || session.title, refs(data, session, topic)),
+    item(session, 'topic', '当前议题', current || session.title, refs(data, session, topic), { basis: understandingTopicBasis(data, session) }),
     item(session, 'people', '讨论中的人物', [...new Set(turns.map(turn => turn.speaker))].map(name => /未知|待确认|说话人/.test(name) ? `${name} · 姓名待核对` : name).join('、'), refs(data, session, turns)),
     item(session, 'event', '正在推进的事', lines(event.length ? event : turns.slice(-1)), refs(data, session, event.length ? event : turns.slice(-1))),
     item(session, 'intent', '表达的意图', lines(intent.length ? intent : turns.slice(0, 1)), refs(data, session, intent.length ? intent : turns.slice(0, 1))),
@@ -147,15 +157,6 @@ function decisions(data: AppData, session: Session): IntelligenceItem[] {
     const kind = /决定|确定|就按|先按/.test(turn.text) ? 'decision' : /关键|重点|结论/.test(turn.text) ? 'conclusion' : 'proposal';
     return item(session, kind, kind === 'decision' ? '决定建议' : kind === 'proposal' ? '方案建议' : '结论建议', turn.text, refs(data, session, [turn]));
   });
-}
-
-function budgetAmount(text: string): number | undefined {
-  const match = text.match(/(?:预算|费用|成本|总计|合计|加起来)[^。；\n]{0,18}?([\d.]+|[一二三四五六七八九十]+)\s*(万|元)/);
-  if (!match) return undefined;
-  const chinese: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
-  let amount = Number(match[1]);
-  if (!Number.isFinite(amount)) { const parts = match[1].split('十'); amount = parts.length > 1 ? (parts[0] ? chinese[parts[0]] : 1) * 10 + (parts[1] ? chinese[parts[1]] : 0) : chinese[match[1]]; }
-  return Number.isFinite(amount) ? amount * (match[2] === '万' ? 10000 : 1) : undefined;
 }
 
 function notices(data: AppData, session: Session): IntelligenceItem[] {
@@ -175,8 +176,9 @@ function notices(data: AppData, session: Session): IntelligenceItem[] {
   if (project) {
     const projectRef = makeSourceReference(data, { kind: 'project', id: project.id });
     for (const turn of turns) {
-      const amount = budgetAmount(turn.text);
-      if (amount !== undefined && project.budget > 0 && amount > project.budget) add('budget-conflict', '当前费用可能超出预算', `讨论金额${amount.toLocaleString()}元，项目预算${project.budget.toLocaleString()}元`, [...refs(data, session, [turn]), projectRef], [{ label: '当前讨论', text: turn.text }, { label: '项目预算', text: `${project.name} · ${project.budget.toLocaleString()}元` }], { view: 'session-reminders', id: session.id }, '核对预算');
+      const amounts = budgetAmounts(turn.text).filter(amount => project.budget > 0 && amount > project.budget);
+      const amount = amounts.length ? Math.max(...amounts) : undefined;
+      if (amount !== undefined) add('budget-conflict', '当前费用可能超出预算', `讨论金额${amount.toLocaleString()}元，项目预算${project.budget.toLocaleString()}元`, [...refs(data, session, [turn]), projectRef], [{ label: '当前讨论', text: turn.text }, { label: '项目预算', text: `${project.name} · ${project.budget.toLocaleString()}元` }], { view: 'session-reminders', id: session.id }, '核对预算');
       if (/逐项确认|先确认|批准|审批/.test(project.rule) && /直接|不用确认|无需确认|自动/.test(turn.text) && /发送|发布|对外|付款|执行/.test(turn.text)) add('rule-conflict', '当前提议与项目规则需核对', '对外操作的确认要求可能不同', [...refs(data, session, [turn]), projectRef], [{ label: '当前提议', text: turn.text }, { label: '项目规则', text: project.rule }], { view: 'session-decisions', id: session.id }, '核对决定');
     }
   }
@@ -239,7 +241,7 @@ export function refreshSessionIntelligence(data: AppData, sessionId: string, kin
       const index = merged.findIndex(value => value.kind === old.kind && (currentKind !== 'personal' || value.action?.id === old.action?.id));
       if (index >= 0) merged[index] = old;
     }
-    next = put(next, intelligenceKey(currentKind, sessionId), { version: 1, sessionId, kind: currentKind, items: merged, ...(currentKind === 'personal' ? { basis: personalBasis(next, session) } : {}) } satisfies IntelligenceSnapshot);
+    next = put(next, intelligenceKey(currentKind, sessionId), { version: 1, sessionId, kind: currentKind, items: merged, ...(currentKind === 'personal' ? { basis: personalBasis(next, session) } : currentKind === 'understanding' ? { basis: understandingTopicBasis(next, session) } : {}) } satisfies IntelligenceSnapshot);
   }
   return next;
 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,existsSync} from 'node:fs';
 import {createHash} from 'node:crypto';
+import {Script} from 'node:vm';
 const load=p=>JSON.parse(readFileSync(p,'utf8'));
 const plan=load('screenshots/capture-plan.json'),captures=load('screenshots/capture-results.json'),mapping=load('public/board-routes.json'),manifest=load('public/board-manifest.json');
 const htmlData=path=>JSON.parse(readFileSync(path,'utf8').match(/<script id="board-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
@@ -21,4 +22,14 @@ test('all 15 P0 capabilities retain frontend-only coverage with matching current
   for(const label of ['议题偏离','会议时间','议题超时','未讨论','预算冲突','规则冲突','历史决定','结论遗漏'])assert.ok(reminderCapture.snapshot.includes(label),label);
   assert.ok(captures.find(page=>page.key==='p39-session-task-suggestions-39').snapshot.includes('待承接'));
   assert.ok(captures.find(page=>page.key==='p41-task-receipt-feishu').snapshot.includes('飞书工作日历'));
+});
+
+
+test('generated boards retain executable scripts and disclose pending screenshot refresh',()=>{
+  for(const path of ['public/board.html','public/interactive-board.html']) {
+    const html=readFileSync(path,'utf8');
+    for(const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) if(!match[0].startsWith('<script id="board-data"')) assert.doesNotThrow(()=>new Script(match[1],{filename:path}));
+    const audit=load('public/logic-audit.json');
+    if(audit.screenshotRefreshPending) { assert.equal(htmlData(path).metadata.browserVerified,false); assert.match(html,/截图待重拍/); assert.match(html,/本轮实屏访问/); }
+  }
 });

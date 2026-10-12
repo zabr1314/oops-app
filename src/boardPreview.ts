@@ -133,6 +133,11 @@ function p0VoiceData(data: AppData, scenario?: '匹配' | '低置信度' | '识�
 export function boardPreviewData(scene: string): AppData {
   let data = baseData();
   switch (scene) {
+    case 'guided-trial':
+      data = p0IntelligenceData(data, true);
+      data.settings.retention['sample-index:session-001'] = '6';
+      data.memories.push({ id: 'trial-memory', title: '会中资料的呈现偏好', body: '查到的资料留在相关议题旁，需要时再打开，减少对讨论的打断。', category: '记忆', tags: ['待确认', '产品偏好'], visibility: '私有', updated: CREATED, confirmed: false, sourceSession: 'session-001', sourceId: 'tr3', sourceTime: '00:16:28' });
+      break;
     case 'recording':
     case 'paused':
       data.sessions = data.sessions.map(session => session.id === 'session-001' ? { ...session, status: scene === 'paused' ? '暂停' : '进行中', duration: '18:24', summary: [] } : session);
