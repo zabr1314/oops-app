@@ -79,17 +79,19 @@ def main():
                               "tasks": tasks or []})
 
     # 3. conflicts between decisions/constraints of this meeting
+    def brief(u):
+        return {k: u[k] for k in ("id", "text", "start_ms", "end_ms")}
+
     previous = []
     for u in rows:
         if u["tag"] not in ("decision", "constraint"):
             continue
         if previous:
-            req = {"kind": "conflict", "session_id": "replay", "utterance": {"id": u["id"], "text": u["text"]},
-                   "previous": previous[-30:]}
+            req = {"kind": "conflict", "session_id": "replay", "utterance": brief(u), "previous": previous[-30:]}
             result, ms, err = timed(judge_notice, req, jev, local_backend.overlap, [])
             log["events"].append({"kind": "conflict", "id": u["id"], "at_ms": u["end_ms"], "latency_ms": ms,
                                   "error": err, "result": result})
-        previous.append({"id": u["id"], "text": u["text"]})
+        previous.append(brief(u))
 
     # 4. questions, through the same steps as the bot
     for item in question_watch.plan_meeting(rows, resolver, log=lambda _: None):
