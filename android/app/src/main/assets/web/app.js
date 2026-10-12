@@ -254,6 +254,9 @@
     set('live-rec-sub', liveDetail());
     set('rc-status', s.capturing ? (s.sourceReady ? '收音中' : '等待收音') : '已停止');
     set('rc-saved', `已保存 ${s.savedCount ?? 0}`);
+    set('home-record-time', mmss(s.sessionMs));
+    set('home-record-status', s.sourceReady ? '正在记录' : '等待收音');
+    set('home-record-people', homePeopleSummary());
     const warn = $('live-warn');
     if (warn) { const w = warnings(); warn.hidden = !w.length; warn.textContent = w.join('；'); }
     if (S.route.name === 'settings') set('diag', diagText());
@@ -261,6 +264,12 @@
       const el = $('card-ago');
       if (el) el.textContent = ago(s.sessionMs - S.card.data.items[S.card.sel].endMs);
     }
+  }
+
+  function homePeopleSummary() {
+    const speakers = new Set([...S.records.values()].map(u => u.manualSpeaker || u.speaker).filter(v => v != null && v !== ''));
+    return speakers.size ? `${speakers.size}位发言人 · 身份可在原文核对`
+      : S.records.size ? `已收到${S.records.size}段对话 · 说话人待识别` : '等待第一段对话';
   }
 
   function liveStatus() {
@@ -521,16 +530,22 @@
     const pendingTotal = (S.historyItems || []).reduce((a, i) => a + reviewPending(i), 0);
     return `<div class="home-content">
       <div class="home-date">${now.getMonth() + 1}/${now.getDate()}星期${week}</div>
-      <div class="home-hero"><h1>今天想<br>一起解决什么？</h1><img alt="Oops伙伴" src="brand/mascot.png"></div>
+      <p class="home-positioning">记住对话里的重点，陪你把下一步做好。</p>
+      <section class="native-record-hero ${S.state.capturing ? 'is-active' : ''}" aria-label="记录状态">
+        <div class="native-record-heading"><div><small>${S.state.capturing ? '本场记录' : '从这一刻开始'}</small>
+          <h1>${S.state.capturing ? esc(liveTitle()) : '重要的话，<br>交给 Oops 记住。'}</h1></div><img alt="Oops伙伴" src="brand/mascot.png"></div>
+        ${S.state.capturing ? `<div class="native-record-status"><span class="recording-dot ${S.state.sourceReady ? '' : 'idle'}"></span><strong id="home-record-status">${S.state.sourceReady ? '正在记录' : '等待收音'}</strong><time id="home-record-time">${mmss(S.state.sessionMs)}</time></div>
+          <p class="meta" id="home-record-people">${homePeopleSummary()}</p>
+          <button class="button primary" type="button" data-act="go" data-route="live">${icon('waveform')}<span>回到记录现场</span></button>`
+          : `<button class="button primary" type="button" data-act="capture-start">${icon('microphone')}<span>开始记录</span></button>`}
+        <div class="record-under"><span>会议 · ${esc(SOURCE_TEXT[S.state.source] || '手机麦克风')}</span><button data-act="go" data-route="settings">收音与保存设置</button></div>
+      </section>
+      ${sectionTitle('问 Oops')}
       <div class="ask-card">
         <textarea id="home-ask" aria-label="想问 Oops 的问题" placeholder="问问刚才或往期会议里说过什么…" rows="2" maxlength="500"></textarea>
         <div class="ask-footer"><small>${icon('lock-key', 13)}团队会议原话</small>
           <button class="input-text" data-act="home-ask-scope">${S.homeAskHistory ? '查往期会议' : '查本场'}</button>
           <button class="mic-button" data-act="home-ask" aria-label="提问">${icon('paper-plane-tilt', 23)}</button></div></div>
-      ${S.state.capturing ? `<button class="button primary" type="button" data-act="go" data-route="live">${icon('waveform')}<span>回到正在进行的记录</span></button>`
-        : `<button class="button primary" type="button" data-act="capture-start">${icon('microphone')}<span>开始记录</span></button>`}
-      <div class="record-under"><span>会议 · ${esc(SOURCE_TEXT[S.state.source] || '手机麦克风')}</span>
-        <button data-act="saved-list">${icon('bookmark-simple', 18)}已保存 ${S.state.savedCount ?? 0} 段</button></div>
       ${listRow({ act: 'go', data: 'data-route="settings"', ic: 'waveform', title: '收音与唤醒', sub: `${SOURCE_TEXT[S.state.source] || '手机麦克风'} · ${S.state.voiceTrigger !== false ? '说「Oops」找回刚才' : '语音唤醒已关闭'}` })}
       ${sectionTitle('接着聊', '全部', 'go', 'data-route="sessions"')}
       <div class="home-recent">
@@ -614,8 +629,6 @@
     const covered = (a.items || []).filter((i) => i.coveredMs > 0).length;
     const w = warnings();
     return `<div class="stack sessions-feature">${heading}${stage}
-      ${p0Grid([['check-circle', '本场纪要', 'commitments-open'], ['bell', notices ? `会议提醒 ${notices}` : '会议提醒', 'notices-open'],
-        ['list-checks', '议程与时间', 'agenda-open'], ['folder-simple', S.liveProject ? `项目：${S.liveProject}` : '所属项目', 'live-project']])}
       <div class="session-recording"><span class="recording-dot ${s.capturing && s.sourceReady ? '' : 'idle'}"></span>
         <div><strong id="live-rec-title">${esc(liveStatus()[0])}</strong><small id="live-rec-sub">${esc(liveDetail())}</small>
           <small class="live-warn" id="live-warn" ${w.length ? '' : 'hidden'}>${esc(w.join('；'))}</small></div>
@@ -625,8 +638,13 @@
         <button data-act="tab" data-tab="actions">${icon('check-square')}<strong>本次行动 ${counts.commitment || 0}</strong></button></div>
       ${listRow({ act: 'agenda-open', ic: 'list-checks', title: '本次议程', sub: a.goal || a.items?.length
         ? `${covered}/${a.items?.length || 0} 项已讨论 · ${current?.title || a.goal || '等待讨论'}${a.plannedMs ? ` · 计划 ${clock(a.plannedMs)}` : ''}` : '没有预设议题，也可以继续记录' })}
-      ${sectionTitle('本次讨论', '完整原文', 'tab', 'data-tab="transcript"')}
+      ${current ? `<div class="native-current-topic"><small>当前议题</small><strong>${esc(current.title)}</strong><span>已讨论不代表结论已确认</span></div>` : ''}
+      ${sectionTitle('本次发现', '查看全部', 'commitments-open')}
+      ${[...(S.summary.decisions || []), ...(S.summary.constraints || []), ...(S.summary.ideas || [])].slice(0, 3).map(u => listRow({act: 'commitment-open', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'decision' ? 'check-circle' : 'sparkle', title: u.text, sub: `${hms(u.startMs ?? u.start_ms)} · ${speakerLabel(u.manualSpeaker || u.speaker) || '说话人待确认'} · 待核对`})).join('') || '<p class="meta">有新的决定、约束或想法时会整理在这里。原话仍可单独查看。</p>'}
+      ${sectionTitle('最近原话', '完整原文', 'tab', 'data-tab="transcript"')}
       <div class="stack live-recent" id="live-recent"></div>
+      ${p0Grid([['check-circle', '本场纪要', 'commitments-open'], ['bell', notices ? `会议提醒 ${notices}` : '会议提醒', 'notices-open'],
+        ['list-checks', '议程与时间', 'agenda-open'], ['folder-simple', S.liveProject ? `项目：${S.liveProject}` : '所属项目', 'live-project']])}
       <div class="action-grid">
         <button class="button secondary" type="button" data-act="ask-open">${icon('magnifying-glass')}<span>问本场</span></button>
         <button class="button secondary" type="button" data-act="saved-list">${icon('bookmark-simple')}<span>已保存 ${s.savedCount ?? 0}</span></button></div>
@@ -697,10 +715,10 @@
       <div class="stack session-overview">
         <section class="card session-result-card">
           <div class="session-task-top"><span class="badge gray">${pending ? `仍有${pending}项待核对` : '已全部核对'}</span><button class="text-action" data-act="review-start" data-id="${esc(h.session_id)}">核对</button></div>
+          ${unconfirmed.length ? `<h3>Oops 整理出的候选</h3><p class="meta">逐条核对后，才成为本次确认的结论。</p>${unconfirmed.slice(0, 5).map(u => listRow({act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'constraint' ? 'flag' : 'check-circle', title: u.text, sub: `${hms(u.start_ms)} · ${u.review?.speaker || speakerLabel(u.speaker) || '说话人待确认'} · 待核对`})).join('')}${unconfirmed.length > 5 ? `<button class="text-action" data-act="review-start" data-id="${esc(h.session_id)}">查看全部 ${unconfirmed.length} 项候选</button>` : ''}` : ''}
           <h3>本次确认的结论</h3>
           ${confirmed.length ? confirmed.map((u) => `<p class="confirmed-line"><span class="badge ${u.tag === 'constraint' ? 'gray' : 'green'}">${u.tag === 'constraint' ? '约束' : '决定'}</span> ${esc(u.text)}</p>`).join('')
             : '<p class="meta">还没有人工确认的结论。会后核对里点「是决定」后会出现在这里，并用于之后开会时的冲突提醒。</p>'}
-          ${unconfirmed.length ? `<details class="session-details"><summary>已有整理 · 尚待核对</summary>${unconfirmed.map((u) => `<p>${esc(u.text)}</p>`).join('')}</details>` : ''}
         </section>
         ${sectionTitle('下一步行动')}
         ${todos.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,

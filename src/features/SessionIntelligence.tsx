@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useOops, type AppData, type Session } from '../store';
 import { Avatar, Badge, Button, Card, Check, Empty, Field, Icon, Notice, Row, SectionTitle, Sheet, Source, Tabs } from '../ui';
 import { useViewState } from '../viewState';
@@ -23,6 +23,8 @@ export function SessionIntelligence({ session }: { session: Session }) {
   const [editing, setEditing] = useState(false);
   const [configuration, setConfiguration] = useState(false);
   const [error, setError] = useState('');
+  const openedRoute = useRef('');
+  const sourceBasis = JSON.stringify([current?.transcript, current?.agenda, data.settings.retention[`agenda-${session.id}`], current?.status]);
   const [draft, setDraft] = useViewState(`intelligence-draft:${session.id}:${kind}:${data.settings.space}`, { id: '', text: '' });
   const context = readPersonalContext(data, session.id);
   const plan = readNoticePlan(data, current || session);
@@ -32,9 +34,19 @@ export function SessionIntelligence({ session }: { session: Session }) {
   const safeCount = (current?.transcript || []).filter(turn => !turn.private && turn.text.trim()).length;
 
   useEffect(() => {
-    if (personal && current && !read.generated) update(value => refreshSessionIntelligence(value, session.id, kind));
-  }, [personal, current?.id, session.id, kind, read.generated, update]);
-  useEffect(() => { setOpenId(null); setEditing(false); setConfiguration(false); setError(''); }, [session.id, kind, personal]);
+    if (personal && current) update(value => refreshSessionIntelligence(value, session.id, kind));
+  }, [personal, current?.id, session.id, kind, sourceBasis, read.generated, update]);
+  useEffect(() => { openedRoute.current = ''; setOpenId(null); setEditing(false); setConfiguration(false); setError(''); }, [session.id, kind, personal]);
+  const targeted = read.items.find(value => value.id === route.mode);
+  useEffect(() => {
+    const key = `${session.id}:${kind}:${route.mode || ''}`;
+    if (!personal || !route.mode || !targeted || openedRoute.current === key) return;
+    openedRoute.current = key;
+    if (draft.id !== targeted.id) setDraft({ id: targeted.id, text: targeted.text });
+    setTab(targeted.state === 'accepted' ? '已采纳' : targeted.state === 'rejected' ? '不采纳' : targeted.state === 'deferred' ? '稍后' : ['handled', 'ignored'].includes(targeted.state) ? '已处理' : kind === 'notices' ? '待处理' : '待核对');
+    setOpenId(targeted.id); setEditing(false); setError('');
+  }, [session.id, kind, route.mode, targeted?.id, personal, setDraft, setTab]);
+
 
   function commit(action: (value: AppData) => IntelligenceResult, message: string): boolean {
     const result = action(data);
@@ -72,13 +84,15 @@ export function SessionIntelligence({ session }: { session: Session }) {
       <h2>{title}</h2><p>{kind === 'personal' ? `${context.role} · ${context.focus}` : current.title}</p>
       <div className="intelligence-hero-meta"><span>{kind === 'decisions' ? `${pending}项待核对` : kind === 'notices' ? `${pending}条待处理` : `${safeCount}段可用原话`}</span><Button tone="quiet" icon="arrows-clockwise" onClick={refresh}>{kind === 'notices' ? '重新检查' : '更新整理'}</Button></div>
     </Card>
+    <p className="intelligence-caption intelligence-local-label">本地示例整理 · 保留原话依据</p>
+    {route.mode && read.generated && !targeted && <Notice tone="warning">这条发现的来源已变化，不再显示旧内容。请核对当前结果。</Notice>}
     {read.staleCount > 0 && <Notice tone="warning">{read.staleCount}项内容的来源或关注点已变化。重新整理后再核对。</Notice>}
     {kind === 'understanding' && <div className="intelligence-caption"><Icon name="sparkle" size={15} /><span>会中整理 · 点击卡片核对或修正</span></div>}
     {kind === 'decisions' && <><Tabs items={['待核对', '已采纳', '不采纳']} value={['待核对', '已采纳', '不采纳'].includes(tab) ? tab : '待核对'} onChange={setTab} /><p className="intelligence-caption">逐项采纳后，加入本次确认结论。</p></>}
     {kind === 'notices' && <><Row title="时间与当前议题" subtitle={`${plan.meetingMinutes}分钟会议 · 每个议题${plan.topicMinutes}分钟`} icon="clock" onClick={() => { setPlanDraft({ meeting: String(plan.meetingMinutes), topic: String(plan.topicMinutes), restart: false }); setConfiguration(true); setError(''); }} /><Tabs items={['待处理', '稍后', '已处理']} value={['待处理', '稍后', '已处理'].includes(tab) ? tab : '待处理'} onChange={setTab} /></>}
     {kind === 'personal' && <><div className="intelligence-personal-context"><Avatar name={context.name} /><span><strong>只给我的复盘</strong><small>按本次角色和关注目标整理</small></span><Button tone="quiet" onClick={() => { setContextDraft({ role: context.role, focus: context.focus }); setConfiguration(true); setError(''); }}>调整</Button></div></>}
 
-    {!safeCount ? <Empty title="还没有可整理的原话" body="记录几句话，或添加文字原文后再整理。" action="查看原文" onAction={() => navigate({ view: 'session-detail', id: session.id, mode: '原文' })} icon="quotes" /> : !filtered.length ? <Empty title={kind === 'notices' ? '当前没有待处理提醒' : kind === 'decisions' ? tab === '已采纳' ? '还没有采纳的决定' : tab === '不采纳' ? '还没有不采纳的建议' : '当前没有决定建议' : '还没有整理结果'} body={kind === 'notices' ? '继续记录，或回看议程后重新检查。' : kind === 'decisions' ? '有了决定、方案或结论的原话，再更新整理。' : '按当前可用原话更新整理。'} action={kind === 'notices' ? '查看议程' : '更新整理'} onAction={kind === 'notices' ? () => navigate({ view: 'session-agenda', id: session.id }) : refresh} /> : filtered.map(value => <Card key={value.id} className={`intelligence-result ${value.state !== 'pending' ? 'processed' : ''}`}>
+    {!safeCount ? <Empty title="还没有可整理的原话" body="记录几句话，或添加文字原文后再整理。" action="查看原文" onAction={() => navigate({ view: 'session-detail', id: session.id, mode: '原文' })} icon="quotes" /> : !filtered.length ? <Empty title={kind === 'notices' ? '当前没有待处理提醒' : kind === 'decisions' ? tab === '已采纳' ? '还没有采纳的决定' : tab === '不采纳' ? '还没有不采纳的建议' : '当前没有决定建议' : '还没有整理结果'} body={kind === 'notices' ? '继续记录，或回看议程后重新检查。' : kind === 'decisions' ? '有了决定、方案或结论的原话，再更新整理。' : '按当前可用原话更新整理。'} action={kind === 'notices' ? '查看议程' : '更新整理'} onAction={kind === 'notices' ? () => navigate({ view: 'session-agenda', id: session.id }) : refresh} /> : filtered.map(value => <Card key={value.id} className={`intelligence-result intelligence-result-${value.kind} ${value.state !== 'pending' ? 'processed' : ''}`}>
       <div className="intelligence-result-head"><span className="intelligence-result-symbol"><Icon name={kind === 'notices' ? value.kind.includes('conflict') ? 'warning' : value.kind.includes('time') || value.kind === 'meeting-ending' ? 'clock' : 'bell' : icons[value.kind] || 'sparkle'} size={19} /></span><strong>{kind === 'notices' ? kindNames[value.kind] || '会议提醒' : value.title}</strong>{value.edited ? <Badge tone="gray">已修正</Badge> : value.state !== 'pending' ? <Badge tone={value.state === 'accepted' || value.state === 'handled' ? 'green' : 'gray'}>{kind === 'personal' && value.state === 'accepted' ? '已记录' : stateNames[value.state]}</Badge> : kind === 'decisions' ? <Badge tone="orange">待确认</Badge> : null}</div>
       {kind === 'notices' && <h3>{value.title}</h3>}<p className="intelligence-body">{value.text}</p>
       <div className="intelligence-card-source"><span>{value.sources.filter(ref => ref.kind === 'session').length}段原话依据</span><Button tone="quiet" onClick={() => open(value)}>{kind === 'notices' ? '查看证据' : '查看原话'}</Button></div>
@@ -87,7 +101,7 @@ export function SessionIntelligence({ session }: { session: Session }) {
     {error && !openId && !configuration && <p className="error-text">{error}</p>}
     {kind === 'decisions' && <Row title="手工补充结论" subtitle="写下已经核对的决定或待确认问题" icon="note-pencil" onClick={() => navigate({ view: 'session-review-edit', id: session.id })} />}
     {kind === 'personal' && <Row title="本次确认结论" subtitle="查看本次核对的结论与问题" icon="users-three" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: '概览' })} />}
-    {kind === 'understanding' && <><SectionTitle>接着核对</SectionTitle><Row title="任务建议" subtitle="核对具体要求、负责人、期限与优先级" icon="list-checks" onClick={() => navigate({ view: 'session-task-suggestions', id: session.id })} /><Row title="决定建议" subtitle="逐项确认方案、结论与决定" icon="check-circle" onClick={() => navigate({ view: 'session-decisions', id: session.id })} /><Row title="会议提醒" subtitle="查看偏离、时间与待定问题" icon="bell" onClick={() => navigate({ view: 'session-notices', id: session.id })} /></>}
+    {kind === 'understanding' && <><SectionTitle>接着核对</SectionTitle><Row title="行动草稿" subtitle="核对具体要求、负责人、期限与优先级" icon="list-checks" onClick={() => navigate({ view: 'session-task-suggestions', id: session.id })} /><Row title="决定建议" subtitle="逐项确认方案、结论与决定" icon="check-circle" onClick={() => navigate({ view: 'session-decisions', id: session.id })} /><Row title="会议提醒" subtitle="查看偏离、时间与待定问题" icon="bell" onClick={() => navigate({ view: 'session-notices', id: session.id })} /></>}
     <Button tone="quiet" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: current.status === '进行中' || current.status === '暂停' ? '现场' : '概览' })}>返回本次会话</Button>
 
     <Sheet open={openId !== null} onClose={() => { setOpenId(null); setEditing(false); setError(''); }} title={selected ? editing ? `修正${selected.title}` : kind === 'notices' ? selected.title : '结果与原话' : '来源需要重新核对'}>

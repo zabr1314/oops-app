@@ -1671,7 +1671,7 @@
     "actions": [
       {
         "kind": "click",
-        "name": "核对并整理",
+        "name": "核对并建立任务",
         "exact": true,
         "role": "button",
         "nth": 2
@@ -1714,7 +1714,7 @@
     "actions": [
       {
         "kind": "click",
-        "name": "核对并整理",
+        "name": "核对并建立任务",
         "exact": true,
         "role": "button",
         "nth": 2
@@ -1771,5 +1771,119 @@
       "mode": "board-p0-feishu-receipt"
     },
     "scene": "p0-feishu-receipt"
+  },
+  {
+    "key": "f01-home-recording",
+    "title": "首页 · 记录中与真实工作阶段",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "recording"
+  },
+  {
+    "key": "f02-home-paused",
+    "title": "首页 · 暂停后的继续与结束",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "paused"
+  },
+  {
+    "key": "f03-home-device",
+    "title": "首页 · 紧凑设备状态",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "devices"
+  },
+  {
+    "key": "f04-tasks-date-filter",
+    "title": "任务 · 日期与状态独立筛选",
+    "group": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "具体日期",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "具体日期",
+        "value": "2026-10-12",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "f05-preference-custom",
+    "title": "助理偏好 · 自定义方式与长度",
+    "group": "我的",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "回答方式",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "我希望怎样回答",
+        "value": "先给三个要点，再列出不确定的地方",
+        "exact": true
+      },
+      {
+        "kind": "select",
+        "label": "回答长度",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "长度要求",
+        "value": "100字以内，需要时再展开",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "f06-preference-draft",
+    "title": "助理偏好 · 可修改的引导草稿",
+    "group": "我的",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "快速整理我的偏好",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "你希望 Oops 怎么回答？",
+        "value": "我时间很紧，先给结论，简短一点",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "整理可修改的偏好草稿",
+        "exact": true,
+        "role": "button"
+      }
+    ]
   }
 ]

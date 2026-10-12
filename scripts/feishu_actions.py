@@ -5,6 +5,7 @@
 """
 import base64
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -116,6 +117,10 @@ def esc(text):
 
 
 # ---- the bot ---------------------------------------------------------------------------------
+
+class MinutesSourceChanged(ValueError):
+    """A historical snapshot must not authorize a new external action."""
+
 
 class Bot:
     def __init__(self, lark, run_lark, dry_run=False, log=print):
@@ -462,8 +467,15 @@ class FeishuActions:
         label = {"decision": "决定", "commitment": "待办", "constraint": "约束"}
         lines = []
         for u in sorted(row["utterances"], key=lambda u: u["start_ms"]):
-            tag = label.get(u.get("tag")) if (u.get("review") or {}).get("verdict") != "rejected" else None
-            lines.append(f"{u['id']} [{self.speaker(u) or '未识别'}] {('[' + tag + '] ') if tag else ''}{u['text']}")
+            review = u.get("review") or {}
+            tag = label.get(u.get("tag")) if review.get("verdict") != "rejected" else None
+            checked = []
+            if review.get("owner"):
+                checked.append(f"人工核对负责人：{review['owner']}")
+            if review.get("verdict") == "rejected":
+                checked.append("人工已驳回该候选，不作为已确定决定、待办或后续安排")
+            lines.append(f"{u['id']} [{self.speaker(u) or '未识别'}] {('[' + tag + '] ') if tag else ''}"
+                         f"{('[' + '；'.join(checked) + '] ') if checked else ''}{u['text']}")
         text = "\n".join(lines)
         return text if len(text) <= limit else text[:limit // 3] + "\n…（中间略）…\n" + text[-limit * 2 // 3:]
 
@@ -472,6 +484,47 @@ class FeishuActions:
         return list(dict.fromkeys([n for n in self.people] + ([data["self"]["name"]] if data.get("self") else [])))
 
     MINUTES_VERSION = 2
+
+    @classmethod
+    def minutes_fingerprint(cls, row):
+        """Only substantive input changes, not review timestamps or a repeated sync."""
+        utterances = [dict(id=u["id"], text=u.get("text"), start_ms=u.get("start_ms"), end_ms=u.get("end_ms"),
+                           speaker=u.get("speaker"), tag=u.get("tag"),
+                           review={k: (u.get("review") or {}).get(k) for k in ("speaker", "owner", "verdict")
+                                   if (u.get("review") or {}).get(k) is not None})
+                      for u in sorted(row["utterances"], key=lambda value: (value["start_ms"], value["id"]))]
+        body = dict(started_at=row.get("started_at"), time_zone=row.get("time_zone"), utterances=utterances)
+        return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    def invalidate_minutes(self, sid):
+        """Withdraw further use, retaining sent cards, documents and the cached historical body."""
+        with self.state.lock:
+            if self.state.get("meetings", sid, "analysis"):
+                self.state.put(True, "meetings", sid, "analysis_invalidated")
+
+    def minutes_current(self, row):
+        sid = row["session_id"]
+        if self.state.get("meetings", sid, "analysis_invalidated"):
+            return False
+        fingerprint = self.state.get("meetings", sid, "analysis_fingerprint")
+        if fingerprint:
+            return fingerprint == self.minutes_fingerprint(row)
+        # Legacy caches have no evidence snapshot: do not guess whether a manual
+        # correction happened before or after generation. Unreviewed legacy data
+        # retains its previous read behavior without silently adopting corrections.
+        return not any(any((u.get("review") or {}).get(k) is not None for k in ("speaker", "owner", "verdict"))
+                       for u in row["utterances"])
+
+    def current_minutes(self, sid, allow_empty=False):
+        row = self.backend.meetings.load(sid)
+        analysis = self.state.get("meetings", sid, "analysis")
+        # Existing PPT/report buttons can prepare from current raw text before
+        # minutes exist. This is not permission to reuse a stale cached body.
+        if not analysis and allow_empty and not self.state.get("meetings", sid, "analysis_invalidated"):
+            return row, {}
+        if not analysis or not self.minutes_current(row):
+            raise MinutesSourceChanged("纪要依据已变化，请先核对当前会议；旧纪要不能继续用于此操作")
+        return row, analysis
 
     def analyse(self, row):
         """The model's minutes, kept only where each item points at sentences that exist."""
@@ -488,19 +541,22 @@ class FeishuActions:
         answer, _ = resolver.complete_json(MINUTES_PROMPT, head + self.transcript(row), timeout=120)
         ids = {u["id"]: u for u in row["utterances"]}
 
-        def backed(item):
+        def backed(item, actionable=False):
             found = [i for i in (item.get("ids") or []) if isinstance(i, str) and i in ids] if isinstance(item, dict) else []
+            if actionable and any((ids[i].get("review") or {}).get("verdict") == "rejected" for i in found):
+                return []
             return found
 
         def clean(value, limit):
             return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
         for d in answer.get("decisions") or []:
-            if backed(d) and clean(d.get("text"), 120):
+            if backed(d, actionable=True) and clean(d.get("text"), 120):
                 result["decisions"].append(dict(text=clean(d["text"], 120), ids=backed(d)))
         for a in answer.get("actions") or []:
-            if backed(a) and clean(a.get("task"), 120):
-                owner = clean(a.get("owner"), 10)
+            if backed(a, actionable=True) and clean(a.get("task"), 120):
+                reviewed_owners = {ids[i]["review"]["owner"] for i in backed(a) if (ids[i].get("review") or {}).get("owner")}
+                owner = next(iter(reviewed_owners)) if len(reviewed_owners) == 1 else "" if reviewed_owners else clean(a.get("owner"), 10)
                 result["actions"].append(dict(owner=owner if owner in team else "", task=clean(a["task"], 120),
                                               due=clean(a.get("due"), 20), ids=backed(a)))
         for t in (answer.get("topics") or [])[:4]:
@@ -516,7 +572,7 @@ class FeishuActions:
                 begin = dt.datetime.fromisoformat(str(f["start"])).replace(tzinfo=zone)
             except (KeyError, ValueError, TypeError):
                 continue
-            if begin < now_utc() or not backed(f):
+            if begin < now_utc() or not backed(f, actionable=True):
                 continue
             minutes = f.get("minutes") if isinstance(f.get("minutes"), int) and 10 <= f["minutes"] <= 240 else 30
             result["follow_ups"].append(dict(title=clean(f.get("title"), 40) or "跟进会议", start=begin.isoformat(), minutes=minutes,
@@ -533,6 +589,10 @@ class FeishuActions:
         sid = row["session_id"]
         analysis = self.state.get("meetings", sid, "analysis")
         if analysis:
+            if not self.minutes_current(row):
+                return dict(status="unavailable", reason="source_changed",
+                            message="说话人、负责人或核对结论已变化。旧纪要仅保留为历史，当前未重新生成；请使用已核对的会议要点继续处理。",
+                            historical_doc_url=self.state.get("meetings", sid, "doc_url"))
             ids = {u["id"]: u for u in row["utterances"]}
             cited = [i for item in analysis.get("decisions", []) + analysis.get("actions", []) for i in item.get("ids", [])]
             cited += [q["id"] for q in analysis.get("open_questions", []) if q.get("id")]
@@ -620,10 +680,24 @@ class FeishuActions:
         title = row.get("display_title") or "会议"
         recipients = self.participants(row)
         analysis = self.state.get("meetings", sid, "analysis")
+        if analysis and not self.minutes_current(self.backend.meetings.load(sid)):
+            self.log(f"meeting {sid[:8]} minutes source changed; retained as history without resending")
+            return
         if not analysis or analysis.get("version") != self.MINUTES_VERSION:
+            fingerprint = self.minutes_fingerprint(row)
             started = time.monotonic()
             analysis = self.analyse(row)
-            self.state.put(analysis, "meetings", sid, "analysis")
+            with self.backend.meetings.lock:
+                current = self.backend.meetings.load(sid)
+                changed = fingerprint != self.minutes_fingerprint(current)
+                with self.state.lock:
+                    self.state.put(analysis, "meetings", sid, "analysis")
+                    self.state.put(fingerprint, "meetings", sid, "analysis_fingerprint")
+                    if changed:
+                        self.state.put(True, "meetings", sid, "analysis_invalidated")
+                if changed:
+                    self.log(f"meeting {sid[:8]} changed while writing minutes; historical result not sent")
+                    return
             self.log(f"meeting {sid[:8]} minutes「{title}」 {int(time.monotonic() - started)}s: decisions={len(analysis['decisions'])} "
                      f"actions={len(analysis['actions'])} topics={len(analysis['topics'])} questions={len(analysis['open_questions'])} "
                      f"follow_ups={len(analysis['follow_ups'])}")
@@ -633,8 +707,10 @@ class FeishuActions:
             return
         doc_url = self.state.get("meetings", sid, "doc_url")
         if not doc_url:
+            self.current_minutes(sid)
             doc_id, doc_url = self.bot.doc(f"会议纪要 · {title}", self.minutes_markdown(row, analysis))
             if doc_id:
+                self.current_minutes(sid)
                 self.bot.share(doc_id, "docx", recipients)
                 self.state.put(doc_url, "meetings", sid, "doc_url")
                 self.log(f"meeting {sid[:8]} minutes doc shared with {len(recipients)}")
@@ -643,6 +719,7 @@ class FeishuActions:
         for open_id in recipients:
             if self.state.get("meetings", sid, "sent", open_id):
                 continue
+            self.current_minutes(sid)
             self.bot.dm_card(open_id, self.summary_card(row, analysis, doc_url, self.name_of(open_id)), f"m{self.MINUTES_VERSION}-{sid[:22]}-{open_id[-12:]}")
             self.state.put(True, "meetings", sid, "sent", open_id)
             self.log(f"meeting {sid[:8]} card → {self.name_of(open_id) or open_id[-6:]}")
@@ -652,6 +729,8 @@ class FeishuActions:
     def ledger_safe(self, sid, row=None, doc_url=None, analysis=None):
         """The ledger is extra: a failure never holds back the cards, and is retried on its own with backoff."""
         try:
+            if not self.minutes_current(self.backend.meetings.load(sid)):
+                return
             if row is None:
                 row = self.titled(self.backend.meetings.load(sid))
                 doc_url, analysis = self.state.get("meetings", sid, "doc_url"), self.state.get("meetings", sid, "analysis")
@@ -731,6 +810,7 @@ class FeishuActions:
 
     def ledger(self, row, doc_url, analysis):
         """Rows per table, each table marked once written, so a retry never adds a meeting twice."""
+        self.current_minutes(row["session_id"])
         base = self.ledger_base()
         sid = row["session_id"]
         title = row.get("display_title") or "会议"
@@ -748,6 +828,7 @@ class FeishuActions:
         for table, rows in tables.items():
             if not rows or self.state.get("meetings", sid, "ledger_tables", table):
                 continue
+            self.current_minutes(sid)
             self.bot.run(["base", "+record-batch-create", "--base-token", base["token"], "--table-id", table,
                           "--json", json.dumps({"fields": LEDGER_TABLES[table], "rows": rows}, ensure_ascii=False)], timeout=60)
             self.state.put(True, "meetings", sid, "ledger_tables", table)
@@ -943,12 +1024,11 @@ class FeishuActions:
         if made:
             self.bot.dm_text(user, f"这个日程已经建好了：{made.get('url') or made.get('summary')}", f"ce-{sid[:20]}-{i}-{user[-8:]}")
             return
-        analysis = self.state.get("meetings", sid, "analysis") or {}
+        row, analysis = self.current_minutes(sid)
         follow = (analysis.get("follow_ups") or [None] * (i + 1))[i] if i < len(analysis.get("follow_ups") or []) else None
         if not follow:
             self.bot.dm_text(user, "找不到这条跟进安排，可能会议已被删除。", f"cx-{sid[:20]}-{i}")
             return
-        row = self.backend.meetings.load(sid)
         start = parse_ts(follow["start"])
         # The person who clicked and whoever was named for the follow-up; nobody named → the meeting's participants.
         named = [self.open_id(a) for a in follow["attendees"]]
@@ -964,10 +1044,10 @@ class FeishuActions:
         self.log(f"calendar {sid[:8]}:{i} created, link={'yes' if url else 'no'}")
 
     def hand_to_mac(self, kind, sid, i, user, event_id=""):
-        row = self.backend.meetings.load(sid)
+        row, analysis = self.current_minutes(sid, allow_empty=kind in ("ppt", "report"))
         title = row.get("display_title") or "会议"
         if kind == "research":
-            questions = (self.state.get("meetings", sid, "analysis") or {}).get("open_questions") or []
+            questions = analysis.get("open_questions") or []
             if i is None or int(i) >= len(questions):
                 self.bot.dm_text(user, "找不到这个问题，可能会议已被删除。", f"rx-{sid[:20]}-{i}")
                 return
@@ -976,13 +1056,14 @@ class FeishuActions:
             # The same sentence may already have been looked up automatically during the meeting.
             key = f"q-{sid}-{q['id']}" if q.get("id") else f"r-{sid}-{i}"
         else:
-            analysis = self.state.get("meetings", sid, "analysis") or {}
             notes = ([analysis["overview"]] if analysis.get("overview") else []) + \
                 [f"决定：{d['text']}" for d in analysis.get("decisions", [])] + \
                 [f"待办：{(a['owner'] + '：') if a['owner'] else ''}{a['task']}{('（' + a['due'] + '）') if a['due'] else ''}" for a in analysis.get("actions", [])] + \
                 [f"{t['topic']}：{'；'.join(t['points'])}" for t in analysis.get("topics", [])]
             payload = dict(session_id=sid, title=title, summary=notes, transcript=self.transcript(row, 14000))
             key = f"{kind}-{sid}"
+        if analysis:
+            payload["minutes_source_fingerprint"] = self.minutes_fingerprint(row)
         with self.jobs.lock:
             job, new = self.jobs.add(kind, payload, [user], key=key)
             if not new and user not in job["requesters"]:
@@ -999,6 +1080,36 @@ class FeishuActions:
 
     # results from the Mac helper ---------------------------------------------------------
 
+    def current_job_minutes(self, job):
+        """Manual card work must still refer to the minutes that supplied its input."""
+        payload = job.get("payload") or {}
+        sid = payload.get("session_id")
+        # Automatic in-meeting look-ups retain their existing, independent rules.
+        if not sid or payload.get("auto"):
+            return
+        fingerprint = payload.get("minutes_source_fingerprint")
+        if fingerprint:
+            row, _ = self.current_minutes(sid)
+            if fingerprint != self.minutes_fingerprint(row):
+                raise MinutesSourceChanged("纪要依据已变化，旧纪要生成的成果不能继续交付")
+        elif self.state.get("meetings", sid, "analysis"):
+            # Pending manual work from an older server has no marker. A stale
+            # cache is enough to stop it, without changing raw-text-only work.
+            self.current_minutes(sid)
+
+    def stop_stale_job(self, job):
+        try:
+            self.current_job_minutes(job)
+        except (ValueError, FileNotFoundError) as error:
+            with self.jobs.lock:
+                job = self.jobs.load(job["id"])
+                job.update(status="failed", finished_at=now_utc().isoformat(), error=str(error)[:300],
+                           reason="source_changed")
+                self.jobs.save(job)
+            self.log(f"agent job {job['id'][:8]} source changed; pending result not delivered")
+            return True
+        return False
+
     def job_result(self, job_id, body):
         """Accepted at once; the document and messages go out in the background, which can take longer than the helper waits."""
         with self.jobs.lock:
@@ -1006,6 +1117,8 @@ class FeishuActions:
             if job["status"] != "running":
                 raise ValueError("任务不在进行中")
             ok = body.get("ok") is True
+            if ok and self.stop_stale_job(job):
+                return dict(status="failed", reason="source_changed")
             job.update(status="delivering" if ok else "failed", finished_at=now_utc().isoformat(),
                        title=str(body.get("title") or "")[:80] or JOB_TITLES[job["kind"]],
                        error=None if ok else str(body.get("error") or "未知错误")[:300])
@@ -1021,19 +1134,23 @@ class FeishuActions:
         url = None
         markdown = str(body.get("markdown") or "")[:200_000]
         try:
+            self.current_job_minutes(job)
             if markdown:
+                doc_id = None
                 try:
                     doc_id, url = self.bot.doc(job["title"], markdown)
-                    if doc_id:
-                        self.bot.share(doc_id, "docx", job["requesters"] + [self.self_id()])
                 except Exception as error:  # noqa: BLE001 - the result still goes out, as a file
                     self.log(f"agent job {job_id[:8]} doc failed, sending the text as a file: {str(error)[:200]}")
                     folder = os.path.join(self.jobs.dir, "files", job_id)
                     os.makedirs(folder, mode=0o700, exist_ok=True)
                     with open(os.path.join(folder, "结果.md"), "w", encoding="utf-8") as f:
                         f.write(markdown)
+                self.current_job_minutes(job)
+                if doc_id:
+                    self.bot.share(doc_id, "docx", job["requesters"] + [self.self_id()])
             with self.jobs.lock:  # requesters may have been added while the document was being made
                 job = self.jobs.load(job_id)
+                self.current_job_minutes(job)
                 job.update(status="done", doc_url=url, brief=str(body.get("brief") or "")[:600])
                 self.jobs.save(job)
             files = self.send_result(job, job["requesters"], "jd")
@@ -1041,16 +1158,24 @@ class FeishuActions:
         except Exception as error:  # noqa: BLE001
             with self.jobs.lock:
                 job = self.jobs.load(job_id)
-                job.update(status="failed", error=f"结果没能发出：{str(error)[:200]}")
-                self.jobs.save(job)
+                # A correction between recipient messages stops the remaining
+                # delivery, without turning already completed history into a
+                # failed/retryable job or erasing its document/file references.
+                if not (isinstance(error, MinutesSourceChanged) and job["status"] == "done"):
+                    job.update(status="failed", error=f"结果没能发出：{str(error)[:200]}")
+                    if isinstance(error, MinutesSourceChanged):
+                        job["reason"] = "source_changed"
+                    self.jobs.save(job)
             self.log(f"agent job {job_id[:8]} delivery failed: {type(error).__name__}: {str(error)[:200]}")
 
     def send_result(self, job, users, tag):
         """The result card, then each file; returns how many files there were."""
+        self.current_job_minutes(job)
         folder = os.path.join(self.jobs.dir, "files", job["id"])
         files = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
         url = job.get("doc_url")
         for user in users:
+            self.current_job_minutes(job)
             elements = []
             if job["kind"] == "research":
                 elements.append(md(f"**问题**：{esc(job['payload']['question'])}"))
@@ -1066,6 +1191,7 @@ class FeishuActions:
             self.bot.dm_card(user, card(f"{head} · {job['title']}", elements or [md("已完成。")], "turquoise"),
                              f"{tag}-{job['id'][:12]}-{user[-8:]}")
             for n, name in enumerate(files):
+                self.current_job_minutes(job)
                 self.bot.dm_file(user, os.path.join(folder, name), f"{tag}{n}-{job['id'][:12]}-{user[-8:]}")
         return len(files)
 
@@ -1081,6 +1207,8 @@ class FeishuActions:
     def agent_call(self, action, body, job_id=None):
         if action == "poll":
             job = self.jobs.take(body.get("agent", "mac"), min(float(body.get("wait", 10)), 10.0))
+            if job and self.stop_stale_job(job):
+                return dict(job=None)
             return dict(job=job and {k: job[k] for k in ("id", "kind", "payload", "attempts")})
         if action == "chunk":
             return self.jobs.add_chunk(job_id, str(body.get("name", "")), int(body.get("offset", -1)), base64.b64decode(body.get("data", "")))

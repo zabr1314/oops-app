@@ -1,7 +1,7 @@
 [
   {
     "id": "H01",
-    "title": "今天想一起解决什么？",
+    "title": "首页 · 开始记录与问 Oops",
     "module": "首页",
     "route": {
       "view": "home"
@@ -1959,5 +1959,134 @@
     "scene": "p0-feishu-receipt",
     "shot": "p41-task-receipt-feishu",
     "note": "由真实日程确认逻辑形成的前端示例回执，固定当次正文、附件版本及飞书工作日历；后续修改草稿不会覆盖回执。未写入真实日历。"
+  },
+  {
+    "id": "F01",
+    "title": "首页 · 记录中与真实工作阶段",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "recording",
+    "shot": "f01-home-recording",
+    "actions": [],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F02",
+    "title": "首页 · 暂停后的继续与结束",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "paused",
+    "shot": "f02-home-paused",
+    "actions": [],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F03",
+    "title": "首页 · 紧凑设备状态",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "devices",
+    "shot": "f03-home-device",
+    "actions": [],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F04",
+    "title": "任务 · 日期与状态独立筛选",
+    "module": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "default",
+    "shot": "f04-tasks-date-filter",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "具体日期",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "具体日期",
+        "value": "2026-10-12",
+        "exact": true
+      }
+    ],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F05",
+    "title": "助理偏好 · 自定义方式与长度",
+    "module": "我的",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "shot": "f05-preference-custom",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "回答方式",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "我希望怎样回答",
+        "value": "先给三个要点，再列出不确定的地方",
+        "exact": true
+      },
+      {
+        "kind": "select",
+        "label": "回答长度",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "长度要求",
+        "value": "100字以内，需要时再展开",
+        "exact": true
+      }
+    ],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F06",
+    "title": "助理偏好 · 可修改的引导草稿",
+    "module": "我的",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "shot": "f06-preference-draft",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "快速整理我的偏好",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "你希望 Oops 怎么回答？",
+        "value": "我时间很紧，先给结论，简短一点",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "整理可修改的偏好草稿",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
   }
 ]

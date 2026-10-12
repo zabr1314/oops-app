@@ -1328,7 +1328,12 @@ class Backend:
             if action == 'rename': return self.meetings.rename(body)
             if action == 'project': return self.meetings.set_project(body)
             if action == 'review':
-                result = self.meetings.review(body)
+                with self.meetings.lock:
+                    before = self.meetings.load(body.get('session_id'))
+                    result = self.meetings.review(body)
+                    feishu = getattr(self, 'feishu', None)
+                    if feishu and feishu.minutes_fingerprint(before) != feishu.minutes_fingerprint(self.meetings.load(body.get('session_id'))):
+                        feishu.invalidate_minutes(body.get('session_id'))
                 self.remember_review(body)
                 return result
             if action == 'search':

@@ -89,3 +89,18 @@ body { -webkit-tap-highlight-color: transparent; }
 .oops-root .rc-scene::after, #rc .rc-actions button::after, .oops-root .session-more::after {
   content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .oops-root .sheet-handle-zone { min-height: 44px; }
+
+/* The native view uses the existing capture/state and meeting-digest contracts. */
+.home-positioning { margin: 6px 0 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.native-record-hero { padding: 18px; border: 1px solid #e8e0f8; border-radius: 24px; background: linear-gradient(145deg, #fff, #f3edff); }
+.native-record-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.native-record-heading > div { flex: 1; min-width: 0; }
+.native-record-heading small { color: var(--muted); font-size: 12px; }
+.native-record-heading h1 { margin: 8px 0 0; color: var(--ink); font-size: 25px; line-height: 1.4; overflow-wrap: anywhere; }
+.native-record-heading img { width: 88px; flex: none; }
+.native-record-status { display: flex; align-items: center; gap: 8px; }
+.native-record-status time { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 24px; color: var(--brand); }
+.native-record-hero .record-under { margin-bottom: 0; }
+.native-current-topic { display: grid; gap: 6px; padding: 14px 16px; border-left: 3px solid var(--brand); background: var(--soft); border-radius: 12px; }
+.native-current-topic small, .native-current-topic span { color: var(--muted); font-size: 12px; }
+.session-result-card > h3 { margin-top: 18px; }

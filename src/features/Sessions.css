@@ -132,3 +132,76 @@
 .session-p0-entry { padding: 8px; }
 .session-p0-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
 .session-p0-grid button { display: flex; gap: 8px; align-items: center; justify-content: flex-start; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 12px; background: #f5f1fe; color: #6951ba; font-size: 13px; font-weight: 650; }
+
+/* Conversation hierarchy: record status, current topic, then candidate results. */
+.session-record-card { padding: 17px; }
+.session-record-open { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 0; color: var(--ink); }
+.session-record-open h3 { margin: 11px 0 6px; padding-right: 20px; line-height: 1.4; }
+.session-record-open .meta { margin: 0 0 13px; }
+.session-topic-link { width: 100%; display: flex; align-items: flex-start; gap: 6px; border: 0; background: #f7f3ff; color: #655289; padding: 9px 10px; border-radius: 10px; text-align: left; font-size: 12px; line-height: 1.5; }
+.session-topic-link span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.session-topic-link .icon { flex: none; margin-top: 2px; }
+.session-result-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.session-result-tags button { border: 1px solid #e8e0f3; background: white; border-radius: 8px; color: #6e5a8c; padding: 6px 8px; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
+.session-result-tags b { font-size: 11px; color: var(--brand); }
+.session-pending-links { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 10px 0 0; font-size: 11px; }
+.session-pending-links > span { color: #a37843; margin-right: 2px; }
+.session-pending-links button { display: inline-flex; align-items: center; gap: 3px; padding: 6px 7px; background: #fff8ec; border: 0; border-radius: 7px; color: #92692e; font-size: 11px; }
+.session-record-card .session-card-bottom { margin-top: 14px; align-items: center; gap: 8px; }
+.session-card-bottom > span { min-width: 0; overflow-wrap: anywhere; }
+.session-card-bottom button { display: inline-flex; align-items: center; gap: 3px; flex: none; color: var(--brand); border: 0; background: transparent; font-size: 11px; font-weight: 600; padding: 4px 0; }
+.session-recording-compact { border: 0; background: transparent; padding: 2px 3px; border-radius: 0; }
+.session-recording-compact > div { flex: 1; }
+.session-recording-compact small { font-size: 10px; margin-top: 3px; }
+.session-recording-compact > button { display: flex; align-items: center; gap: 5px; border: 0; background: #f0eafa; padding: 7px 9px; border-radius: 9px; font-size: 11px; color: #73608e; }
+.session-current-topic { padding: 18px; background: linear-gradient(135deg, #eee7fd, #f9f6ff); border-color: #ded1f5; }
+.session-topic-eyebrow { display: flex; justify-content: space-between; gap: 8px; align-items: center; color: #7f66a7; font-size: 11px; }
+.session-topic-eyebrow > span { letter-spacing: .5px; font-weight: 650; }
+.session-topic-eyebrow button { display: flex; align-items: center; gap: 3px; padding: 3px 0 3px 7px; border: 0; background: transparent; color: #7a5baf; font-size: 11px; }
+.session-current-topic h3 { font-size: 21px; line-height: 1.4; margin: 11px 0 13px; color: #382553; overflow-wrap: anywhere; }
+.session-agenda-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 10px; color: #82718e; }
+.session-agenda-progress strong { color: #6e4aab; font-weight: 650; }
+.session-agenda-progress > span:last-child { width: 100%; margin-top: 2px; line-height: 1.5; overflow-wrap: anywhere; }
+.session-topic-detail { margin-top: 14px; padding: 0; display: inline-flex; gap: 5px; align-items: center; background: transparent; border: 0; color: #7950bc; font-size: 11px; }
+.session-findings .section-title { margin: 3px 0 5px; }
+.session-findings .section-title h2 { font-size: 17px; letter-spacing: -.25px; }
+.session-findings-caption { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 10px; color: #978ca7; margin: 0 0 12px; line-height: 1.5; }
+.session-findings-caption button { display: flex; align-items: center; gap: 2px; padding: 3px 0 3px 6px; flex: none; border: 0; background: transparent; color: #80659f; font-size: 10px; }
+.session-findings-card { padding: 2px 14px; border-color: #e9e2f2; }
+.session-finding { width: 100%; display: flex; align-items: flex-start; gap: 8px; padding: 15px 0; text-align: left; border: 0; border-bottom: 1px solid #f0ebf6; background: transparent; color: #49365e; }
+.session-finding:last-child { border-bottom: 0; }
+.session-finding > span:not(.badge) { min-width: 0; flex: 1; font-size: 13px; font-weight: 550; line-height: 1.65; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.session-finding .badge { flex: none; margin-top: 3px; }
+.session-finding .icon { flex: none; margin-top: 5px; }
+.session-findings-empty { font-size: 12px; line-height: 1.7; color: #8f819f; background: #faf8fd; border-radius: 12px; padding: 13px; margin: 0; }
+.session-result-links { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 14px; margin-top: 12px; }
+.session-result-links button { padding: 4px 0; background: transparent; border: 0; font-size: 11px; color: #7f5ea9; }
+.session-chapter-caption { margin: -6px 0 0; font-size: 10px; color: #a297ae; line-height: 1.6; }
+.session-chapter { border: 1px solid #e9e3f0; border-radius: 15px; background: white; }
+.session-chapter.current { border-color: #d2bdef; }
+.session-chapter > summary { list-style: none; padding: 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.session-chapter > summary::-webkit-details-marker { display: none; }
+.session-chapter > summary > span:first-child { min-width: 0; flex: 1; }
+.session-chapter > summary strong { display: block; font-size: 13px; color: #51405f; line-height: 1.5; overflow-wrap: anywhere; }
+.session-chapter > summary small { display: block; font-size: 10px; color: #a092ab; margin-top: 4px; }
+.session-chapter > summary > .icon { flex: none; transition: transform .15s; }
+.session-chapter[open] > summary > .icon { transform: rotate(180deg); }
+.session-chapter-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 9px; }
+.session-chapter-body .session-transcript { border-radius: 11px; background: #faf8fd; padding: 12px; }
+.session-chapter-body .session-transcript p { font-size: 12px; }
+.session-action-drafts { display: flex; flex-direction: column; gap: 11px; }
+.session-action-drafts .section-title { margin: 0; }
+.session-action-drafts .session-findings-caption { margin: -5px 0 0; }
+.session-action-draft { text-align: left; padding: 16px; background: #faf7ff; border-color: #e5d9f8; }
+.session-action-draft > div { display: flex; justify-content: space-between; align-items: center; }
+.session-action-draft h3 { font-size: 16px; line-height: 1.5; }
+.session-action-draft p { color: #8c7b9d; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; margin: 6px 0 10px; }
+.session-action-draft > span { color: #8355c1; font-size: 11px; font-weight: 600; }
+.session-overview > .session-result-card { background: white; border-color: #e4e0ea; }
+.session-overview > .session-result-card h3 { font-size: 17px; }
+.session-record-open:focus-visible, .session-topic-link:focus-visible, .session-finding:focus-visible, .session-pending-links button:focus-visible, .session-chapter summary:focus-visible { outline: 2px solid #a47bd7; outline-offset: 3px; }
+.session-topic-points { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.session-topic-points li { border-left: 2px solid #b595dd; padding-left: 9px; }
+.session-topic-points small { display: block; color: #a28ab8; font-size: 9px; margin-bottom: 4px; }
+.session-topic-points span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 12px; line-height: 1.7; color: #6c547f; overflow-wrap: anywhere; }
+.session-chapter summary em { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 11px; font-style: normal; color: #877397; line-height: 1.6; margin-top: 7px; overflow-wrap: anywhere; }

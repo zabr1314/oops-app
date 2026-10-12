@@ -279,7 +279,7 @@ pyannote 3.0 局部编号不作为身份，不跨不连续发言共用声纹判�
 | POST /v1/meetings/sync | {session_id,started_at,time_zone,ended_at?,agenda?,utterances:[最多500句],notices:[最多100条]} → {session_id,utterance_count,notice_count} |
 | GET /v1/meetings?limit=30 | limit 1–100 → {count,items:[session_id,started_at,ended_at,goal,utterance_count,digest_counts]} |
 | GET /v1/meetings/{id} | 元数据、按时间排列的 utterances、notices、digest 四类原话、按 operations.request.session_id 关联的 tasks |
-| GET /v1/meetings/{id}/minutes | {session_id,status,reason?,minutes?,sources?,doc_url?}；飞书机器人写好的 AI 纪要，只读，见下 |
+| GET /v1/meetings/{id}/minutes | {session_id,status,reason?,message?,minutes?,sources?,doc_url?,historical_doc_url?}；飞书机器人写好的 AI 纪要，只读，见下 |
 | POST /v1/meetings/search | {query:1–500字} → {items:[id,text,start_ms,end_ms,speaker,tag,session_id,started_at,prob],engine} |
 | POST /v1/meetings/delete | {session_id,confirm:true} → {deleted:true}；重复删除幂等，迟到同步返回 400 |
 | POST /v1/meetings/rename | {session_id,title:0–40字} → {session_id,title,title_source}；空字符串恢复自动名称 |
@@ -293,11 +293,15 @@ pyannote 3.0 局部编号不作为身份，不跨不连续发言共用声纹判�
 - `pending`：`reason` 为 `in_progress`（会议未结束）或 `writing`（已结束，机器人会在结束 90 秒后写，失败按 2、4、8… 分钟重试）。
 - `unavailable`：`reason` 为 `bot_off`（服务器未开 `OOPS_FEISHU_BOT=1`）、`before_bot`（会议在机器人启用前结束，不补写）、`no_end`（旧记录既没有结束时间也没有同步时间，判断不出已结束，机器人不会处理）或 `failed`（连续 6 次失败）。
 
+**核对后的来源一致性（2026-10-12）**：实际修改说话人、负责人、决定核对或来源文字后，旧纪要返回 `status:unavailable, reason:source_changed`，附 `message`；已创建的旧文档仅以 `historical_doc_url` 保留历史入口，不再返回可作为当前结果使用的旧正文。无实质变化的重复核对不使纪要失效。已有发送、日程和工作记录继续保留；不会自动重生成、重发或覆盖外部文档。使用旧纪要的日程、资料整理和 Mac 工作在开始、接收结果及交付前检查来源，变化后停止继续使用；已经完成的外部操作仍显示其历史回执。
+
 会议不存在或已删除返回 404，`id` 不合法返回 400；凭据要求同其他会议接口。
 
 **人工核对（2026-10-09）**：`speaker` ∈ 团队成员或 `other`/`multi`/`unclear`，`owner` ∈ 团队成员，`verdict` ∈ `confirmed`/`rejected`；只改请求里出现的字段，传 `null` 清除该字段，全部清空则删除这条核对。核对单独存在会议文件的 `reviews` 里，同步永远不会覆盖；`GET /v1/meetings/{id}` 把它叠加为每句的 `review` 字段，模型的 `speaker` 原样保留以便对比。会议不存在或已删除返回 404。会议进行中改说话人，服务器本场的任务草稿立即改用人工说话人（优先于句内拆分）找负责人；仍然只是"建议"，不越过负责人验收开关。核对时界面会显示模型猜测，所以这些结果不是盲标，只能进开发集，不能当验收集。
 
 **项目与跨会议冲突（2026-10-09）**：`POST /v1/notices` 的 conflict 判断，本场会议有项目时，取同一项目其他会议里人工确认过的决定和约束（最多 30 条，新会议在前）全部交给 Jev，不再按关键词预选，所以说法不同的矛盾也能找到；项目里还没有确认过的，退回原来的做法（最近 10 场会议、字面相近、未被驳回）。返回的 `with` 增加 `meeting_title` 和 `confirmed`，手机据此显示"可能与已确认的决定冲突""MM/dd《会议名》已确认"或"（未核对）"。
+
+2026-10-12：会议列表的公开 `limit` 仍为 1–100；项目汇总、指定项目详情及跨会议历史先读取完整存档，再按项目和历史规则筛选，不再先截全局最近100场而遗漏老项目。
 
 **会议名称（2026-10-09）**：`GET /v1/meetings/{id}` 返回 `display_title` 和 `title_source`，列表每项返回 `title`/`title_source`。优先级：手动改名（`manual`，存在会议文件 `title`，同步不覆盖）→ 议程目标（`agenda`）→ AI 概括（`generated`）→ 不足 5 句时显示"简短会议"（`short`）→ 按原话自动取（`auto`：第一条未被驳回的决定/待办/约束，人工确认过的优先，去掉"那、就是、嗯"等开头，截 18 字；都没有时取最长一句）→ 无（`none`）。AI 概括：会议有 `ended_at` 或开始超过 3 小时、至少 5 句、没有手动名称和议程目标时，打开会议列表会在后台逐场请求 DeepSeek（整场文字最多 6000 字，标出未驳回的决定/待办/约束），回答 2–16 字才采用，连同当时句数存在会议文件 `auto_title`；句数变化后重新生成，生成期间文字变了则丢弃。没有 DeepSeek 时只用按原话自动取。
 

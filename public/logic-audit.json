@@ -1,9 +1,8 @@
 {
-  "revision": "logic-audit-20261009",
-  "reviewedAt": "2026-10-09",
-  "scope": "29项前端代码路径、状态及跨模块逻辑验收",
-  "browserVerified": false,
-  "browserBlock": "本轮已获用户授权，保存的浏览器权限设置仍阻止站点访问。尚未完成本轮实屏操作与重拍。",
+  "revision": "feedback-20261012",
+  "reviewedAt": "2026-10-12",
+  "scope": "飞书26条意见分项落实、前端联动与后端兼容修复",
+  "browserVerified": true,
   "changedViews": [
     "assistant",
     "session-review",
@@ -19,9 +18,26 @@
     "memory-conflict",
     "memory-project",
     "memory-project-edit",
-    "memory-person-edit"
+    "memory-person-edit",
+    "home",
+    "sessions",
+    "session-detail",
+    "session-task-suggestions",
+    "session-decisions",
+    "session-personal",
+    "tasks",
+    "task-detail",
+    "task-result",
+    "task-plan",
+    "task-send",
+    "task-email",
+    "settings-preferences",
+    "settings-privacy",
+    "memory",
+    "memory-person",
+    "memory-voice"
   ],
-  "screenshotRefreshPending": true,
+  "screenshotRefreshPending": false,
   "fixedIssueGroups": 10,
   "coverage": {
     "localFlow": 20,
@@ -30,10 +46,16 @@
     "total": 29
   },
   "verification": {
-    "logicTestsPassed": 175,
-    "newLogicTests": 32,
+    "logicTestsPassed": 204,
+    "newLogicTests": 29,
     "boardTestsPassed": 6,
     "hostingTestsPassed": 4,
-    "protectedRuntimeFiles": 28
+    "protectedRuntimeFiles": 28,
+    "nativeUITestEntriesPassed": 3,
+    "backendMeetingTestsPassed": 15,
+    "screenshotsCaptured": 155,
+    "interactiveEntries": 178,
+    "backendSourceChangeTestsPassed": 12,
+    "backendFakeFeishuTestsPassed": 11
   }
 }

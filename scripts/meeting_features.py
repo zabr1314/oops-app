@@ -542,6 +542,10 @@ class Meetings:
     def listing(self, limit=30):
         if not 1 <= limit <= 100:
             raise ValueError('limit 必须为 1–100')
+        return self._listing(limit)
+
+    def _listing(self, limit=None):
+        """Internal complete index; project scope must be applied before any presentation limit."""
         with self.lock:
             self.cleanup()
             rows = [self.load(n[:-5]) for n in os.listdir(self.dir) if n.endswith('.json')]
@@ -574,7 +578,7 @@ class Meetings:
         the old keyword-matched pool from the last ten meetings, marked unconfirmed.
         """
         with self.lock:
-            sessions = [s for s in self.listing(100)['items'] if s['session_id'] != sid]
+            sessions = [s for s in self._listing()['items'] if s['session_id'] != sid]
             project = self.project_of(sid)
             def item(s, u, confirmed):
                 return dict(id=f"h:{s['session_id']}:{u['id']}", text=u['text'], start_ms=u['start_ms'], end_ms=u['end_ms'],
@@ -624,7 +628,7 @@ class Meetings:
         """Every project name in use, with how much it holds, most recently active first."""
         with self.lock:
             groups = {}
-            for s in self.listing(100)['items']:
+            for s in self._listing()['items']:
                 if s.get('project'):
                     groups.setdefault(s['project'], []).append(s)
             items = []
@@ -645,7 +649,7 @@ class Meetings:
         if not name:
             raise ValueError('缺少项目名称')
         with self.lock:
-            meetings = [s for s in self.listing(100)['items'] if s.get('project') == name]
+            meetings = [s for s in self._listing()['items'] if s.get('project') == name]
             decisions, unreviewed = [], 0
             for s in meetings:
                 row = self.load(s['session_id'])
