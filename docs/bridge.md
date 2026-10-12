@@ -140,3 +140,9 @@ settings.set 增加 `speakerPreview`，默认 false；state 增加 `speakerPrevi
 - 已提交的行动沿用原操作的服务地址与 op_id，不因切换服务器改投新地址。收音保存规则继续沿用原设置。
 
 公开站 `/native-flow.html` 从当前 Android H5 源文件生成隔离预览，`preview=1` 不读写浏览器保存记录，不连接真实后端，不创建飞书任务。它用于验证界面流程；不代表 APK 已构建或真机验收。
+
+
+## 2026-10-12：本场任务清单
+
+- 原生 → H5 `tasks.board`：`{session_id, tasks:[{id,what,owner,priority,status,sources,reason}], pending, updated_at}`，服务器的实时任务清单（见 api.md「本场实时任务清单」）。`snapshot` 也带 `board`（没有时为 null）。
+- H5 在「行动」页按 P0–P3 分组显示；点任务打开它最后一句出处，沿用 `digest.open` → 生成行动 → `action.confirm`，不自动确认。浏览器模拟在出现待办时发送一份模拟清单。

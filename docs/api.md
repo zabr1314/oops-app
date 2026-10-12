@@ -280,6 +280,7 @@ pyannote 3.0 局部编号不作为身份，不跨不连续发言共用声纹判�
 | GET /v1/meetings?limit=30 | limit 1–100 → {count,items:[session_id,started_at,ended_at,goal,utterance_count,digest_counts]} |
 | GET /v1/meetings/{id} | 元数据、按时间排列的 utterances、notices、digest 四类原话、按 operations.request.session_id 关联的 tasks |
 | GET /v1/meetings/{id}/minutes | {session_id,status,reason?,message?,minutes?,sources?,doc_url?,historical_doc_url?}；飞书机器人写好的 AI 纪要，只读，见下 |
+| GET /v1/meetings/{id}/board | {session_id,tasks:[{id,what,owner,priority:P0–P3,status:open/done/dropped,sources,reason}],updated_at,pending}；本场实时任务清单（2026-10-12），只读，见下 |
 | POST /v1/meetings/search | {query:1–500字} → {items:[id,text,start_ms,end_ms,speaker,tag,session_id,started_at,prob],engine} |
 | POST /v1/meetings/delete | {session_id,confirm:true} → {deleted:true}；重复删除幂等，迟到同步返回 400 |
 | POST /v1/meetings/rename | {session_id,title:0–40字} → {session_id,title,title_source}；空字符串恢复自动名称 |
@@ -339,3 +340,10 @@ App 每场队列绑定开始时的后端；20 秒或累积 30 句发送，同一
 | GET | `/clip?start_ms=A&end_ms=B` | 截取一段原声，返回 `audio/wav`（16 kHz 单声道），前后各多 300 ms；最长 30 秒。还没有录音 404，这一段还没传到 409，参数无效 400 |
 
 已删除会议的编号返回 410，延迟重试不能重建录音。手机只在 `complete` 成功后写 `<id>.uploaded`，只清理已确认上传且超过 7 天（或超出 2 GB）的本地副本；未上传成功的录音永不自动删除。Mac 每晚 03:30 由 `local.oops.archive-pull` 用 rsync 镜像服务器 `recordings/` 与 `meetings/` 到 `/Volumes/GPFS/Users/a1234/oops-archive`（镜像删除）。
+
+
+## 本场实时任务清单（2026-10-12）
+
+`POST /v1/actions/draft` 可带 `"board": true`（App 只在后台取负责人提示时这样做）。服务器把这句补全出的任务交给 `scripts/task_board.py`：和本场已有任务合并、排 P0–P3，或丢弃举例、当场做完的事和空话；随后续对话调整优先级或作废。更新在后台进行，响应里的 `board` 是这句之前的清单，`pending: true` 表示还在整理，App 稍后读 `GET /v1/meetings/{id}/board`。清单存在 `<state>/boards/<session>.json`，重启不丢。
+
+清单只用于展示和排序：建飞书任务仍要从原话生成草稿并由人确认（op_id 规则不变）。会上只请大家确认 P0，其余会后处理。每条任务带原话编号 `sources`；没有出处的任务、不是团队成员的负责人都会被丢掉。

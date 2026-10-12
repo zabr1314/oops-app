@@ -43,6 +43,7 @@ from voiceprint_registry import VoiceprintRegistry, audio_quality, person_profil
 from voiceprint_invites import invite_person
 from recordings import RecordingError, Recordings
 from task_resolver import load_deepseek, owner_for, resolve_all
+import task_board
 from feishu_actions import FeishuActions
 from speaker_attribution import (attribute, calibrated_probability, owner_features, OWNER_EVENT,
                                  SEGMENT_EVENT, consolidate_trial, leading_guess, merge_for_display,
@@ -1175,6 +1176,7 @@ class Backend:
             team=TEAM)
         self.recordings = Recordings(os.path.join(state, "recordings"), deleted=self.meeting_deleted)
         # The Oops bot: private meeting summaries, task notices, follow-up events, the ledger and Mac helper jobs.
+        self.boards = task_board.Boards(os.path.join(state, "boards"), self.resolver, log)
         self.feishu = (FeishuActions(self, state, self.lark, run_lark, log, dry_run=args.feishu == "dry-run")
                        if os.environ.get("OOPS_FEISHU_BOT") == "1" else None)
         self.speakers = Speakers(args.speaker_accept, args.speaker_margin, os.path.join(state, "voiceprints.json"))
@@ -1724,7 +1726,21 @@ class Backend:
                             "clause_speaker": speaker, "due_raw": primary["due_raw"],
                             "other_tasks": [t["what"] for t in tasks[1:]]}
         iso = resolve_date(when.group(0), reference_date(req)) if when else None
-        return {"who": ownership["owner"], **ownership, "what": what, "task_context": task_context,
+        board = None
+        if req.get("board") is True and isinstance(req.get("session_id"), str):
+            # The meeting's running task list (task_board): drafts are folded in on a background thread, so the
+            # list returned here is the one before this sentence; the phone reads GET .../board for the update.
+            boards = getattr(self, "boards", None)
+            if boards:
+                if tasks:
+                    lines = [dict(id=str(u.get("id", "")), text=u.get("text", ""), speaker=u.get("speaker"))
+                             for u in context + utterances if isinstance(u, dict) and u.get("text")]
+                    source = str(tasks[0]["utterance"].get("id", ""))
+                    boards.submit(req["session_id"], [dict(what=t["what"], source=source,
+                                                           owner=(mapped if i == 0 else owner_for(t, None, [])) or "")
+                                                      for i, t in enumerate(tasks)], lines)
+                board = boards.view(req["session_id"])
+        return {"who": ownership["owner"], **ownership, "what": what, "task_context": task_context, **({"board": board} if board else {}),
                 "when": {"iso": iso.isoformat() if iso else None, "raw": when.group(0)} if when else None,
                 "constraint": constraint, "assignee_candidates": TEAM, "timing_ms": {"deepseek_ms": deepseek_ms}}
 
@@ -1998,6 +2014,12 @@ class Handler(BaseHTTPRequestHandler):
                 value = self.backend.recording_call("chunk", m.group(1), name=m.group(2), offset=offset,
                                                     data=self.rfile.read(size), sha=self.headers.get("X-Content-SHA256", ""))
                 summary = f"{m.group(2)} received={value['received']}"
+            elif method == "GET" and re.fullmatch(r"/v1/meetings/[^/]+/board", urlsplit(self.path).path):
+                try:
+                    value = self.backend.boards.view(urlsplit(self.path).path.split("/")[3])
+                except ValueError as error:
+                    raise ApiError(400, 'BAD_REQUEST', str(error)) from None
+                summary = f"board {len(value['tasks'])} tasks"
             elif method == "GET" and re.fullmatch(r"/v1/meetings/[^/]+/minutes", urlsplit(self.path).path):
                 sid = urlsplit(self.path).path.split("/")[3]
                 try:

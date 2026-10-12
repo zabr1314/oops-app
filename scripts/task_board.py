@@ -6,12 +6,16 @@ re-ranked as the conversation moves on. Only P0 asks for confirmation during the
 
 `update(model, board, drafts, context)` returns the new board. Every task keeps the sentence ids it came from;
 a task the model invents without a source, or a merge into a task that does not exist, is ignored.
+`Boards` keeps one board per meeting for the live backend: drafts are queued and folded in on a background thread,
+one batch at a time, and each board is saved under <state>/boards/<session>.json.
 """
 import argparse
+import datetime as dt
 import json
 import os
 import re
 import sys
+import threading
 
 PRIORITIES = ("P0", "P1", "P2", "P3")
 CONTEXT_LINES = 12
@@ -76,6 +80,76 @@ def update(model, board, drafts, context, timeout=40):
         if t["id"] not in seen:
             out.append(dict(t, changed=False))
     return out[:MAX_TASKS]
+
+
+class Boards:
+    """Live boards. `submit` never waits for the model; `view` returns the board as it stands, `pending` while a batch runs."""
+
+    SESSION = re.compile(r"[A-Za-z0-9_-]{8,80}")
+
+    def __init__(self, folder, model, log=print):
+        self.folder, self.model, self.log = folder, model, log
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        self.lock = threading.Lock()
+        self.queues, self.running = {}, set()
+
+    def path(self, sid):
+        if not self.SESSION.fullmatch(sid or ""):
+            raise ValueError("会议编号无效")
+        return os.path.join(self.folder, sid + ".json")
+
+    def view(self, sid):
+        path = self.path(sid)
+        saved = {}
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                saved = json.load(f)
+        with self.lock:
+            pending = sid in self.running or bool(self.queues.get(sid))
+        return dict(session_id=sid, tasks=saved.get("tasks", []), updated_at=saved.get("updated_at"), pending=pending)
+
+    def submit(self, sid, drafts, context):
+        """drafts: [{what, owner, source}] from one sentence; context: the lines around it [{id, text, speaker}]."""
+        self.path(sid)
+        if not drafts or not self.model:
+            return
+        with self.lock:
+            self.queues.setdefault(sid, []).append((drafts, context))
+            if sid in self.running:
+                return
+            self.running.add(sid)
+        threading.Thread(target=self._work, args=(sid,), name=f"board-{sid[:8]}", daemon=True).start()
+
+    def _work(self, sid):
+        try:
+            while True:
+                with self.lock:
+                    batch = self.queues.pop(sid, [])
+                    if not batch:
+                        self.running.discard(sid)
+                        return
+                drafts = [d for ds, _ in batch for d in ds]
+                context, seen = [], set()
+                for _, ctx in batch:  # every sentence the queued drafts were drawn from, once, in order
+                    for u in ctx:
+                        if u.get("id") and u["id"] not in seen:
+                            seen.add(u["id"])
+                            context.append(u)
+                try:
+                    board = update(self.model, self.view(sid)["tasks"], drafts, context[-CONTEXT_LINES * 2:])
+                except Exception as error:  # noqa: BLE001 - the drafts stay in the minutes; the board just misses them
+                    self.log(f"task board {sid[:8]} update failed: {type(error).__name__}: {str(error)[:120]}")
+                    continue
+                path = self.path(sid)
+                with open(path + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump(dict(session_id=sid, tasks=board, updated_at=dt.datetime.now(dt.timezone.utc).isoformat()),
+                              f, ensure_ascii=False, indent=1)
+                os.chmod(path + ".tmp", 0o600)
+                os.replace(path + ".tmp", path)
+        except Exception:
+            with self.lock:
+                self.running.discard(sid)
+            raise
 
 
 def simulate(log, model, say=print):

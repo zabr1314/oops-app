@@ -38,5 +38,25 @@ class UpdateTest(unittest.TestCase):
         self.assertFalse(board[0]["changed"])
 
 
+class BoardsTest(unittest.TestCase):
+    def test_drafts_are_folded_in_on_a_background_thread_and_saved(self):
+        import tempfile
+        import time
+        model = Fake({"tasks": [{"id": "new", "what": "列出 P0 功能点", "owner": "洪玉麟", "priority": "P0", "status": "open",
+                                 "sources": ["u8"]}]})
+        with tempfile.TemporaryDirectory() as folder:
+            boards = tb.Boards(folder, model, log=lambda _: None)
+            boards.submit("sess-0001", [dict(what="列 P0", owner="", source="u8")], CONTEXT)
+            deadline = time.monotonic() + 3
+            while boards.view("sess-0001")["pending"] and time.monotonic() < deadline:
+                time.sleep(0.02)
+            view = boards.view("sess-0001")
+            self.assertEqual(["列出 P0 功能点"], [t["what"] for t in view["tasks"]])
+            self.assertFalse(view["pending"])
+            self.assertEqual(view["tasks"], tb.Boards(folder, None).view("sess-0001")["tasks"])  # survives a restart
+            with self.assertRaises(ValueError):
+                boards.view("../etc")
+
+
 if __name__ == "__main__":
     unittest.main()
