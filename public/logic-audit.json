@@ -1,17 +1,23 @@
 {
-  "revision": "feedback-p0-gaps-20261012",
+  "revision": "feedback-direct-20261012",
   "reviewedAt": "2026-10-12",
-  "scope": "三项P0前端补齐：未知人物线索前置、来源绑定事实重点、首次使用隐私说明确认",
+  "scope": "七类可直接采纳的前端意见：文档角色草稿、工作助手类型与异常承接、人物内容线索、可纠正个人理解、紧凑录音条与首页伙伴状态",
   "browserVerified": true,
   "changedViews": [
-    "welcome",
-    "settings-privacy",
+    "home",
+    "task-plan",
+    "task-result",
     "memory",
     "memory-person",
-    "memory-unknown",
-    "memory-voice",
+    "memory-people",
+    "settings-identity",
+    "settings-preferences",
     "session-detail",
-    "session-transcript"
+    "session-listening",
+    "settings-role-import",
+    "tasks",
+    "task-assistant-work",
+    "task-detail"
   ],
   "screenshotRefreshPending": false,
   "fixedIssueGroups": 10,
@@ -22,20 +28,23 @@
     "total": 29
   },
   "verification": {
-    "logicTestsPassed": 231,
-    "newLogicTests": 27,
+    "logicTestsPassed": 271,
+    "newLogicTests": 40,
     "boardTestsPassed": 6,
     "hostingTestsPassed": 4,
     "protectedRuntimeFiles": 28,
     "nativeUITestEntriesPassed": 20,
     "backendMeetingTestsPassed": 15,
-    "screenshotsCaptured": 162,
-    "interactiveEntries": 185,
+    "screenshotsCaptured": 174,
+    "interactiveEntries": 197,
     "backendSourceChangeTestsPassed": 12,
     "backendFakeFeishuTestsPassed": 11,
     "nativePreviewTestsPassed": 7,
     "backendReadRouteTestsPassed": 6,
-    "screenshotsRefreshedThisRound": 13
+    "screenshotsRefreshedThisRound": 36,
+    "screenshotsAddedThisRound": 12,
+    "logicTestEvidence": "work/feedback-direct-20261012/test-logic-final.txt",
+    "screenshotEvidence": "work/feedback-direct-20261012/captures/evidence.json"
   },
   "nativeFlow": {
     "entry": "native-flow.html",
@@ -50,5 +59,5 @@
   },
   "onlineBrowserVerified": false,
   "browserVerificationMode": "local-preview",
-  "onlineVerificationLimit": "公开站点受保存的浏览器权限设置限制，本轮完成本地操作截图与原生发布确认，不声称线上实屏验收。"
+  "onlineVerificationLimit": "公开站点受保存的浏览器权限设置限制，本轮完成本地实际操作截图；网站发布确认另行记录，不声称线上实屏验收。"
 }

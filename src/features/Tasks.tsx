@@ -2,7 +2,8 @@ import { projectMemorySummary } from '../projectMemoryLogic';
 import { useEffect, useState } from 'react';
 import { TaskCommunication, initialDraft, type Draft } from './TaskCommunication';
 import { useOops, type AppData, type Route, type Task, type TaskArtifact, type TaskMaterial, type SourceReference, type TaskInquiry } from '../store';
-import { makeSourceReference, materialVisible, provenanceAvailable, sourceAvailable, sourceTurn, taskSourceAvailable, taskVisible } from '../sourceAccess';
+import { makeSourceReference, materialVisible, provenanceAvailable, selectedTaskMaterials, sourceAvailable, sourceTurn, taskSourceAvailable, taskVisible } from '../sourceAccess';
+import { ASSISTANT_WORK_CHOICES, advanceAssistantWorkPreview, assistantWorkConsentKey, assistantWorkKind, assistantWorkStageLabel, cancelAssistantWorkPreview, existingAssistantResult, initialAssistantWorkPreview, startAssistantWorkPreview, validateAssistantWorkPreview, type AssistantServiceResult, type AssistantWorkPreview, type AssistantWorkScenario } from '../assistantWorkPresentation';
 import { useViewState } from '../viewState';
 import { useKeyboard } from '../mobile';
 import { saveCommunicationDraft } from '../communicationLogic';
@@ -15,7 +16,7 @@ import { Badge, Button, Card, Check, Chips, Empty, Field, Icon, Notice, Row, Sea
 import './Tasks.css';
 
 type Artifact = TaskArtifact;
-type TaskRecord = Task & { criteria?: string[]; materials?: string[]; questions?: string[]; drafts?: Record<string,Draft>; budget?: number; used?: number; failure?: string; transferFrom?: string; retryMissing?: boolean; generationSources?: SourceReference[]; generationSpace?: string };
+type TaskRecord = Task & { criteria?: string[]; materials?: string[]; questions?: string[]; drafts?: Record<string,Draft>; budget?: number; used?: number; failure?: string; transferFrom?: string; retryMissing?: boolean; generationSources?: SourceReference[]; generationSpace?: string; assistantServiceResult?: AssistantServiceResult };
 type TaskTab = '概览'|'资料'|'成果'|'记录';
 type Reader = { tab: TaskTab };
 const TASK_TABS: TaskTab[] = ['概览','资料','成果','记录'];
@@ -23,7 +24,7 @@ const OUTPUT_LABELS = TASK_OUTPUT_CHOICES.map(choice => choice.label);
 const titles: Record<string,string> = {
   tasks:'任务', 'task-detail':'任务详情', 'task-accept':'核对承接', 'task-reject':'婉拒任务', 'task-transfer':'建议转交', 'task-transfer-response':'转交进展',
   'task-edit':'任务要求', 'task-create':'新建任务', 'task-plan':'助手准备', 'task-authorize':'助手准备', 'task-progress':'助手工作', 'task-failure':'补齐后继续',
-  'task-budget':'助手准备', 'task-change':'修改要求', 'task-result':'成果', 'task-versions':'比较版本', 'task-preview':'成果预览', 'task-artifact-edit':'编辑成果',
+  'task-budget':'助手准备', 'task-assistant-work':'工作助手', 'task-change':'修改要求', 'task-result':'成果', 'task-versions':'比较版本', 'task-preview':'成果预览', 'task-artifact-edit':'编辑成果',
   'task-send':'跟进消息', 'task-send-confirm':'核对消息', 'task-email':'审阅邮件', 'task-calendar':'审阅日程', 'task-receipt':'操作回执', 'task-history':'任务记录',
   'task-complete':'核对结果', 'task-ask':'问题与跟进', 'task-attachment':'补充资料', 'task-progress-note':'记录进展',
 };
@@ -176,6 +177,57 @@ function ProgressNote({task:t}:{task:TaskRecord}) {
   function save(){if(closed(t))return setError('工作已结束，先回详情查看记录');if(t.status==='待承接')return go('task-accept');if(!taskSourceAvailable(data,t))return go('task-edit');if(!note.trim())return setError('填写实际进展');if(follow.trim()&&validMoment(follow)===undefined)return setError('填写有效跟进时间');if(apply(current=>saveTaskProgress(current,t.id,{note,nextFollowUp:follow}),'实际进展已保存')){setNote('');go('task-detail');}}
   return <div className="stack"><Card><h2>{t.title}</h2><p className="meta">{taskState(t)}</p></Card>{t.status==='待转交'&&<Notice>对方回应前，仍由你负责。记录进展会保留当前转交请求。</Notice>}<Field label="已经推进了什么？" value={note} onChange={setNote} multiline placeholder="记录真实进展、结果或阻碍"/><Field label="下一次跟进（可留空）" value={follow} onChange={setFollow} placeholder="2026-10-09 10:00" hint="按当前设备本地时间"/>{error&&<p className="error-text">{error}</p>}<Button onClick={save}>保存实际进展</Button>{t.status==='待转交'?<Button tone="secondary" onClick={()=>go('task-transfer-response')}>查看转交回应</Button>:<Button tone="secondary" onClick={()=>go('task-complete',taskWorkKind(t)==='行动'?'人工完成':'交付验收')}>这项工作已完成</Button>}</div>;
 }
+const WORK_SCENARIOS: { value: AssistantWorkScenario; label: string }[] = [
+  { value: 'normal', label: '正常准备' }, { value: 'offline', label: '助手离线' },
+  { value: 'generation-failure', label: '生成失败' }, { value: 'delivery-failure', label: '交付失败' },
+];
+function AssistantWork({task:t}:{task:TaskRecord}) {
+  const {data,route,navigate}=useOops(),{go}=useTaskActions(t);
+  const initialKind=assistantWorkKind(route.mode),key=`assistant-work-preview:${data.settings.space}:${t.id}`;
+  const [state,setState]=useViewState<AssistantWorkPreview>(key,()=>initialAssistantWorkPreview(initialKind));
+  const [read,setRead]=useState(false),[draft,setDraft]=useState(false),[error,setError]=useState('');
+  const current=validateAssistantWorkPreview(data,state),choice=ASSISTANT_WORK_CHOICES.find(item=>item.kind===current.kind)!,materials=selectedTaskMaterials(t),includeSource=t.scope?.includeSource!==false;
+  const consentKey=assistantWorkConsentKey(data,t,current.kind,current.scenario);
+  const busy=['queued','preparing'].includes(current.stage),canConfirm=['idle','cancelled','revoked','generation-failed'].includes(current.stage),hasDraft=artifacts(t).length>0;
+  useEffect(()=>{if(current!==state){setState(current);setRead(false);setDraft(false);setError('');}},[current,state,setState]);
+  useEffect(()=>{setRead(false);setDraft(false);setError('');},[consentKey]);
+  function reset(kind=current.kind,scenario=current.scenario){setState(initialAssistantWorkPreview(kind,scenario));setRead(false);setDraft(false);setError('');}
+  function start(){const result=startAssistantWorkPreview(data,t.id,current,{read,draft},artifactId());setError(result.error||'');setState(result.state);if(!result.error){setRead(false);setDraft(false);}}
+  function advance(event:'online'|'result'|'recover-result'){setState(previous=>advanceAssistantWorkPreview(data,previous,event,current.requestId||''));setError('');}
+  function stop(){setState(cancelAssistantWorkPreview(current));setRead(false);setDraft(false);setError('');}
+  return <div className="stack assistant-work-screen">
+    <div><Badge tone="gray">本地状态演示</Badge><h1 className="title">让助手接着准备</h1><p className="meta">查资料、整理报告和做 PPT 已有工作助手支持。这里体验流程，不连接真实服务器。</p></div>
+    <Chips items={ASSISTANT_WORK_CHOICES.map(item=>item.label)} value={choice.label} onChange={label=>reset(ASSISTANT_WORK_CHOICES.find(item=>item.label===label)!.kind)}/>
+    <Card className="assistant-work-capability"><div className="section-title"><h2>{choice.label}</h2><Icon name={choice.icon}/></div><p>{choice.description}</p><p className="assistant-work-output">可返回：{choice.output}</p><p className="meta">按任务选择帮助类型；个人草稿的正文、要点或行动步骤在准备页单独选择。</p></Card>
+    <Card className="assistant-work-scope"><SectionTitle>这次核对的范围</SectionTitle><h3>{t.title}</h3>{t.description&&<p>{t.description}</p>}<p className="meta">{includeSource&&t.sourceSession?'这项任务引用的原话':'本人填写的任务要求'}{materials.length?` · ${materials.length}份选定资料`:' · 未附入额外资料'}</p>{includeSource&&<TaskSource task={t}/>}<ul>{materials.map(material=><li key={material.id}>{material.title}</li>)}</ul><p className="meta">仅预览这些要求与资料，不会把选中片段扩大为整场会议。调整后需要重新核对。</p><Button tone="quiet" onClick={()=>go('task-plan')}>调整个人草稿与资料范围</Button></Card>
+    <Card className={`assistant-work-state is-${current.stage}`}><div className="section-title"><Badge tone={current.stage.includes('failed')||current.stage==='revoked'?'orange':current.stage==='ready'?'green':'gray'}>{assistantWorkStageLabel(current.stage)}</Badge><span className="meta">{choice.label}</span></div>
+      {current.stage==='idle'&&<p>先核对范围，再体验助手工作状态。</p>}
+      {current.stage==='queued'&&<><h2>助手上线后继续</h2><p>本次示例已保留，不需要重复开始。真实工作助手的在线状态由服务返回。</p><Button onClick={()=>advance('online')}>模拟助手恢复在线</Button></>}
+      {current.stage==='preparing'&&<><h2>正在按核对范围准备</h2><p>已有个人草稿保留，实际工作仍由你负责。</p><Button onClick={()=>advance('result')}>查看本地示例结果</Button></>}
+      {current.stage==='generation-failed'&&<><h2>这次没有生成新结果</h2><p>已有草稿保留。补齐资料或调整范围后，重新允许准备。</p><Button tone="secondary" onClick={()=>go('task-attachment')}>检查或补充资料</Button></>}
+      {current.stage==='delivery-failed'&&<><h2>生成与交付分开处理</h2><p>此示例表示内容已生成，但服务没能交回文档或文件。先重读已有结果，避免重复生成或重复发送。</p><Button onClick={()=>advance('recover-result')}>重试读取示例结果</Button><p className="meta">此处没有真实发文档、共享或发送操作。</p></>}
+      {current.stage==='ready'&&<><h2>结果先交给你核对</h2><p>状态示例已走通。个人草稿仍可编辑；收件对象、正文、成果版本和对外发送分别核对。</p><Button onClick={()=>go(hasDraft?'task-result':'task-plan')}>{hasDraft?'查看已有个人草稿':'继续准备个人草稿'}</Button><Button tone="quiet" onClick={()=>reset()}>重新体验另一种状态</Button></>}
+      {(current.stage==='revoked'||current.stage==='cancelled')&&<Notice tone={current.stage==='revoked'?'warning':'soft'}>{current.message}</Notice>}
+      {busy&&<Button tone="quiet" onClick={stop}>停止本次示例</Button>}
+    </Card>
+    {canConfirm&&<><SelectField label="体验哪种工作状态" value={WORK_SCENARIOS.find(item=>item.value===current.scenario)!.label} options={WORK_SCENARIOS.map(item=>item.label)} onChange={label=>reset(current.kind,WORK_SCENARIOS.find(item=>item.label===label)!.value)}/><Check label="已核对本次原话、要求与选定资料" value={read} onChange={setRead}/><Check label="仅体验个人草稿，不授权对外发送" value={draft} onChange={setDraft}/>{error&&<p className="error-text" role="alert">{error}</p>}<Button onClick={start}>{current.stage==='generation-failed'?'重新允许并重试示例':'核对并体验工作状态'}</Button></>}
+    {t.status==='待承接'&&<Button tone="secondary" onClick={()=>go('task-accept')}>先核对并承接</Button>}
+    <details className="task-evidence"><summary>真实结果在哪里？</summary><p className="meta">已有机器人可在飞书返回报告、文档及 PPT 文件。当前网站仍展示本地草稿，App 的工作提交与结果取回尚未接通；这里不会创建真实工作，也不提供虚构的文档或下载链接。</p></details>
+    <Button tone="quiet" onClick={()=>navigate({view:'task-detail',id:t.id})}>返回任务</Button>
+  </div>;
+}
+function ExistingAssistantOutputs({task:t}:{task:TaskRecord}) {
+  const {data}=useOops(),result=existingAssistantResult(data,t,t.assistantServiceResult,['https://giftedprofessor.xyz']);
+  if(result.status==='blocked')return <Notice tone="warning">此服务结果不属于当前任务或空间，不能在这里打开。</Notice>;
+  const open=(url:string)=>window.open(url,'_blank','noopener,noreferrer');
+  return <details className="task-evidence assistant-existing-output"><summary>工作助手文档与文件</summary><div className="stack">
+    {result.status==='absent'?<p className="meta">这里保存的是本地草稿。真实助手结果尚未接回本页；已有机器人文档和文件可在飞书查看。</p>:result.status==='historical'?<><Notice tone="warning">来源或准备范围已变化。已生成文档仅保留历史入口，不能直接作为本次交付。</Notice>{result.docUrl&&<Button tone="quiet" onClick={()=>open(result.docUrl!)}>查看历史文档</Button>}</>:<>
+      {result.docUrl&&<Button tone="secondary" icon="arrow-up-right" onClick={()=>open(result.docUrl!)}>打开已有飞书文档</Button>}
+      {result.files.map((file,index)=><div className="assistant-existing-file" key={`${file.name}:${index}`}><div><strong>{file.name}</strong><small className="meta">{file.bytes!==undefined?`${Math.ceil(file.bytes/1024)} KB`:'服务未提供大小'}{!file.url?' · 尚无可打开地址':''}</small></div>{file.url&&<Button tone="quiet" onClick={()=>open(file.url!)}>打开已有文件</Button>}</div>)}
+      {!result.docUrl&&!result.files.length&&<p className="meta">服务尚未提供文档或文件地址，已有正文继续保留。</p>}
+    </>}
+  </div></details>;
+}
 function AssistantSetup({task:t}:{task:TaskRecord}) {
   const {data,update,toast}=useOops(),{patch,go}=useTaskActions(t);const key=`task-prepare:${data.settings.space}:${t.id}:${t.version}`,refs=t.materialRefs||[];
   const [mode,setMode]=useViewState<string>(key+':mode',taskOutputMode(t)),[limit,setLimit]=useViewState(key+':limit',String(t.budget??40)),[includeSource,setIncludeSource]=useViewState(key+':source',t.scope?.includeSource!==false),[ids,setIds]=useViewState<string[]>(key+':materials',t.scope?.materialIds||refs.map(m=>m.id)),[read,setRead]=useViewState(key+':read',false),[draft,setDraft]=useViewState(key+':draft',false),[error,setError]=useState('');const cost=outputCost(mode),source=sourceTurn(data,t),selected=refs.filter(m=>ids.includes(m.id));
@@ -190,7 +242,7 @@ function AssistantSetup({task:t}:{task:TaskRecord}) {
     if(t.aiStatus==='准备中')return setError('先停止当前准备，再确认新范围');if(!accepted(t))return go('task-accept');const budget=Number(limit);if(!Number.isFinite(budget)||budget<(t.used??0)+(startNow?cost:0))return setError('额度上限需覆盖已用额度与本次准备');if(startNow&&(!read||!draft))return setError('勾选资料读取与个人草稿允许');const token=startNow?artifactId():undefined,preview=configured(data,startNow,token);if(preview.error)return setError(preview.error);
     let allowed=true;update(current=>{const fresh=configured(current,startNow,token);if(fresh.error){allowed=false;toast(fresh.error);return current;}return startNow?{...fresh.data,settings:{...fresh.data.settings,space:'我的空间'}}:fresh.data;});if(!allowed)return;if(startNow&&token){setTimeout(()=>update(current=>finishLocalGeneration(current,t.id,token,cost)),2400);toast('已按所选范围开始准备');go('task-progress');}else{toast('配置已保存，尚未允许助手准备');go('task-detail');}
   }
-  return <div className="stack task-setup"><Card className="task-prepare-brief"><Badge tone="gray">为这项任务准备内容</Badge><h2>{t.title}</h2>{t.description&&<p>{t.description}</p>}<p className="meta">{t.owner}负责 · {dueText(t.due)} · {taskState(t)}</p></Card>{!accepted(t)&&<Notice>先承接工作，再决定是否需要助手。</Notice>}<SectionTitle>准备什么</SectionTitle><SelectField label="准备的内容" value={TASK_OUTPUT_CHOICES.find(choice=>choice.value===mode)?.label||mode} options={OUTPUT_LABELS} onChange={v=>{changed();setMode(TASK_OUTPUT_CHOICES.find(choice=>choice.label===v)?.value||mode)}}/><SectionTitle>这次允许使用</SectionTitle>{t.sourceSession?<Card><Check label="任务引用的原话" value={includeSource} onChange={v=>{changed();setIncludeSource(v)}}/>{includeSource&&source&&<p className="task-source-preview">{source.text}</p>}<TaskSource task={t}/></Card>:<p className="meta">本人填写的任务要求</p>}{refs.length?<Card>{refs.map(m=>{const valid=!m.needsReview&&sourceAvailable(data,m)&&(!m.memoryId||data.memories.some(x=>x.id===m.memoryId&&!x.deleted&&x.confirmed&&!x.needsReview));return <div className="task-resource-choice" key={m.id}><Check label={m.title+(valid?'':' · 当前不可用')} value={ids.includes(m.id)} onChange={v=>{changed();if(v&&!valid)return toast('这份资料失效，先更新或移除');setIds(v?[...ids.filter(id=>id!==m.id),m.id]:ids.filter(id=>id!==m.id));}}/>{ids.includes(m.id)&&m.body&&valid&&<p className="meta">{m.body.slice(0,90)}</p>}{ids.includes(m.id)&&m.note&&valid&&<p className="meta">本人补充：{m.note}</p>}</div>})}</Card>:<Empty title="尚未附入资料" body="可按本人任务要求准备，或先补充资料" action="补充资料" onAction={()=>go('task-attachment')}/>}<Button tone="quiet" icon="paperclip" onClick={()=>go('task-attachment')}>管理附入资料</Button><div className="stat-grid"><Card><small className="meta">本次预计</small><h2>{cost}点</h2></Card><Card><small className="meta">已经使用</small><h2>{t.used??0}点</h2></Card></div><Field label="本任务额度上限" value={limit} onChange={v=>{changed();setLimit(v)}} type="number"/><p className="meta">准备可修改的正文、资料要点或汇报提纲，可预览、编辑并下载文本。额度与准备为本地示例。</p><Check label="允许读取以上所选原话与资料" value={read} onChange={setRead}/><Check label="允许生成这次个人草稿" value={draft} onChange={setDraft}/>{error&&<p className="error-text">{error}</p>}<Button onClick={()=>save(true)}>{accepted(t)?'允许并开始准备':'先确认承接'}</Button><Button tone="secondary" onClick={()=>save(false)}>保存配置，稍后准备</Button><p className="meta">外部消息、邮件、共享与日程需在具体内容旁再次确认。</p></div>;
+  return <div className="stack task-setup"><Card className="task-prepare-brief"><Badge tone="gray">为这项任务准备内容</Badge><h2>{t.title}</h2>{t.description&&<p>{t.description}</p>}<p className="meta">{t.owner}负责 · {dueText(t.due)} · {taskState(t)}</p></Card>{!accepted(t)&&<Notice>先承接工作，再决定是否需要助手。</Notice>}<Card className="assistant-work-entry"><Row title="工作助手" subtitle="查资料、整理报告、做 PPT · 体验工作状态" icon="sparkle" onClick={()=>go('task-assistant-work')}/></Card><SectionTitle>准备个人草稿</SectionTitle><SelectField label="准备的内容" value={TASK_OUTPUT_CHOICES.find(choice=>choice.value===mode)?.label||mode} options={OUTPUT_LABELS} onChange={v=>{changed();setMode(TASK_OUTPUT_CHOICES.find(choice=>choice.label===v)?.value||mode)}}/><SectionTitle>这次允许使用</SectionTitle>{t.sourceSession?<Card><Check label="任务引用的原话" value={includeSource} onChange={v=>{changed();setIncludeSource(v)}}/>{includeSource&&source&&<p className="task-source-preview">{source.text}</p>}<TaskSource task={t}/></Card>:<p className="meta">本人填写的任务要求</p>}{refs.length?<Card>{refs.map(m=>{const valid=!m.needsReview&&sourceAvailable(data,m)&&(!m.memoryId||data.memories.some(x=>x.id===m.memoryId&&!x.deleted&&x.confirmed&&!x.needsReview));return <div className="task-resource-choice" key={m.id}><Check label={m.title+(valid?'':' · 当前不可用')} value={ids.includes(m.id)} onChange={v=>{changed();if(v&&!valid)return toast('这份资料失效，先更新或移除');setIds(v?[...ids.filter(id=>id!==m.id),m.id]:ids.filter(id=>id!==m.id));}}/>{ids.includes(m.id)&&m.body&&valid&&<p className="meta">{m.body.slice(0,90)}</p>}{ids.includes(m.id)&&m.note&&valid&&<p className="meta">本人补充：{m.note}</p>}</div>})}</Card>:<Empty title="尚未附入资料" body="可按本人任务要求准备，或先补充资料" action="补充资料" onAction={()=>go('task-attachment')}/>}<Button tone="quiet" icon="paperclip" onClick={()=>go('task-attachment')}>管理附入资料</Button><div className="stat-grid"><Card><small className="meta">本次预计</small><h2>{cost}点</h2></Card><Card><small className="meta">已经使用</small><h2>{t.used??0}点</h2></Card></div><Field label="本任务额度上限" value={limit} onChange={v=>{changed();setLimit(v)}} type="number"/><p className="meta">准备可修改的正文、资料要点或汇报提纲，可预览、编辑并下载文本。额度与准备为本地示例。</p><Check label="允许读取以上所选原话与资料" value={read} onChange={setRead}/><Check label="允许生成这次个人草稿" value={draft} onChange={setDraft}/>{error&&<p className="error-text">{error}</p>}<Button onClick={()=>save(true)}>{accepted(t)?'允许并开始准备':'先确认承接'}</Button><Button tone="secondary" onClick={()=>save(false)}>保存配置，稍后准备</Button><p className="meta">外部消息、邮件、共享与日程需在具体内容旁再次确认。</p></div>;
 }
 function Progress({task:t}:{task:TaskRecord}) {
   const {patch,go,start}=useTaskActions(t);const ready=t.aiStatus==='草稿完成',running=t.aiStatus==='准备中';
@@ -226,6 +278,7 @@ function Result({task:t,embedded=false}:{task:TaskRecord;embedded?:boolean}) {
     {taskBelongsToMe(data,t)&&!closed(t)&&<Button tone="secondary" icon="plus" onClick={()=>setCreate(true)}>保存本人交付物</Button>}
     <Card className="task-result-next"><SectionTitle>下一步沟通</SectionTitle><p className="meta">{selectedVersions.length?`已选${selectedVersions.length}份成果：${selectedVersions.map(a=>`${a.title} v${a.version}`).join('、')}`:'不附成果，只起草跟进内容'}</p><Row title="起草跟进消息" subtitle="对象、正文和选定版本由你核对" icon="chat-circle-text" onClick={()=>go('task-send',communicationMode)}/>{latest.length>0&&<Row title="请人审阅选定成果" icon="envelope-simple" onClick={()=>go('task-email',communicationMode)}/>}</Card>
     {latest.some(a=>a.kind==='资料')&&<Button tone="secondary" onClick={returnToSession}>带回本会话资料</Button>}
+    <ExistingAssistantOutputs task={t}/><Button tone="quiet" icon="sparkle" onClick={()=>go('task-assistant-work')}>查看工作助手与异常恢复</Button>
     <details className="task-evidence task-result-history"><summary>历史版本与运行记录</summary><Row title="比较历史版本" icon="clock-counter-clockwise" onClick={()=>go('task-versions')}/><Row title="查看工作记录" icon="list-checks" onClick={()=>go('task-history')}/></details>
     <Sheet open={create} onClose={()=>setCreate(false)} title="保存本人交付物"><div className="stack"><Field label="成果标题" value={ownTitle} onChange={v=>{setOwnTitle(v);setOwnReviewed(false)}}/><SelectField label="内容类型" value={ownKind==='PPT'?'汇报提纲':ownKind} onChange={value=>setOwnKind(value==='汇报提纲'?'PPT':value)} options={['文档','资料','汇报提纲']}/><Field label={ownKind==='PPT'?'每页提纲（空行分页）':'正文'} value={ownBody} onChange={v=>{setOwnBody(v);setOwnReviewed(false)}} multiline/><Check label="已核对这份正文与当前来源" value={ownReviewed} onChange={setOwnReviewed}/><Button onClick={saveOwn}>保存这份成果</Button></div></Sheet>
   </div>;
@@ -302,7 +355,7 @@ function Supplement({task:t}:{task:TaskRecord}) {
 export default function Tasks() {
   const {data,route,navigate}=useOops();if(route.view==='tasks')return <TaskList/>;if((route.view==='task-edit'&&!route.id)||route.view==='task-create')return <Requirements key="new"/>;
   const t=data.tasks.find(x=>x.id===route.id) as TaskRecord|undefined;if(!t)return <Empty title="没有找到这项工作" body="返回列表查看当前工作" action="返回任务" onAction={()=>navigate({view:'tasks'})}/>;if(!taskVisible(data,t))return <Empty title="这项工作不在当前空间" body="切回个人空间，或查看当前团队已共享的工作" action="返回当前列表" onAction={()=>navigate({view:'tasks'})} icon="lock-key"/>;
-  const ownerRoutes=['task-accept','task-reject','task-transfer','task-transfer-response','task-edit','task-change','task-plan','task-authorize','task-budget','task-progress','task-failure','task-artifact-edit','task-complete','task-attachment','task-progress-note'];if(ownerRoutes.includes(route.view)&&!taskBelongsToMe(data,t))return <Empty title="这项工作由对方负责" body="可以查看成果与记录，或继续跟进问题" action="查看跟进" onAction={()=>navigate({view:'task-ask',id:t.id})}/>;
+  const ownerRoutes=['task-accept','task-reject','task-transfer','task-transfer-response','task-edit','task-change','task-plan','task-authorize','task-budget','task-assistant-work','task-progress','task-failure','task-artifact-edit','task-complete','task-attachment','task-progress-note'];if(ownerRoutes.includes(route.view)&&!taskBelongsToMe(data,t))return <Empty title="这项工作由对方负责" body="可以查看成果与记录，或继续跟进问题" action="查看跟进" onAction={()=>navigate({view:'task-ask',id:t.id})}/>;
   const key=`${route.view}:${t.id}:${route.mode||''}`;
   switch(route.view){
     case 'task-detail':return <Detail key={key} task={t}/>;
@@ -312,6 +365,7 @@ export default function Tasks() {
     case 'task-transfer-response':return <Transfer key={key} task={t} response/>;
     case 'task-edit':case 'task-change':return <Requirements key={key} task={t}/>;
     case 'task-plan':case 'task-authorize':case 'task-budget':return <AssistantSetup key={`${t.id}:setup`} task={t}/>;
+    case 'task-assistant-work':return <AssistantWork key={key} task={t}/>;
     case 'task-progress':return <Progress key={key} task={t}/>;
     case 'task-failure':return <Failure key={key} task={t}/>;
     case 'task-result':return <Result key={key} task={t}/>;

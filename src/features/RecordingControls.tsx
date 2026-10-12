@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useOops, type AppData, type Session } from '../store';
+import { useOops, type AppData, type Route, type Session } from '../store';
 import { useKeyboardInsets } from '../mobile';
 import { Badge, Button, Card, Check, Field, Icon, Notice, Row, SelectField, Sheet, Source } from '../ui';
 import { sessionVisible } from './Home';
 import { invalidateSessionSources } from '../sourceAccess';
 import { preferredSaveScope, retainedTranscript, type SaveScope } from '../recordingLogic';
+import { useViewState } from '../viewState';
 import './RecordingControls.css';
 
 type RecordMark = { id: string; time: string; note?: string; sourceTime?: string; sourceId?: string };
@@ -27,13 +28,23 @@ function snapshotOf(data: AppData, id: string): EndSnapshot | undefined {
   return { session: { ...s, transcript: s.transcript.map(t => ({ ...t })), privateNotes: [...s.privateNotes], summary: [...s.summary], participants: [...s.participants], agenda: [...s.agenda], attachments: [...s.attachments] }, marks: readMarks(data, id).map(m => ({ ...m })), space: data.settings.space };
 }
 
+export function recordingControlContext(sessionId: string | undefined, space: string, route: Route, tab: string) {
+  const onsite = !!sessionId && route.view === 'session-detail' && route.id === sessionId && ['现场', '概览', '复盘'].includes(tab);
+  return { onsite, key: JSON.stringify([sessionId, space, route.view, route.id, route.mode, tab]) };
+}
+
 export function RecordingControls() {
-  const { data, update, navigate, toast, requestEnd } = useOops();
+  const { data, route, update, navigate, toast, requestEnd } = useOops();
   const { isKeyboardVisible } = useKeyboardInsets();
   const session = data.sessions.find(s => s.id === data.activeSessionId && !s.archived && ['进行中', '暂停'].includes(s.status));
   const visible = !!session && sessionVisible(data, session.id);
+  const [reader] = useViewState(`session-reader:${route.id || ''}:${data.settings.space}`, { tab: '现场' });
+  const context = recordingControlContext(session?.id, data.settings.space, route, reader.tab);
+  const [expandedContext, setExpandedContext] = useState<string | null>(null);
+  const expanded = context.onsite || expandedContext === context.key;
   const [editing, setEditing] = useState<{ sessionId: string; markId: string; note: string } | null>(null);
   const [showMarks, setShowMarks] = useState(false);
+  useEffect(() => { setExpandedContext(null); setShowMarks(false); setEditing(null); }, [context.key, visible]);
   useEffect(() => { if (!visible || editing && editing.sessionId !== session?.id) { setEditing(null); setShowMarks(false); } }, [visible, session?.id, editing?.sessionId]);
   const marks = session && visible ? readMarks(data, session.id) : [];
   const selected = editing ? marks.find(m => m.id === editing.markId) : undefined;
@@ -75,10 +86,10 @@ export function RecordingControls() {
     setEditing(null); toast('已删除这个重点');
   }
   return <>
-    {session && visible && !isKeyboardVisible && <aside className="recording-controls" aria-label="当前记录控制">
-      <div className="rc-heading"><span className={`rc-dot ${session.status === '暂停' ? 'paused' : ''}`} /><div className="rc-session"><strong>{session.title}</strong><span>{session.status === '暂停' ? '已暂停' : '示例记录中'} · <time>{session.duration || '00:00'}</time></span></div><button className="rc-scene" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: '现场' })}>现场<Icon name="caret-right" size={13} /></button></div>
-      <div className="rc-actions"><button onClick={togglePause}><Icon name={session.status === '暂停' ? 'play' : 'pause'} size={19} /><span>{session.status === '暂停' ? '继续' : '暂停'}</span></button><button onClick={markNow}><Icon name="bookmark-simple" size={19} /><span>标记重点</span></button><button className="rc-end" onClick={() => requestEnd(session.id)}><Icon name="stop" size={19} /><span>结束</span></button></div>
-      {!!marks.length && <button className="rc-mark-count" onClick={() => setShowMarks(true)}>{marks.length} 个重点<Icon name="caret-right" size={11} /></button>}
+    {session && visible && !isKeyboardVisible && <aside className={`recording-controls ${expanded ? 'is-expanded' : 'is-compact'}`} data-expanded={expanded} aria-label="当前记录控制">
+      <div className="rc-heading"><span className={`rc-dot ${session.status === '暂停' ? 'paused' : ''}`} /><div className="rc-session"><strong>{session.title}</strong><span>{session.status === '暂停' ? '已暂停' : '示例记录中'} · <time>{session.duration || '00:00'}</time></span></div>{expanded ? <button className="rc-scene" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: '现场' })}>现场<Icon name="caret-right" size={13} /></button> : <div className="rc-compact-actions"><button aria-label={session.status === '暂停' ? '继续当前记录' : '暂停当前记录'} onClick={togglePause}><Icon name={session.status === '暂停' ? 'play' : 'pause'} size={18} /></button><button className="rc-end" aria-label="结束当前记录并检查保存范围" onClick={() => requestEnd(session.id)}><Icon name="stop" size={18} /></button></div>}{!context.onsite && <button className="rc-expand" aria-label={expanded ? '收起记录控制' : '展开记录控制'} aria-expanded={expanded} onClick={() => setExpandedContext(expanded ? null : context.key)}><Icon name={expanded ? 'caret-down' : 'caret-up'} size={16} /></button>}</div>
+      {expanded && <><div className="rc-actions"><button onClick={togglePause}><Icon name={session.status === '暂停' ? 'play' : 'pause'} size={19} /><span>{session.status === '暂停' ? '继续' : '暂停'}</span></button><button onClick={markNow}><Icon name="bookmark-simple" size={19} /><span>标记重点</span></button><button className="rc-end" onClick={() => requestEnd(session.id)}><Icon name="stop" size={19} /><span>结束</span></button></div>
+      {!!marks.length && <button className="rc-mark-count" onClick={() => setShowMarks(true)}>{marks.length} 个重点<Icon name="caret-right" size={11} /></button>}</>}
     </aside>}
     <Sheet open={!!editing && visible && !!selected} onClose={() => setEditing(null)} title="记下这个重点">
       <Card><Badge>时间点 · {selected?.time}</Badge><h3>{session?.title}</h3>{source ? <><p>{source.speaker}：{source.text}</p><Source title="对应原话" time={source.time} onClick={() => { setEditing(null); navigate({ view: 'session-transcript', id: session?.id, mode: source.id }); }} /></> : <p className="meta">保留时间点，没有关联转写来源。</p>}</Card>

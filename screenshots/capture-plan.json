@@ -1977,5 +1977,299 @@
       "mode": "概览"
     },
     "scene": "feedback-facts-finished"
+  },
+  {
+    "key": "f14-memory-understanding",
+    "title": "个人理解 · 场景、更新时间与纠正",
+    "group": "记忆",
+    "route": {
+      "view": "memory"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "核对",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f15-document-role-source",
+    "title": "文档角色 · 选定来源与原话",
+    "group": "我的",
+    "route": {
+      "view": "settings-role-import"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "选择示例飞书文档",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f16-document-role-draft",
+    "title": "文档角色 · 可修改并明确应用的草稿",
+    "group": "我的",
+    "route": {
+      "view": "settings-role-import"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "选择示例飞书文档",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "原文 1",
+        "exact": false,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "整理角色建议",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f17-recording-compact",
+    "title": "跨页记录 · 紧凑控制与直接暂停结束",
+    "group": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "recording",
+    "actions": []
+  },
+  {
+    "key": "f18-recording-expanded",
+    "title": "跨页记录 · 展开标记与返回现场",
+    "group": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "recording",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "展开记录控制",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f19-assistant-work-ppt",
+    "title": "工作助手 · PPT 类型与使用范围",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-plan",
+    "actions": []
+  },
+  {
+    "key": "f20-assistant-work-offline",
+    "title": "工作助手 · 离线等待与恢复在线",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "助手离线",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f21-assistant-work-generation-failure",
+    "title": "工作助手 · 生成失败与重新核对",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "生成失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f22-assistant-work-delivery-failure",
+    "title": "工作助手 · 交付失败只重读结果",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "交付失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f23-assistant-work-recovered",
+    "title": "工作助手 · 同一请求恢复与已有草稿",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "交付失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "重试读取示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f24-home-preparing",
+    "title": "首页伙伴 · 本人草稿准备状态",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "tasks-in-progress",
+    "actions": []
+  },
+  {
+    "key": "f25-home-failed",
+    "title": "首页伙伴 · 准备中断与重试入口",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "tasks-failure",
+    "actions": []
   }
 ]
