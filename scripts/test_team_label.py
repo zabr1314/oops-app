@@ -87,7 +87,7 @@ class HttpTest(unittest.TestCase):
 
     def call(self, path, key=None, body=None):
         req = urllib.request.Request(self.base + path, data=None if body is None else json.dumps(body).encode(),
-                                     headers={"Authorization": "Bearer " + key} if key else {})
+                                     headers={"Authorization": "Bearer " + key, **({"X-Label-Revision": "0"} if path.endswith("/labels") else {})} if key else {})
         try:
             with urllib.request.urlopen(req) as r:
                 return r.status, r.read()
@@ -123,7 +123,7 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(200, self.call(f"/clip/0236/u1-1.wav?k={team}")[0])
         req = urllib.request.Request(self.base + "/api/meeting/0236/labels", data=b'{"u1-1":{"kind":"noise"}}',
                                      headers={"Authorization": "Bearer " + team,
-                                              "X-Labeler": urllib.parse.quote("江古月")})
+                                              "X-Labeler": urllib.parse.quote("江古月"), "X-Label-Revision": "0"})
         with urllib.request.urlopen(req) as r:
             self.assertEqual(200, r.status)
         mine = json.loads(self.call("/api/meeting/0236", tl.make_key(SECRET, "江古月"))[1])
