@@ -172,18 +172,23 @@ class Boards:
                             seen.add(u["id"])
                             context.append(u)
                 try:
-                    hashes = self._hashes(sid) if self.source_rows else None
+                    all_hashes = self._hashes(sid) if self.source_rows else None
                     current_rows = self.source_rows(sid) if self.source_rows else None
                     current = {u['id']: u for u in current_rows or []}
-                    if self.source_rows and (hashes is None or any(d['source'] not in hashes for d in drafts)
+                    if self.source_rows and (all_hashes is None or any(d['source'] not in all_hashes for d in drafts)
                             or any(u['id'] not in current or u['text'] != current[u['id']]['text'] for u in context)):
                         continue
-                    board = update(self.model, self.view(sid)["tasks"], drafts, context[-CONTEXT_LINES * 2:])
+                    previous = self.view(sid)['tasks']
+                    used = {d['source'] for d in drafts} | {u['id'] for u in context} | {i for t in previous for i in t['sources']}
+                    hashes = {i: all_hashes[i] for i in used if i in all_hashes} if all_hashes is not None else None
+                    board = update(self.model, previous, drafts, context[-CONTEXT_LINES * 2:])
                 except Exception as error:  # noqa: BLE001 - the drafts stay in the minutes; the board just misses them
                     self.log(f"task board {sid[:8]} update failed: {type(error).__name__}: {str(error)[:120]}")
                     continue
-                if self.source_rows and self._hashes(sid) != hashes:
-                    continue  # expiry/deletion/correction during generation withdraws this result
+                if self.source_rows:
+                    latest = self._hashes(sid)
+                    if latest is None or any(latest.get(i) != value for i, value in hashes.items()):
+                        continue  # new sentences may arrive; only changed evidence withdraws the result
                 path = self.path(sid)
                 with open(path + ".tmp", "w", encoding="utf-8") as f:
                     json.dump(dict(session_id=sid, tasks=board, source_hashes=hashes or {}, updated_at=dt.datetime.now(dt.timezone.utc).isoformat()),

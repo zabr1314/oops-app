@@ -39,6 +39,20 @@ class UpdateTest(unittest.TestCase):
 
 
 class BoardsTest(unittest.TestCase):
+    def test_new_conversation_during_generation_does_not_cancel_supported_tasks(self):
+        import tempfile
+        rows = list(CONTEXT)
+        class MoreConversation:
+            def complete_json(self, *args, **kwargs):
+                rows.append(dict(id='u9', text='接着讨论下一项', speaker=None))
+                return {'tasks':[dict(id='new',what='列 P0',priority='P0',sources=['u8'])]}, 'fake'
+        with tempfile.TemporaryDirectory() as folder:
+            boards = tb.Boards(folder, MoreConversation(), source_rows=lambda sid: rows)
+            boards.queues['sess-0001'] = [([dict(what='列 P0',source='u8')],CONTEXT)]
+            boards.running.add('sess-0001')
+            boards._work('sess-0001')
+            self.assertEqual(['列 P0'], [t['what'] for t in boards.view('sess-0001')['tasks']])
+
     def test_temporary_daily_context_is_never_sent_to_board_model_or_saved(self):
         import tempfile
         from pathlib import Path
