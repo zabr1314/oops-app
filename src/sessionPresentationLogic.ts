@@ -1,11 +1,12 @@
 import type { AppData, Route, Session, Transcript } from './store';
-import { PERSONAL_SPACE, sessionVisible, taskVisible } from './sourceAccess';
+import { PERSONAL_SPACE, sessionVisible, sourceAvailable, taskVisible } from './sourceAccess';
 import { readSessionIntelligence, refreshSessionIntelligence, type IntelligenceItem } from './sessionIntelligenceLogic';
 import { readTaskSuggestions, refreshTaskSuggestions, type TaskSuggestion } from './taskSuggestionsLogic';
 
 export type SessionChapter = { id: string; topic: string; state: '已讨论' | '当前' | '待讨论' | '其他'; turns: Transcript[] };
 export type SessionFinding = { id: string; kind: '决定' | '行动' | '提醒'; text: string; route: Route };
 export type SessionCheck = { label: string; count: number; route: Route };
+export type SessionChapterPoint = { id: string; label: string; text: string; sourceId: string; sourceTime: string; route: Route };
 
 /** Uses the prototype's existing local extraction, without confirming, executing or sharing its candidates. */
 export function prepareSessionCandidates(data: AppData, sessionId: string): AppData {
@@ -32,8 +33,48 @@ export function sessionChapters(data: AppData, session: Session, shared = false)
   return [...chapters, ...(other.turns.length ? [other] : [])];
 }
 
+const normalizedExcerpt = (text: string) => text.replace(/\s+/g, '').trim();
+
+/** Legacy summaries have no provenance. Only an exact current quote can select an excerpt. */
+function summaryMatchesTurn(summary: string, turn: Transcript): boolean {
+  const text = summary.trim().replace(/^原话摘录\s*·\s*/, '');
+  const quote = normalizedExcerpt(turn.text);
+  if (!quote) return false;
+  const labels = [`${turn.speaker}：`, `${turn.speaker}:`, ...(turn.time ? [`${turn.time} ${turn.speaker}：`, `${turn.time} ${turn.speaker}:`] : [])];
+  return normalizedExcerpt(text) === quote || labels.some(label => text.startsWith(label) && normalizedExcerpt(text.slice(label.length)) === quote);
+}
+
+function chapterExcerpts(data: AppData, session: Session, chapter: SessionChapter, personal: boolean, excluded = new Set<string>()): SessionChapterPoint[] {
+  const turns = chapter.turns.filter(turn => !excluded.has(turn.id) && turn.text.trim() && !turn.private && sourceAvailable(data, { sourceSession: session.id, sourceId: turn.id }, { publicOnly: true }));
+  // Private legacy summaries must not influence the shared view, even when their quotes are public.
+  const selected = personal ? turns.filter(turn => session.summary.some(summary => summaryMatchesTurn(summary, turn))) : [];
+  const excerpts = [...selected, ...turns.slice(-2)].filter((turn, index, all) => all.findIndex(value => value.id === turn.id) === index).slice(0, 2);
+  return excerpts.map(turn => ({ id: `excerpt:${turn.id}`, label: '原话摘录', text: turn.text.length > 180 ? `${turn.text.slice(0, 180)}…` : turn.text, sourceId: turn.id, sourceTime: turn.time, route: { view: 'session-transcript', id: session.id, mode: turn.id } }));
+}
+
+function chapterHighlights(data: AppData, session: Session, chapter: SessionChapter, decisions: IntelligenceItem[], actions: TaskSuggestion[], personal: boolean): SessionChapterPoint[] {
+  const turns = chapter.turns.filter(turn => turn.text.trim() && !turn.private && sourceAvailable(data, { sourceSession: session.id, sourceId: turn.id }, { publicOnly: true }));
+  const byId = new Map(turns.map(turn => [turn.id, turn]));
+  const point = (id: string, label: string, text: string, turn: Transcript): SessionChapterPoint => ({ id, label, text, sourceId: turn.id, sourceTime: turn.time, route: { view: 'session-transcript', id: session.id, mode: turn.id } });
+  const candidates: SessionChapterPoint[] = [];
+  for (const value of decisions) {
+    const ref = value.sources.find(source => source.kind === 'session' && source.id === session.id && source.sourceId && byId.has(source.sourceId));
+    const turn = ref?.sourceId ? byId.get(ref.sourceId) : undefined;
+    if (turn) candidates.push(point(value.id, value.state === 'accepted' ? '已确认结论' : '结论候选', value.text, turn));
+  }
+  for (const value of actions) {
+    const turn = byId.get(value.sourceId);
+    if (turn) candidates.push(point(value.id, '行动草稿', value.title, turn));
+  }
+  if (candidates.length) return candidates.slice(0, 2);
+  // Plain facts and ideas are still useful. Quote current evidence instead of inventing a summary.
+  return chapterExcerpts(data, session, chapter, personal);
+}
+
 /** An ephemeral preview lets the list show candidates before opening a separate analysis page. */
 export function readSessionPresentation(data: AppData, session: Session, shared = false) {
+  // A screen may still hold its previous object after an edit; derive from the current store.
+  session = data.sessions.find(value => value.id === session.id) || session;
   const allowed = sessionVisible(data, session.id);
   const personal = allowed && !shared && data.settings.space === PERSONAL_SPACE;
   const prepared = personal ? prepareSessionCandidates(data, session.id) : data;
@@ -61,14 +102,11 @@ export function readSessionPresentation(data: AppData, session: Session, shared 
     ...(decisionPending.length ? [{ id: decisionPending[0].id, kind: '决定' as const, text: decisionPending[0].text, route: { view: 'session-decisions', id: session.id, mode: decisionPending[0].id } }] : []),
     ...(actions.length ? [{ id: actions[0].id, kind: '行动' as const, text: actions[0].title, route: { view: 'session-task-suggestions', id: session.id, mode: actions[0].id } }] : []),
   ];
-  const chapterPoints = Object.fromEntries(chapters.map(chapter => {
-    const ids = new Set(chapter.turns.map(turn => turn.id));
-    const points = [
-      ...decisions.filter(value => value.sources.some(ref => ref.kind === 'session' && ref.id === session.id && !!ref.sourceId && ids.has(ref.sourceId))).map(value => ({ label: value.state === 'accepted' ? '已确认结论' : '结论候选', text: value.text })),
-      ...actions.filter(value => ids.has(value.sourceId)).map(value => ({ label: '行动草稿', text: value.title })),
-    ].slice(0, 2);
-    return [chapter.id, points];
-  }));
+  const chapterPoints = Object.fromEntries(chapters.map(chapter => [chapter.id, chapterHighlights(data, session, chapter, decisions, actions, personal)]));
+  // Overview also surfaces ordinary discussion when a nearby task or decision already has its own card.
+  const candidateSourceIds = new Set([...decisions.flatMap(value => value.sources.filter(ref => ref.kind === 'session' && ref.id === session.id && ref.sourceId).map(ref => ref.sourceId!)), ...actions.map(value => value.sourceId)]);
+  const excerptsByChapter = chapters.map(chapter => chapterExcerpts(data, session, chapter, personal, candidateSourceIds));
+  const excerptPoints = [...excerptsByChapter.flatMap(points => points.slice(0, 1)), ...excerptsByChapter.flatMap(points => points.slice(1))].slice(0, 2);
   const currentChapter = chapters.find(chapter => chapter.state === '当前');
-  return { topic, chapters, chapterPoints, topicPoints: currentChapter ? chapterPoints[currentChapter.id] || [] : [], understanding, decisions, notices, actions, checks, findings, pendingCount: checks.reduce((count, value) => count + value.count, 0) };
+  return { topic, chapters, chapterPoints, excerptPoints, topicPoints: currentChapter ? chapterPoints[currentChapter.id] || [] : [], understanding, decisions, notices, actions, checks, findings, pendingCount: checks.reduce((count, value) => count + value.count, 0) };
 }

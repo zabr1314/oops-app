@@ -133,6 +133,27 @@ function p0VoiceData(data: AppData, scenario?: '匹配' | '低置信度' | '识�
 export function boardPreviewData(scene: string): AppData {
   let data = baseData();
   switch (scene) {
+    case 'feedback-facts-live':
+    case 'feedback-facts-finished': {
+      const live=scene==='feedback-facts-live';
+      data.activeSessionId=live?'session-001':undefined;
+      data.tasks=[];data.memories=[];
+      data.sessions=data.sessions.map(session=>session.id==='session-001'?{...session,
+        title:'用户测试复盘',kind:'会议',status:live?'暂停':'已结束',duration:'00:40',
+        agenda:['用户测试','合作反馈','下次议程'],
+        summary:['旧版判断：按钮入口已经没有问题。'],
+        transcript:[
+          {id:'fact',speaker:'我',time:'00:00:20',text:'用户测试显示按钮不容易找到。'},
+          {id:'feedback',speaker:'同事',time:'00:00:40',text:'合作反馈来自三位设计师。'}
+        ],attachments:[],privateNotes:[]}:session);
+      delete data.settings.retention['session-review-items:session-001'];
+      delete data.settings.retention['session-reviewed:session-001'];
+      delete data.settings.retention['session-conclusions:session-001'];
+      delete data.settings.retention['session-questions:session-001'];
+      data.settings.retention['session-agenda-index:session-001']='0';
+      break;
+    }
+
     case 'guided-trial':
       data = p0IntelligenceData(data, true);
       data.settings.retention['sample-index:session-001'] = '6';

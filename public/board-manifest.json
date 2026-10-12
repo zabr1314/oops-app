@@ -1,48 +1,24 @@
 {
   "metadata": {
-    "revision": "service-adaptation-20261012",
+    "revision": "feedback-p0-gaps-20261012",
     "logicReviewedAt": "2026-10-12",
     "browserVerified": true,
     "screenshotRefreshPending": false,
     "changedViews": [
-      "assistant",
-      "session-review",
-      "session-review-queue",
-      "session-understanding",
-      "session-notices",
-      "session-agenda",
-      "session-reminders",
-      "task-edit",
-      "task-transfer",
-      "task-transfer-response",
-      "memory-candidate",
-      "memory-conflict",
-      "memory-project",
-      "memory-project-edit",
-      "memory-person-edit",
-      "home",
-      "sessions",
-      "session-detail",
-      "session-task-suggestions",
-      "session-decisions",
-      "session-personal",
-      "tasks",
-      "task-detail",
-      "task-result",
-      "task-plan",
-      "task-send",
-      "task-email",
-      "settings-preferences",
+      "welcome",
       "settings-privacy",
       "memory",
       "memory-person",
-      "memory-voice"
+      "memory-unknown",
+      "memory-voice",
+      "session-detail",
+      "session-transcript"
     ],
-    "capturedAt": "2026-10-12T04:26:01.533Z",
+    "capturedAt": "2026-10-12T06:58:41.380Z",
     "capturedFrom": "2026-10-12T04:21:33.098Z",
     "app": "https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/",
-    "screenshots": 155,
-    "coverage": 178
+    "screenshots": 162,
+    "coverage": 185
   },
   "pages": [
     {
@@ -1931,6 +1907,98 @@
           "role": "button"
         }
       ]
+    },
+    {
+      "key": "f07-privacy-notice",
+      "title": "首次使用 · 阅读隐私说明",
+      "group": "首页",
+      "route": {
+        "view": "welcome"
+      },
+      "scene": "default",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "阅读使用与隐私说明",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f08-welcome-choices",
+      "title": "首次使用 · 明确确认后的独立选择",
+      "group": "首页",
+      "route": {
+        "view": "welcome"
+      },
+      "scene": "default",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "我已阅读并了解本版使用与隐私说明",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "确认并继续",
+          "exact": true,
+          "role": "button"
+        }
+      ]
+    },
+    {
+      "key": "f09-unknown-people",
+      "title": "人物列表 · 未关联交流线索与建档",
+      "group": "记忆",
+      "route": {
+        "view": "memory",
+        "mode": "人物"
+      },
+      "scene": "default"
+    },
+    {
+      "key": "f10-unknown-detail",
+      "title": "未知人物 · 匿名片段与档案线索分开",
+      "group": "记忆",
+      "route": {
+        "view": "memory-person",
+        "id": "p3"
+      },
+      "scene": "default"
+    },
+    {
+      "key": "f11-unknown-build",
+      "title": "从原话建档 · 精确片段与独立声音许可",
+      "group": "记忆",
+      "route": {
+        "view": "memory-unknown",
+        "mode": "{\"sessionId\":\"session-001\",\"turnId\":\"tr3\",\"create\":true}"
+      },
+      "scene": "default"
+    },
+    {
+      "key": "f12-chapter-facts-live",
+      "title": "现场话题 · 没有任务也保留事实重点",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-001",
+        "mode": "现场"
+      },
+      "scene": "feedback-facts-live"
+    },
+    {
+      "key": "f13-chapter-facts-overview",
+      "title": "会后概览 · 普通事实与原话定位",
+      "group": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-001",
+        "mode": "概览"
+      },
+      "scene": "feedback-facts-finished"
     }
   ],
   "coverage": [
@@ -2037,7 +2105,7 @@
       },
       "scene": "default",
       "merged": true,
-      "note": "首次使用合为三步；此项与 H09 同属第1步「先认识一下你」，没有独立欢迎空页。",
+      "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。",
       "key": "H08",
       "group": "首页",
       "shot": "h06-welcome"
@@ -2051,7 +2119,7 @@
       },
       "scene": "default",
       "merged": true,
-      "note": "第1步填写称呼与角色后点「继续」；身份日后在 settings-identity 修改。",
+      "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。",
       "key": "H09",
       "group": "首页",
       "shot": "h06-welcome"
@@ -2065,7 +2133,7 @@
       },
       "scene": "default",
       "merged": true,
-      "note": "从第1步点击「继续」进入第2步，分别选择云端处理与确认后的长期记忆。",
+      "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。",
       "key": "H10",
       "group": "首页",
       "shot": "h06-welcome"
@@ -2093,7 +2161,7 @@
       },
       "scene": "default",
       "merged": true,
-      "note": "完成称呼和保存选择进入第3步，可轻量开始记录、导入或私人提问，再回首页。",
+      "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。",
       "key": "H12",
       "group": "首页",
       "shot": "h06-welcome"
@@ -4507,6 +4575,131 @@
       "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。",
       "key": "F06",
       "group": "我的"
+    },
+    {
+      "id": "F07",
+      "title": "首次使用 · 阅读隐私说明",
+      "module": "首页",
+      "route": {
+        "view": "welcome"
+      },
+      "scene": "default",
+      "shot": "f07-privacy-notice",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "阅读使用与隐私说明",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "进入第一次使用后，点击阅读说明。阅读、关闭不代表确认；返回后勾选才能继续。说明是原型流程说明，真实服务需另行确认。",
+      "key": "F07",
+      "group": "首页"
+    },
+    {
+      "id": "F08",
+      "title": "首次使用 · 明确确认后的独立选择",
+      "module": "首页",
+      "route": {
+        "view": "welcome"
+      },
+      "scene": "default",
+      "shot": "f08-welcome-choices",
+      "actions": [
+        {
+          "kind": "click",
+          "name": "我已阅读并了解本版使用与隐私说明",
+          "exact": true,
+          "role": "checkbox"
+        },
+        {
+          "kind": "click",
+          "name": "确认并继续",
+          "exact": true,
+          "role": "button"
+        }
+      ],
+      "note": "勾选本版说明并确认后进入第二步；云端处理与长期记忆首次默认关闭，单独选择。稍后设置不保存未提交的称呼或偏好。",
+      "key": "F08",
+      "group": "首页"
+    },
+    {
+      "id": "F09",
+      "title": "人物列表 · 未关联交流线索与建档",
+      "module": "记忆",
+      "route": {
+        "view": "memory",
+        "mode": "人物"
+      },
+      "scene": "default",
+      "shot": "f09-unknown-people",
+      "actions": [],
+      "note": "人物页直接展示时间、项目/原文关键词与交流原话；核对身份或建立档案带入精确片段，未关联原话不冒充某人的历史。",
+      "key": "F09",
+      "group": "记忆"
+    },
+    {
+      "id": "F10",
+      "title": "未知人物 · 匿名片段与档案线索分开",
+      "module": "记忆",
+      "route": {
+        "view": "memory-person",
+        "id": "p3"
+      },
+      "scene": "default",
+      "shot": "f10-unknown-detail",
+      "actions": [],
+      "note": "匿名详情前置交流线索和建档入口；已绑定档案的待核对发言与尚未关联的匿名池分开，空档案不猜测身份。",
+      "key": "F10",
+      "group": "记忆"
+    },
+    {
+      "id": "F11",
+      "title": "从原话建档 · 精确片段与独立声音许可",
+      "module": "记忆",
+      "route": {
+        "view": "memory-unknown",
+        "mode": "{\"sessionId\":\"session-001\",\"turnId\":\"tr3\",\"create\":true}"
+      },
+      "scene": "default",
+      "shot": "f11-unknown-build",
+      "actions": [],
+      "note": "已选中00:16:28的实际原话与新增人物；填姓名、核对后保存。也可改选已有联系人或保持匿名；声音身份许可独立。",
+      "key": "F11",
+      "group": "记忆"
+    },
+    {
+      "id": "F12",
+      "title": "现场话题 · 没有任务也保留事实重点",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-001",
+        "mode": "现场"
+      },
+      "scene": "feedback-facts-live",
+      "shot": "f12-chapter-facts-live",
+      "actions": [],
+      "note": "纯事实场景：当前话题与章节显示当前原话摘录，点击定位到fact片段；空章节保持空，旧摘要不混入重点。",
+      "key": "F12",
+      "group": "会话"
+    },
+    {
+      "id": "F13",
+      "title": "会后概览 · 普通事实与原话定位",
+      "module": "会话",
+      "route": {
+        "view": "session-detail",
+        "id": "session-001",
+        "mode": "概览"
+      },
+      "scene": "feedback-facts-finished",
+      "shot": "f13-chapter-facts-overview",
+      "actions": [],
+      "note": "会后仍显示两个议题的普通事实，点击查看对应原话；提醒与原话摘录分开，摘录不会自动成为结论或任务。",
+      "key": "F13",
+      "group": "会话"
     }
   ]
 }

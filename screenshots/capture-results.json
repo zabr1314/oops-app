@@ -66,16 +66,16 @@
   },
   {
     "key": "h06-welcome",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:32\n- banner:\n  - button \"返回上一页\"\n  - heading \"你好，我是 Oops\" [level=1]\n  - button \"回到首页\"\n- main \"你好，我是 Oops\":\n  - img \"Oops\"\n  - generic: 第1步 / 共3步\n  - heading \"先了解信息怎么用\" [level=2]\n  - paragraph: 读完说明后，由你确认是否继续设置。\n  - heading \"使用与隐私说明\" [level=3]\n  - generic: 尚未确认\n  - paragraph: 先了解信息怎样使用，再决定开启哪些能力。\n  - generic: 当前网页用于原型体验。此确认不会开启麦克风、上传资料、共享声纹或发送消息。\n  - button \"阅读使用与隐私说明\":\n    - generic: 阅读使用与隐私说明\n  - generic: 说明版本：prototype-2026-10-12\n  - checkbox \"我已阅读并了解本版使用与隐私说明\"\n  - generic: 我已阅读并了解本版使用与隐私说明\n  - button \"确认并继续\" [disabled]:\n    - generic: 确认并继续\n  - button \"仅浏览示例，稍后设置\":\n    - generic: 仅浏览示例，稍后设置\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:32:37.075Z",
+    "status": "captured",
     "title": "你好，我是 Oops",
     "route": {
       "view": "welcome"
     },
     "scene": "default",
-    "capturedAt": "2026-10-12T04:21:33.506Z",
-    "bytes": 17134,
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 12:21\n- banner:\n  - button \"返回上一页\"\n  - heading \"你好，我是 Oops\" [level=1]\n  - button \"回到首页\"\n- main \"你好，我是 Oops\":\n  - img \"Oops\"\n  - generic: 第1步 / 共3步\n  - heading \"先认识一下你\" [level=2]\n  - paragraph: 称呼和角色会帮助 Oops 更懂你。\n  - generic: 怎么称呼你\n  - textbox \"怎么称呼你\":\n    - /placeholder: \"\"\n    - text: 林\n  - generic: 我的角色\n  - textbox \"我的角色\":\n    - /placeholder: \"\"\n    - text: 产品负责人\n  - button \"继续\":\n    - generic: 继续\n  - button \"稍后再设置\":\n    - generic: 稍后再设置\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\" [active]:\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
-    "status": "captured",
-    "sha256": "ba2013a696428b7f2541b67f48904dd4f016215cfaa2b957661690301686289f"
+    "bytes": 40415,
+    "sha256": "ba8c2c271c877410568776c9643b36202c03fa70f9a60a0c3afdaec4aa00880c"
   },
   {
     "key": "c01-sessions",
@@ -132,6 +132,9 @@
   },
   {
     "key": "c05-session-detail",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:58\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"概览\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"产品头脑风暴\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 18:24\n  - button \"本次会话工具\"\n  - generic: 已保存 · 待核对\n  - heading \"本次整理\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - button \"提醒 还有议题没有讨论依据\":\n    - generic: 提醒\n    - generic: 还有议题没有讨论依据\n  - button \"决定 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\":\n    - generic: 决定\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n  - heading \"讨论中的其他重点\" [level=3]\n  - button \"原话摘录 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。 查看原话 · 00:18:02\":\n    - generic: 原话摘录\n    - generic: 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。\n    - strong: 查看原话 · 00:18:02\n  - button \"原话摘录 请核实蓝色椅子B-108的库存，现货和预留分别列清楚，再准备跟进消息。 查看原话 · 00:18:10\":\n    - generic: 原话摘录\n    - generic: 请核实蓝色椅子B-108的库存，现货和预留分别列清楚，再准备跟进消息。\n    - strong: 查看原话 · 00:18:10\n  - generic: 待确认\n  - button \"决定候选 3\"\n  - button \"提醒 1\"\n  - button \"身份 1\"\n  - button \"已有任务 2\"\n  - button \"记忆 1\"\n  - button \"行动草稿\"\n  - button \"决定与结论 3\"\n  - button \"全部提醒 1\"\n  - generic: 仍有4项待核对\n  - button \"编辑\"\n  - heading \"本次确认的结论\" [level=3]\n  - paragraph: 先准备第三季度 KPI 复盘框架，再核对六页汇报内容。\n  - paragraph: 资料卡留在相关议题旁，需要时再打开。\n  - heading \"下一步行动\" [level=2]\n  - button \"准备第三季度 KPI 复盘 我 · 2026-10-09 17:00 · 待承接 待承接\":\n    - strong: 准备第三季度 KPI 复盘\n    - generic: 我 · 2026-10-09 17:00 · 待承接\n    - generic: 待承接\n  - button \"核实蓝色椅子库存 我 · 2026-10-08 18:00 · 已承接 已承接\":\n    - strong: 核实蓝色椅子库存\n    - generic: 我 · 2026-10-08 18:00 · 已承接\n    - generic: 已承接\n  - button \"验证会中资料卡的返回方式 我 · 期限待定 · 待承接 待承接\":\n    - strong: 验证会中资料卡的返回方式\n    - generic: 我 · 期限待定 · 待承接\n    - generic: 待承接\n  - heading \"尚未决定的问题\" [level=2]\n  - paragraph: 库存资料是否已包含今天的出入库？\n  - heading \"4项可以逐项核对\" [level=3]\n  - paragraph: 身份、行动、记忆与来源分别处理，也可以稍后再说。\n  - button \"开始 / 继续核对\":\n    - generic: 开始 / 继续核对\n  - generic \"重点与原话依据\"\n  - button \"补充一条行动\":\n    - generic: 补充一条行动\n  - button \"导出预览\":\n    - generic: 导出预览\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:58:04.069Z",
+    "status": "captured",
     "title": "会议复盘",
     "route": {
       "view": "session-detail",
@@ -139,11 +142,8 @@
       "mode": "复盘"
     },
     "scene": "review",
-    "capturedAt": "2026-10-12T04:21:34.216Z",
-    "bytes": 22461,
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 12:21\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"概览\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"产品头脑风暴\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 18:24\n  - button \"本次会话工具\"\n  - generic: 已保存 · 待核对\n  - heading \"本次整理\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - button \"提醒 还有议题没有讨论依据\":\n    - generic: 提醒\n    - generic: 还有议题没有讨论依据\n  - button \"决定 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\":\n    - generic: 决定\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n  - generic: 待确认\n  - button \"决定候选 3\"\n  - button \"提醒 1\"\n  - button \"身份 1\"\n  - button \"已有任务 2\"\n  - button \"记忆 1\"\n  - button \"行动草稿\"\n  - button \"决定与结论 3\"\n  - button \"全部提醒 1\"\n  - generic: 仍有4项待核对\n  - button \"编辑\"\n  - heading \"本次确认的结论\" [level=3]\n  - paragraph: 先准备第三季度 KPI 复盘框架，再核对六页汇报内容。\n  - paragraph: 资料卡留在相关议题旁，需要时再打开。\n  - heading \"下一步行动\" [level=2]\n  - button \"准备第三季度 KPI 复盘 我 · 2026-10-09 17:00 · 待承接 待承接\":\n    - strong: 准备第三季度 KPI 复盘\n    - generic: 我 · 2026-10-09 17:00 · 待承接\n    - generic: 待承接\n  - button \"核实蓝色椅子库存 我 · 2026-10-08 18:00 · 已承接 已承接\":\n    - strong: 核实蓝色椅子库存\n    - generic: 我 · 2026-10-08 18:00 · 已承接\n    - generic: 已承接\n  - button \"验证会中资料卡的返回方式 我 · 期限待定 · 待承接 待承接\":\n    - strong: 验证会中资料卡的返回方式\n    - generic: 我 · 期限待定 · 待承接\n    - generic: 待承接\n  - heading \"尚未决定的问题\" [level=2]\n  - paragraph: 库存资料是否已包含今天的出入库？\n  - heading \"4项可以逐项核对\" [level=3]\n  - paragraph: 身份、行动、记忆与来源分别处理，也可以稍后再说。\n  - button \"开始 / 继续核对\":\n    - generic: 开始 / 继续核对\n  - generic \"重点与原话依据\"\n  - button \"补充一条行动\":\n    - generic: 补充一条行动\n  - button \"导出预览\":\n    - generic: 导出预览\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
-    "status": "captured",
-    "sha256": "143c7c2a7cca9695da85f68b170cbaf757c165eab9e1a44aabc5f6d5a46b7d65"
+    "bytes": 39556,
+    "sha256": "f4e7278ed479155211a90cdbe67c8fc0c65859650e2c9cd206de081cefb5982a"
   },
   {
     "key": "c06-session-transcript",
@@ -810,6 +810,9 @@
   },
   {
     "key": "m08-memory-voice",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:57\n- banner:\n  - button \"返回上一页\"\n  - heading \"核对说话人\" [level=1]\n  - button \"回到首页\"\n- main \"核对说话人\":\n  - generic: 待\n  - heading \"待确认\" [level=3]\n  - paragraph: 当前人物，原话来源由你选择\n  - heading \"从这些对话里核对\" [level=2]\n  - paragraph: 时间和话题帮助你找到原话，身份由你确认。\n  - generic: 匿名片段\n  - generic: 00:16:28\n  - heading \"产品头脑风暴\" [level=3]\n  - paragraph: 10月8日 10:00 · Oops 首版\n  - paragraph: 检索出来的资料先放在当前议题旁边，不要每次都打断。\n  - button \"核对这段话\":\n    - generic: 核对这段话\n  - generic: 选择会话\n  - combobox \"选择会话\":\n    - option \"请选择一段会话\"\n    - option \"产品头脑风暴 · 10月8日 10:00 · 001\" [selected]\n    - option \"桌面伙伴的灵感 · 昨天 16:20 · 002\"\n  - generic: 选择实际原话\n  - combobox \"选择实际原话\":\n    - option \"请选择一段原话\" [selected]\n    - option \"1. 00:06:20 · 我 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上\"\n    - option \"2. 00:12:40 · Alex · 首版先按十万元预算，我们把最关键的使用链路做出来。\"\n    - option \"3. 00:16:28 · 待确认 · 检索出来的资料先放在当前议题旁边，不要每次都打断。\"\n    - option \"4. 00:18:02 · 王宁 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周\"\n    - option \"5. 00:18:10 · 我 · 请核实蓝色椅子B-108的库存，现货和预留分别列清楚，再\"\n  - generic: 这段话的说话人\n  - combobox \"这段话的说话人\":\n    - option \"保持未确认\" [selected]\n    - option \"王宁 · Oops 团队 · p1\"\n    - option \"Alex · Oops 团队 · p2\"\n    - option \"新增人物\"\n  - checkbox \"我已查看原话，确认这段话的说话人\"\n  - generic: 我已查看原话，确认这段话的说话人\n  - strong: 另外允许个人声音身份示例\n  - generic: 姓名核对不自动开启声音身份，也不开放项目使用。此项不录音、不生成真实声纹。\n  - switch \"另外允许个人声音身份示例\"\n  - button \"保存这段姓名对应\":\n    - generic: 保存这段姓名对应\n  - button \"本次保持未确认\":\n    - generic: 本次保持未确认\n  - generic: 本页核对文字片段的姓名对应，不执行真实声音识别。修改对应关系后，旧任务与记忆需复核，工作负责人保持原归属。\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:57:37.059Z",
+    "status": "captured",
     "title": "纠正声音身份",
     "route": {
       "view": "memory-voice",
@@ -817,11 +820,8 @@
       "mode": "session-001"
     },
     "scene": "default",
-    "capturedAt": "2026-10-12T04:21:54.818Z",
-    "bytes": 21283,
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 12:21\n- banner:\n  - button \"返回上一页\"\n  - heading \"核对说话人\" [level=1]\n  - button \"回到首页\"\n- main \"核对说话人\":\n  - generic: 待\n  - heading \"待确认\" [level=3]\n  - paragraph: 当前人物，原话来源由你选择\n  - heading \"从这些对话里核对\" [level=2]\n  - paragraph: 时间和话题帮助你找到原话，身份由你确认。\n  - generic: 匿名片段\n  - generic: 00:16:28\n  - heading \"产品头脑风暴\" [level=3]\n  - paragraph: 10月8日 10:00 · Oops 首版\n  - paragraph: 检索出来的资料先放在当前议题旁边，不要每次都打断。\n  - button \"核对这段话\":\n    - generic: 核对这段话\n  - generic: 选择会话\n  - combobox \"选择会话\":\n    - option \"请选择一段会话\"\n    - option \"产品头脑风暴 · 10月8日 10:00 · 001\" [selected]\n    - option \"桌面伙伴的灵感 · 昨天 16:20 · 002\"\n  - generic: 选择实际原话\n  - combobox \"选择实际原话\":\n    - option \"请选择一段原话\" [selected]\n    - option \"1. 00:06:20 · 我 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上\"\n    - option \"2. 00:12:40 · Alex · 首版先按十万元预算，我们把最关键的使用链路做出来。\"\n    - option \"3. 00:16:28 · 待确认 · 检索出来的资料先放在当前议题旁边，不要每次都打断。\"\n    - option \"4. 00:18:02 · 王宁 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周\"\n    - option \"5. 00:18:10 · 我 · 请核实蓝色椅子B-108的库存，现货和预留分别列清楚，再\"\n  - generic: 这段话的说话人\n  - combobox \"这段话的说话人\":\n    - option \"保持未确认\" [selected]\n    - option \"王宁 · Oops 团队 · p1\"\n    - option \"Alex · Oops 团队 · p2\"\n    - option \"新增人物\"\n  - checkbox \"我已查看原话，确认这段话的说话人\"\n  - generic: 我已查看原话，确认这段话的说话人\n  - strong: 另外允许个人声音身份示例\n  - generic: 姓名核对不自动开启声音身份，也不开放项目使用。此项不录音、不生成真实声纹。\n  - switch \"另外允许个人声音身份示例\"\n  - button \"保存这段姓名对应\":\n    - generic: 保存这段姓名对应\n  - button \"本次保持未确认\":\n    - generic: 本次保持未确认\n  - generic: 本页核对文字片段的姓名对应，不执行真实声音识别。修改对应关系后，旧任务与记忆需复核，工作负责人保持原归属。\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
-    "status": "captured",
-    "sha256": "caf9acdbb88e920477e94ad2849591e36be81b087c1e017071794117cd63959c"
+    "bytes": 38566,
+    "sha256": "7b6f8aff3cb2c977a1b24cc1650e97a80a3f1f058887c7c9d3abfd5931d7106b"
   },
   {
     "key": "m09-memory-exchange",
@@ -1210,16 +1210,16 @@
   },
   {
     "key": "u17-settings-privacy",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:34\n- banner:\n  - button \"返回上一页\"\n  - heading \"隐私与数据\" [level=1]\n  - button \"回到首页\"\n- main \"隐私与数据\":\n  - heading \"使用与隐私说明\" [level=3]\n  - generic: 尚未确认\n  - paragraph: 先了解信息怎样使用，再决定开启哪些能力。\n  - generic: 当前网页用于原型体验。此确认不会开启麦克风、上传资料、共享声纹或发送消息。\n  - button \"阅读使用与隐私说明\":\n    - generic: 阅读使用与隐私说明\n  - generic: 说明版本：prototype-2026-10-12\n  - checkbox \"我已阅读并了解本版使用与隐私说明\"\n  - generic: 我已阅读并了解本版使用与隐私说明\n  - button \"保存本版确认\" [disabled]:\n    - generic: 保存本版确认\n  - heading \"按场景决定使用范围\" [level=2]\n  - paragraph: 记录、长期记忆、声音身份分别选择。关联项目不会自动扩大共享。\n  - heading \"记录对话\" [level=2]\n  - strong: 允许开始声音记录\n  - generic: 每次开始仍需明确操作；活动记录可随时暂停和结束。\n  - switch \"允许开始声音记录\" [checked]\n  - button \"聆听与自动起止设置 单独设置有效对话检测与唤醒方式\":\n    - strong: 聆听与自动起止设置\n    - generic: 单独设置有效对话检测与唤醒方式\n  - button \"录音与文字保存期限 记录结束时另行选择保留哪些片段\":\n    - strong: 录音与文字保存期限\n    - generic: 记录结束时另行选择保留哪些片段\n  - heading \"资料与长期记忆\" [level=2]\n  - strong: 云端处理偏好\n  - generic: 当前演示未上传到真实云端；接入真实服务时应显示具体资料与范围。\n  - switch \"云端处理偏好\" [checked]\n  - strong: 允许保存长期记忆\n  - generic: 新信息核对后再使用，关闭后已有内容保留。\n  - switch \"允许保存长期记忆\" [checked]\n  - button \"共享内容与撤销 只共享主动选择的结果；私人备注单独保留\":\n    - strong: 共享内容与撤销\n    - generic: 只共享主动选择的结果；私人备注单独保留\n  - heading \"声音身份\" [level=2]\n  - strong: 共享我的声音身份\n  - generic: 默认关闭。姓名核对、声音样本与项目使用范围分别处理。\n  - switch \"共享我的声音身份\"\n  - button \"管理声音身份与授权 查看样本、纠正对应或撤销允许\":\n    - strong: 管理声音身份与授权\n    - generic: 查看样本、纠正对应或撤销允许\n  - heading \"查看与管理数据\" [level=2]\n  - button \"删除与回收站\":\n    - strong: 删除与回收站\n  - button \"导出与清理\":\n    - strong: 导出与清理\n  - button \"访问与操作记录\":\n    - strong: 访问与操作记录\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:34:25.166Z",
+    "status": "captured",
     "title": "隐私与数据",
     "route": {
       "view": "settings-privacy"
     },
     "scene": "default",
-    "capturedAt": "2026-10-12T04:22:10.798Z",
-    "bytes": 22640,
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 12:22\n- banner:\n  - button \"返回上一页\"\n  - heading \"隐私与数据\" [level=1]\n  - button \"回到首页\"\n- main \"隐私与数据\":\n  - heading \"按场景决定使用范围\" [level=2]\n  - paragraph: 记录、长期记忆、声音身份分别选择。关联项目不会自动扩大共享。\n  - heading \"记录对话\" [level=2]\n  - strong: 允许开始声音记录\n  - generic: 每次开始仍需明确操作；活动记录可随时暂停和结束。\n  - switch \"允许开始声音记录\" [checked]\n  - button \"聆听与自动起止设置 单独设置有效对话检测与唤醒方式\":\n    - strong: 聆听与自动起止设置\n    - generic: 单独设置有效对话检测与唤醒方式\n  - button \"录音与文字保存期限 记录结束时另行选择保留哪些片段\":\n    - strong: 录音与文字保存期限\n    - generic: 记录结束时另行选择保留哪些片段\n  - heading \"资料与长期记忆\" [level=2]\n  - strong: 云端处理偏好\n  - generic: 当前演示未上传到真实云端；接入真实服务时应显示具体资料与范围。\n  - switch \"云端处理偏好\" [checked]\n  - strong: 允许保存长期记忆\n  - generic: 新信息核对后再使用，关闭后已有内容保留。\n  - switch \"允许保存长期记忆\" [checked]\n  - button \"共享内容与撤销 只共享主动选择的结果；私人备注单独保留\":\n    - strong: 共享内容与撤销\n    - generic: 只共享主动选择的结果；私人备注单独保留\n  - heading \"声音身份\" [level=2]\n  - strong: 共享我的声音身份\n  - generic: 默认关闭。姓名核对、声音样本与项目使用范围分别处理。\n  - switch \"共享我的声音身份\"\n  - button \"管理声音身份与授权 查看样本、纠正对应或撤销允许\":\n    - strong: 管理声音身份与授权\n    - generic: 查看样本、纠正对应或撤销允许\n  - heading \"查看与管理数据\" [level=2]\n  - button \"删除与回收站\":\n    - strong: 删除与回收站\n  - button \"导出与清理\":\n    - strong: 导出与清理\n  - button \"访问与操作记录\":\n    - strong: 访问与操作记录\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
-    "status": "captured",
-    "sha256": "1bfe7f065104520cfe42496cd9534c5d27d979417e8123ed06603632a06212d3"
+    "bytes": 43702,
+    "sha256": "22adf0d1c9ede774a6daf8f1cbe57e4c1edb0f03996300d6c9cdeaeac335fe15"
   },
   {
     "key": "u18-settings-export",
@@ -1288,6 +1288,9 @@
   },
   {
     "key": "c21-session-live",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:58\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"现场\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"产品头脑风暴\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 18:39\n  - button \"本次会话工具\"\n  - generic: 进行中\n  - strong: 示例记录中\n  - generic: 预设文字 · 麦克风未开启\n  - button \"1待核对\"\n  - generic: 当前话题重点\n  - button \"议程\"\n  - heading \"明确首版目标\" [level=3]\n  - list:\n    - button \"结论候选 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 查看原话 · 00:06:20\":\n      - generic: 结论候选\n      - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n      - strong: 查看原话 · 00:06:20\n    - button \"结论候选 首版先按十万元预算，我们把最关键的使用链路做出来。 查看原话 · 00:12:40\":\n      - generic: 结论候选\n      - generic: 首版先按十万元预算，我们把最关键的使用链路做出来。\n      - strong: 查看原话 · 00:12:40\n  - generic: 0项已讨论\n  - strong: 当前 1 / 3\n  - generic: 下一项：会中资料如何返回\n  - button \"查看重点与上下文\"\n  - heading \"Oops 重要发现\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - button \"提醒 讨论可能偏离当前议题\":\n    - generic: 提醒\n    - generic: 讨论可能偏离当前议题\n  - button \"决定 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\":\n    - generic: 决定\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n  - generic: 待确认\n  - button \"决定候选 3\"\n  - button \"提醒 2\"\n  - button \"身份 1\"\n  - button \"已有任务 2\"\n  - button \"行动草稿\"\n  - button \"决定与结论 3\"\n  - button \"全部提醒 2\"\n  - heading \"按话题回看原话\" [level=2]\n  - button \"完整原文\"\n  - paragraph: 章节按本地关键词归类；议程推进由你确认，不代表结论已定。\n  - generic \"明确首版目标 2段原话 · 00:06:20 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 查看原话 · 00:06:20 当前\":\n    - strong: 明确首版目标\n    - generic: 2段原话 · 00:06:20\n    - button \"结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 查看原话 · 00:06:20\":\n      - emphasis: 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n      - generic: 查看原话 · 00:06:20\n    - generic: 当前\n  - generic \"会中资料如何返回 1段原话 · 00:16:28 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。 查看原话 · 00:16:28 待讨论\":\n    - strong: 会中资料如何返回\n    - generic: 1段原话 · 00:16:28\n    - button \"结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。 查看原话 · 00:16:28\":\n      - emphasis: 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。\n      - generic: 查看原话 · 00:16:28\n    - generic: 待讨论\n  - generic \"任务与执行边界 还没有匹配的原话 待讨论\":\n    - strong: 任务与执行边界\n    - generic: 还没有匹配的原话\n    - generic: 待讨论\n  - generic \"其他讨论 2段原话 · 00:18:02 原话摘录 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。 查看原话 · 00:18:02 其他\":\n    - strong: 其他讨论\n    - generic: 2段原话 · 00:18:02\n    - button \"原话摘录 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。 查看原话 · 00:18:02\":\n      - emphasis: 原话摘录 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。\n      - generic: 查看原话 · 00:18:02\n    - generic: 其他\n  - button \"查本地资料\":\n    - generic: 查本地资料\n  - button \"私人便签 · 1\":\n    - generic: 私人便签 · 1\n  - button \"结束当前记录\":\n    - generic: 结束当前记录\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的\n- complementary \"当前记录控制\":\n  - strong: 产品头脑风暴\n  - text: 示例记录中 ·\n  - time: 18:39\n  - button \"现场\"\n  - button \"暂停\":\n    - generic: 暂停\n  - button \"标记重点\":\n    - generic: 标记重点\n  - button \"结束\":\n    - generic: 结束\n  - button \"1 个重点\"",
+    "capturedAt": "2026-10-12T06:58:19.653Z",
+    "status": "captured",
     "title": "记录现场 · 会话概览",
     "route": {
       "view": "session-detail",
@@ -1295,11 +1298,8 @@
       "mode": "现场"
     },
     "scene": "recording",
-    "capturedAt": "2026-10-12T04:22:11.675Z",
-    "bytes": 22125,
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 12:22\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"现场\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"产品头脑风暴\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 18:24\n  - button \"本次会话工具\"\n  - generic: 进行中\n  - strong: 示例记录中\n  - generic: 预设文字 · 麦克风未开启\n  - button \"1待核对\"\n  - generic: 当前话题重点\n  - button \"议程\"\n  - heading \"明确首版目标\" [level=3]\n  - list:\n    - generic: 结论候选\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n    - generic: 结论候选\n    - generic: 首版先按十万元预算，我们把最关键的使用链路做出来。\n  - generic: 0项已讨论\n  - strong: 当前 1 / 3\n  - generic: 下一项：会中资料如何返回\n  - button \"查看重点与上下文\"\n  - heading \"Oops 重要发现\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - button \"提醒 讨论可能偏离当前议题\":\n    - generic: 提醒\n    - generic: 讨论可能偏离当前议题\n  - button \"决定 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\":\n    - generic: 决定\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n  - generic: 待确认\n  - button \"决定候选 3\"\n  - button \"提醒 2\"\n  - button \"身份 1\"\n  - button \"已有任务 2\"\n  - button \"行动草稿\"\n  - button \"决定与结论 3\"\n  - button \"全部提醒 2\"\n  - heading \"按话题回看原话\" [level=2]\n  - button \"完整原文\"\n  - paragraph: 章节按本地关键词归类；议程推进由你确认，不代表结论已定。\n  - generic \"明确首版目标 2段原话 · 00:06:20 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 当前\":\n    - strong: 明确首版目标\n    - generic: 2段原话 · 00:06:20\n    - emphasis: 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n    - generic: 当前\n  - generic \"会中资料如何返回 1段原话 · 00:16:28 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。 待讨论\":\n    - strong: 会中资料如何返回\n    - generic: 1段原话 · 00:16:28\n    - emphasis: 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。\n    - generic: 待讨论\n  - generic \"任务与执行边界 还没有匹配的原话 待讨论\":\n    - strong: 任务与执行边界\n    - generic: 还没有匹配的原话\n    - generic: 待讨论\n  - generic \"其他讨论 2段原话 · 00:18:02 其他\":\n    - strong: 其他讨论\n    - generic: 2段原话 · 00:18:02\n    - generic: 其他\n  - button \"查本地资料\":\n    - generic: 查本地资料\n  - button \"私人便签 · 1\":\n    - generic: 私人便签 · 1\n  - button \"结束当前记录\":\n    - generic: 结束当前记录\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的\n- complementary \"当前记录控制\":\n  - strong: 产品头脑风暴\n  - text: 示例记录中 ·\n  - time: 18:24\n  - button \"现场\"\n  - button \"暂停\":\n    - generic: 暂停\n  - button \"标记重点\":\n    - generic: 标记重点\n  - button \"结束\":\n    - generic: 结束\n  - button \"1 个重点\"",
-    "status": "captured",
-    "sha256": "dc532293f53c51b180098738dce30719ee76c8aa23959e513e3e5f30734e5270"
+    "bytes": 41035,
+    "sha256": "5d758856a190d38ddb481bbad4fcbf417474e3bbe08694be9cfdfd8568cd8293"
   },
   {
     "key": "c22-session-live-transcript",
@@ -1348,6 +1348,9 @@
   },
   {
     "key": "c25-session-paused",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:58\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"现场\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"产品头脑风暴\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 18:24\n  - button \"本次会话工具\"\n  - generic: 暂停\n  - strong: 记录已暂停\n  - generic: 预设文字 · 麦克风未开启\n  - button \"1待核对\"\n  - generic: 当前话题重点\n  - button \"议程\"\n  - heading \"明确首版目标\" [level=3]\n  - list:\n    - button \"结论候选 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 查看原话 · 00:06:20\":\n      - generic: 结论候选\n      - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n      - strong: 查看原话 · 00:06:20\n    - button \"结论候选 首版先按十万元预算，我们把最关键的使用链路做出来。 查看原话 · 00:12:40\":\n      - generic: 结论候选\n      - generic: 首版先按十万元预算，我们把最关键的使用链路做出来。\n      - strong: 查看原话 · 00:12:40\n  - generic: 0项已讨论\n  - strong: 当前 1 / 3\n  - generic: 下一项：会中资料如何返回\n  - button \"查看重点与上下文\"\n  - heading \"Oops 重要发现\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - button \"提醒 讨论可能偏离当前议题\":\n    - generic: 提醒\n    - generic: 讨论可能偏离当前议题\n  - button \"决定 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\":\n    - generic: 决定\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n  - generic: 待确认\n  - button \"决定候选 3\"\n  - button \"提醒 2\"\n  - button \"身份 1\"\n  - button \"已有任务 2\"\n  - button \"行动草稿\"\n  - button \"决定与结论 3\"\n  - button \"全部提醒 2\"\n  - heading \"按话题回看原话\" [level=2]\n  - button \"完整原文\"\n  - paragraph: 章节按本地关键词归类；议程推进由你确认，不代表结论已定。\n  - generic \"明确首版目标 2段原话 · 00:06:20 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 查看原话 · 00:06:20 当前\":\n    - strong: 明确首版目标\n    - generic: 2段原话 · 00:06:20\n    - button \"结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 查看原话 · 00:06:20\":\n      - emphasis: 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n      - generic: 查看原话 · 00:06:20\n    - generic: 当前\n  - generic \"会中资料如何返回 1段原话 · 00:16:28 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。 查看原话 · 00:16:28 待讨论\":\n    - strong: 会中资料如何返回\n    - generic: 1段原话 · 00:16:28\n    - button \"结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。 查看原话 · 00:16:28\":\n      - emphasis: 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。\n      - generic: 查看原话 · 00:16:28\n    - generic: 待讨论\n  - generic \"任务与执行边界 还没有匹配的原话 待讨论\":\n    - strong: 任务与执行边界\n    - generic: 还没有匹配的原话\n    - generic: 待讨论\n  - generic \"其他讨论 2段原话 · 00:18:02 原话摘录 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。 查看原话 · 00:18:02 其他\":\n    - strong: 其他讨论\n    - generic: 2段原话 · 00:18:02\n    - button \"原话摘录 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。 查看原话 · 00:18:02\":\n      - emphasis: 原话摘录 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。\n      - generic: 查看原话 · 00:18:02\n    - generic: 其他\n  - button \"查本地资料\":\n    - generic: 查本地资料\n  - button \"私人便签 · 1\":\n    - generic: 私人便签 · 1\n  - button \"结束当前记录\":\n    - generic: 结束当前记录\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的\n- complementary \"当前记录控制\":\n  - strong: 产品头脑风暴\n  - text: 已暂停 ·\n  - time: 18:24\n  - button \"现场\"\n  - button \"继续\":\n    - generic: 继续\n  - button \"标记重点\":\n    - generic: 标记重点\n  - button \"结束\":\n    - generic: 结束\n  - button \"1 个重点\"",
+    "capturedAt": "2026-10-12T06:58:41.380Z",
+    "status": "captured",
     "title": "记录已暂停",
     "route": {
       "view": "session-detail",
@@ -1355,11 +1358,8 @@
       "mode": "现场"
     },
     "scene": "paused",
-    "capturedAt": "2026-10-12T04:22:12.466Z",
-    "bytes": 22031,
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 12:22\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"现场\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"产品头脑风暴\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 18:24\n  - button \"本次会话工具\"\n  - generic: 暂停\n  - strong: 记录已暂停\n  - generic: 预设文字 · 麦克风未开启\n  - button \"1待核对\"\n  - generic: 当前话题重点\n  - button \"议程\"\n  - heading \"明确首版目标\" [level=3]\n  - list:\n    - generic: 结论候选\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n    - generic: 结论候选\n    - generic: 首版先按十万元预算，我们把最关键的使用链路做出来。\n  - generic: 0项已讨论\n  - strong: 当前 1 / 3\n  - generic: 下一项：会中资料如何返回\n  - button \"查看重点与上下文\"\n  - heading \"Oops 重要发现\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - button \"提醒 讨论可能偏离当前议题\":\n    - generic: 提醒\n    - generic: 讨论可能偏离当前议题\n  - button \"决定 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\":\n    - generic: 决定\n    - generic: 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n  - generic: 待确认\n  - button \"决定候选 3\"\n  - button \"提醒 2\"\n  - button \"身份 1\"\n  - button \"已有任务 2\"\n  - button \"行动草稿\"\n  - button \"决定与结论 3\"\n  - button \"全部提醒 2\"\n  - heading \"按话题回看原话\" [level=2]\n  - button \"完整原文\"\n  - paragraph: 章节按本地关键词归类；议程推进由你确认，不代表结论已定。\n  - generic \"明确首版目标 2段原话 · 00:06:20 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。 当前\":\n    - strong: 明确首版目标\n    - generic: 2段原话 · 00:06:20\n    - emphasis: 结论候选 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上下文。\n    - generic: 当前\n  - generic \"会中资料如何返回 1段原话 · 00:16:28 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。 待讨论\":\n    - strong: 会中资料如何返回\n    - generic: 1段原话 · 00:16:28\n    - emphasis: 结论候选 · 检索出来的资料先放在当前议题旁边，不要每次都打断。\n    - generic: 待讨论\n  - generic \"任务与执行边界 还没有匹配的原话 待讨论\":\n    - strong: 任务与执行边界\n    - generic: 还没有匹配的原话\n    - generic: 待讨论\n  - generic \"其他讨论 2段原话 · 00:18:02 其他\":\n    - strong: 其他讨论\n    - generic: 2段原话 · 00:18:02\n    - generic: 其他\n  - button \"查本地资料\":\n    - generic: 查本地资料\n  - button \"私人便签 · 1\":\n    - generic: 私人便签 · 1\n  - button \"结束当前记录\":\n    - generic: 结束当前记录\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的\n- complementary \"当前记录控制\":\n  - strong: 产品头脑风暴\n  - text: 已暂停 ·\n  - time: 18:24\n  - button \"现场\"\n  - button \"继续\":\n    - generic: 继续\n  - button \"标记重点\":\n    - generic: 标记重点\n  - button \"结束\":\n    - generic: 结束\n  - button \"1 个重点\"",
-    "status": "captured",
-    "sha256": "edf27042274e483f9995b27b008051c93c0e03cea43f7271d065d99e9a56a70d"
+    "bytes": 40847,
+    "sha256": "0cb65d7b253932f8e4762f4eeff2a4ae8f86f7e2476a6d692a69dec77b8253da"
   },
   {
     "key": "c26-session-review-queue",
@@ -2141,5 +2141,103 @@
     "snapshot": "- button:\n  - generic: iPhone\n- generic: 12:26\n- banner:\n  - button\n  - heading [level=1]: 助理偏好\n  - button\n- main:\n  - generic: 由你定义\n  - heading [level=3]: 让 Oops 按你的习惯帮忙\n  - paragraph: 先用两句话描述，也可以直接设置。建议草稿由你修改确认。\n  - button:\n    - generic: 快速整理我的偏好\n  - generic: 回答方式\n  - combobox\n  - generic: 回答长度\n  - combobox\n  - generic: 现在最关心的事\n  - textbox:\n    - /placeholder: 例如：先把首版使用流程跑通\n    - text: 推进明确的下一步\n  - generic: 不希望助理做的事\n  - textbox:\n    - /placeholder: 例如：会议中频繁打断\n  - generic: 保留为边界偏好；发送、共享等动作仍由你确认。\n  - button:\n    - generic: 保存偏好\n  - generic: 当前表单预览\n  - heading [level=3]: 围绕：推进明确的下一步\n  - paragraph: 先看结论：来源和责任有变化，建议先核对再推进。\n  - paragraph: 先结论，再给依据 · 简短\n  - paragraph: 当前使用本地内容展示偏好整理，未调用真实模型或语音识别。\n  - button:\n    - generic: 查看偏好与资料的使用范围\n- navigation:\n  - button:\n    - generic: 首页\n  - button:\n    - generic: 会话\n  - button:\n    - generic: 任务\n    - generic: \"3\"\n  - button:\n    - generic: 记忆\n  - button:\n    - generic: 我的\n- dialog \"用两句话认识你的习惯\" [active]:\n  - heading \"用两句话认识你的习惯\" [level=2]\n  - paragraph: 当前角色：产品负责人。可以跳过，之后随时修改。\n  - generic: 待应用的本地草稿\n  - paragraph: 回答方式：先结论，再给依据\n  - paragraph: 长度：简短\n  - paragraph: 你的原描述会保留在自定义方式中，应用后仍可逐项修改。\n  - button \"应用到表单，继续修改\":\n    - generic: 应用到表单，继续修改\n  - button \"返回修改描述\":\n    - generic: 返回修改描述\n  - button \"暂时跳过\":\n    - generic: 暂时跳过",
     "status": "captured",
     "sha256": "897840fac48a06b7529f909c0e95c34a15504afec3a18f3d53c0fcf7df97f201"
+  },
+  {
+    "key": "f07-privacy-notice",
+    "snapshot": "- button:\n  - generic: iPhone\n- generic: 2:32\n- banner:\n  - button\n  - heading [level=1]: 你好，我是 Oops\n  - button\n- main:\n  - generic: 第1步 / 共3步\n  - heading [level=2]: 先了解信息怎么用\n  - paragraph: 读完说明后，由你确认是否继续设置。\n  - heading [level=3]: 使用与隐私说明\n  - generic: 尚未确认\n  - paragraph: 先了解信息怎样使用，再决定开启哪些能力。\n  - generic: 当前网页用于原型体验。此确认不会开启麦克风、上传资料、共享声纹或发送消息。\n  - button:\n    - generic: 阅读使用与隐私说明\n  - generic: 说明版本：prototype-2026-10-12\n  - checkbox\n  - generic: 我已阅读并了解本版使用与隐私说明\n  - button [disabled]:\n    - generic: 确认并继续\n  - button:\n    - generic: 仅浏览示例，稍后设置\n- navigation:\n  - button:\n    - generic: 首页\n  - button:\n    - generic: 会话\n  - button:\n    - generic: 任务\n    - generic: \"3\"\n  - button:\n    - generic: 记忆\n  - button:\n    - generic: 我的\n- dialog \"使用与隐私说明（原型）\":\n  - heading \"使用与隐私说明（原型）\" [level=2]\n  - paragraph: 版本：prototype-2026-10-12\n  - heading \"1. 当前体验会留下什么\" [level=3]\n  - paragraph: 示例会话、你填写的称呼与角色、偏好，以及你在页面里确认的任务和记忆用于演示前端流程。请使用示例内容体验。\n  - heading \"2. 信息怎样使用\" [level=3]\n  - paragraph: 页面从当前可见的记录中整理重点、任务和记忆。匿名发言需要由你核对身份；候选内容需要确认，才会作为已确认信息使用。\n  - heading \"3. 每项授权分别选择\" [level=3]\n  - paragraph: 云端处理、长期记忆、声音身份、团队共享和外部应用各自设置。确认这份说明不会代替这些授权；姓名核对也不会自动注册或共享声纹。\n  - heading \"4. 保存、查看与管理\" [level=3]\n  - paragraph: 普通网页体验在浏览器允许时将前端示例保存在本机；画板预览使用独立示例，不写入普通体验。可在隐私设置中查看记录范围、导出或删除本地内容。真实服务的存储位置和保留规则仍需单独确认。\n  - heading \"5. 外部操作由你确认\" [level=3]\n  - paragraph: 生成消息、日程和文档草稿不等于已经发送或创建。本页不办理真实登录、麦克风授权或第三方授权；接入真实服务时，需要展示对应说明并完成单独确认。\n  - button \"返回确认\" [active]:\n    - generic: 返回确认",
+    "capturedAt": "2026-10-12T06:32:37.548Z",
+    "status": "captured",
+    "title": "首次使用 · 阅读隐私说明",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "bytes": 50539,
+    "sha256": "e31d01a960ccc1000f2e09695ad4a1332a2676301e4c2b0338d151c52467e516"
+  },
+  {
+    "key": "f08-welcome-choices",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:33\n- banner:\n  - button \"返回上一页\"\n  - heading \"你好，我是 Oops\" [level=1]\n  - button \"回到首页\"\n- main \"你好，我是 Oops\":\n  - generic: 第2步 / 共3步\n  - heading \"认识你，按你的选择记住\" [level=2]\n  - paragraph: 称呼、角色和可选能力分别由你决定。\n  - generic: 怎么称呼你\n  - textbox \"怎么称呼你\":\n    - /placeholder: \"\"\n    - text: 林\n  - generic: 我的角色\n  - textbox \"我的角色\":\n    - /placeholder: \"\"\n    - text: 产品负责人\n  - strong: 允许云端处理\n  - generic: 原型设置；接入真实服务时另行说明与授权\n  - switch \"允许云端处理\"\n  - strong: 保存确认后的长期记忆\n  - switch \"保存确认后的长期记忆\"\n  - generic: 这些选项不会开启声音身份或团队共享。记录、私人便签和外部操作仍需分别确认。\n  - button \"保存选择\":\n    - generic: 保存选择\n  - button \"返回阅读说明\":\n    - generic: 返回阅读说明\n  - button \"稍后再设置\":\n    - generic: 稍后再设置\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:33:22.746Z",
+    "status": "captured",
+    "title": "首次使用 · 明确确认后的独立选择",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "bytes": 38822,
+    "sha256": "927e96fa1a6700b36409d6454ad9031c77d614b402db4d8e5086ccea33cbbf47"
+  },
+  {
+    "key": "f09-unknown-people",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:34\n- banner:\n  - button \"搜索全部内容\"\n  - heading \"记忆\" [level=1]\n  - button \"回到首页\"\n- main \"记忆\":\n  - tablist:\n    - tab \"记忆\"\n    - tab \"人物\" [selected]\n    - tab \"项目\"\n  - textbox \"搜索姓名、角色或原话线索\"\n  - heading \"认识的人\" [level=2]\n  - button \"新增\"\n  - button \"0 人 今天聊过 今天还没有已确认身份的对话 只统计当前可见会话\":\n    - generic: 0 人\n    - heading \"今天聊过\" [level=3]\n    - paragraph: 今天还没有已确认身份的对话\n    - paragraph: 只统计当前可见会话\n  - region \"筛选\":\n    - button \"全部\" [pressed]\n    - button \"今天聊过\"\n    - button \"待核对\"\n  - heading \"尚未关联人物的片段\" [level=3]\n  - generic: 1 段\n  - paragraph: 先看什么时候、聊了什么，再选择已有联系人或建立档案；也可以继续匿名。\n  - paragraph:\n    - generic: 10月8日 10:00 · 片段 00:16:28\n  - heading \"产品头脑风暴\" [level=3]\n  - generic: Oops 首版\n  - generic: 资料\n  - paragraph: “检索出来的资料先放在当前议题旁边，不要每次都打断。”\n  - button \"查看这段原话 · 00:16:28\":\n    - generic: 查看这段原话 · 00:16:28\n  - button \"核对身份\":\n    - generic: 核对身份\n  - button \"建立档案\":\n    - generic: 建立档案\n  - button \"王宁 业务负责人 · Oops 团队 · 1 个可见会话 姓名已确认\":\n    - strong: 王宁\n    - generic: 业务负责人 · Oops 团队 · 1 个可见会话\n    - generic: 姓名已确认\n  - button \"Alex 设计与研发 · Oops 团队 · 1 个可见会话 姓名已确认\":\n    - strong: Alex\n    - generic: 设计与研发 · Oops 团队 · 1 个可见会话\n    - generic: 姓名已确认\n  - button \"待确认 未核对身份 待核对\":\n    - strong: 待确认\n    - generic: 未核对身份\n    - generic: 待核对\n  - paragraph: 还没有明确关联这份档案的待核对片段。\n  - paragraph: 可以先选择未关联的原话再核对，或仅补全这份人物资料。\n  - button \"选择片段再核对\":\n    - generic: 选择片段再核对\n  - button \"补充这份档案\":\n    - generic: 补充这份档案\n  - button \"交换身份\":\n    - generic: 交换身份\n  - button \"声音动态\":\n    - generic: 声音动态\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:34:50.754Z",
+    "status": "captured",
+    "title": "人物列表 · 未关联交流线索与建档",
+    "route": {
+      "view": "memory",
+      "mode": "人物"
+    },
+    "scene": "default",
+    "bytes": 40294,
+    "sha256": "cc2dbd0156f2c72c4fa38a843e604aab61974b2d3734fcca510e1b25e937ae24"
+  },
+  {
+    "key": "f10-unknown-detail",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:51\n- banner:\n  - button \"返回上一页\"\n  - heading \"人物详情\" [level=1]\n  - button \"回到首页\"\n- main \"人物详情\":\n  - generic: 待\n  - heading \"待确认\" [level=2]\n  - paragraph: 未核对身份 · 未填写组织\n  - generic: 姓名待核对\n  - generic: 未开启声音身份示例\n  - heading \"尚未关联人物的片段\" [level=3]\n  - generic: 1 段\n  - paragraph: 先看什么时候、聊了什么，再选择已有联系人或建立档案；也可以继续匿名。\n  - paragraph:\n    - generic: 10月8日 10:00 · 片段 00:16:28\n  - heading \"产品头脑风暴\" [level=3]\n  - generic: Oops 首版\n  - generic: 资料\n  - paragraph: “检索出来的资料先放在当前议题旁边，不要每次都打断。”\n  - button \"查看这段原话 · 00:16:28\":\n    - generic: 查看这段原话 · 00:16:28\n  - button \"核对身份\":\n    - generic: 核对身份\n  - button \"建立档案\":\n    - generic: 建立档案\n  - heading \"这份档案的待核对片段\" [level=3]\n  - generic: 逐段核对身份\n  - paragraph: 还没有明确关联这份档案的待核对片段。\n  - paragraph: 可以先选择未关联的原话再核对，或仅补全这份人物资料。\n  - button \"选择片段再核对\":\n    - generic: 选择片段再核对\n  - button \"补充这份档案\":\n    - generic: 补充这份档案\n  - heading \"我的私人备注\" [level=2]\n  - button \"编辑\"\n  - paragraph: 对应00:16:28的发言。\n  - paragraph: 我的手动备注 · 只对你可见，不随身份卡共享。\n  - strong: 共享姓名与公开身份\n  - generic: 私人备注始终保留在个人空间。\n  - switch \"共享姓名与公开身份\"\n  - strong: 允许项目使用声音身份\n  - generic: 声音范围与公开身份分开设置。\n  - switch \"允许项目使用声音身份\"\n  - button \"核对原话中的说话人\":\n    - generic: 核对原话中的说话人\n  - button \"管理声音样本与关联\":\n    - generic: 管理声音样本与关联\n  - button \"查看身份交换\":\n    - generic: 查看身份交换\n  - button \"删除人物\":\n    - generic: 删除人物\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:51:36.814Z",
+    "status": "captured",
+    "title": "未知人物 · 匿名片段与档案线索分开",
+    "route": {
+      "view": "memory-person",
+      "id": "p3"
+    },
+    "scene": "default",
+    "bytes": 43655,
+    "sha256": "3061e3022d15c39cd256cd1fb8fe8e8e4f2f0fc3adebcc23827d964be1802957"
+  },
+  {
+    "key": "f11-unknown-build",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:35\n- banner:\n  - button \"返回上一页\"\n  - heading \"核对说话人\" [level=1]\n  - button \"回到首页\"\n- main \"核对说话人\":\n  - generic: 选择会话\n  - combobox \"选择会话\":\n    - option \"请选择一段会话\"\n    - option \"产品头脑风暴 · 10月8日 10:00 · 001\" [selected]\n    - option \"桌面伙伴的灵感 · 昨天 16:20 · 002\"\n  - generic: 选择实际原话\n  - combobox \"选择实际原话\":\n    - option \"请选择一段原话\"\n    - option \"1. 00:06:20 · 我 · 先把我在这个项目里的角色和目标记住，后面给我的建议才有上\"\n    - option \"2. 00:12:40 · Alex · 首版先按十万元预算，我们把最关键的使用链路做出来。\"\n    - option \"3. 00:16:28 · 待确认 · 检索出来的资料先放在当前议题旁边，不要每次都打断。\" [selected]\n    - option \"4. 00:18:02 · 王宁 · 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周\"\n    - option \"5. 00:18:10 · 我 · 请核实蓝色椅子B-108的库存，现货和预留分别列清楚，再\"\n  - generic: 原话 · 当前标记待确认\n  - paragraph: 10月8日 10:00 · Oops 首版\n  - paragraph: 检索出来的资料先放在当前议题旁边，不要每次都打断。\n  - button \"产品头脑风暴 · 00:16:28\":\n    - generic: 产品头脑风暴 · 00:16:28\n  - generic: 这段话的说话人\n  - combobox \"这段话的说话人\":\n    - option \"保持未确认\"\n    - option \"王宁 · Oops 团队 · p1\"\n    - option \"Alex · Oops 团队 · p2\"\n    - option \"新增人物\" [selected]\n  - generic: 人物姓名\n  - textbox \"人物姓名\":\n    - /placeholder: \"\"\n  - checkbox \"我已查看原话，确认这段话的说话人\"\n  - generic: 我已查看原话，确认这段话的说话人\n  - strong: 另外允许个人声音身份示例\n  - generic: 姓名核对不自动开启声音身份，也不开放项目使用。此项不录音、不生成真实声纹。\n  - switch \"另外允许个人声音身份示例\"\n  - button \"保存这段姓名对应\":\n    - generic: 保存这段姓名对应\n  - button \"本次保持未确认\":\n    - generic: 本次保持未确认\n  - generic: 本页核对文字片段的姓名对应，不执行真实声音识别。修改对应关系后，旧任务与记忆需复核，工作负责人保持原归属。\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:35:18.210Z",
+    "status": "captured",
+    "title": "从原话建档 · 精确片段与独立声音许可",
+    "route": {
+      "view": "memory-unknown",
+      "mode": "{\"sessionId\":\"session-001\",\"turnId\":\"tr3\",\"create\":true}"
+    },
+    "scene": "default",
+    "bytes": 39706,
+    "sha256": "b5f8faed3cc32214f2c9ee5d1c0af46689443a534d6bb873093569ad82584938"
+  },
+  {
+    "key": "f12-chapter-facts-live",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:53\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"现场\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"用户测试复盘\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 00:40\n  - button \"本次会话工具\"\n  - generic: 暂停\n  - strong: 记录已暂停\n  - generic: 预设文字 · 麦克风未开启\n  - button \"2个发言标签\"\n  - generic: 当前话题重点\n  - button \"议程\"\n  - heading \"用户测试\" [level=3]\n  - list:\n    - button \"原话摘录 用户测试显示按钮不容易找到。 查看原话 · 00:00:20\":\n      - generic: 原话摘录\n      - generic: 用户测试显示按钮不容易找到。\n      - strong: 查看原话 · 00:00:20\n  - generic: 0项已讨论\n  - strong: 当前 1 / 3\n  - generic: 下一项：合作反馈\n  - button \"查看重点与上下文\"\n  - heading \"Oops 重要发现\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - paragraph: 继续记录具体想法、决定或下一步，发现会显示在这里。\n  - button \"行动草稿\"\n  - button \"决定与结论\"\n  - button \"全部提醒\"\n  - heading \"按话题回看原话\" [level=2]\n  - button \"完整原文\"\n  - paragraph: 章节按本地关键词归类；议程推进由你确认，不代表结论已定。\n  - generic \"用户测试 1段原话 · 00:00:20 原话摘录 · 用户测试显示按钮不容易找到。 查看原话 · 00:00:20 当前\":\n    - strong: 用户测试\n    - generic: 1段原话 · 00:00:20\n    - button \"原话摘录 · 用户测试显示按钮不容易找到。 查看原话 · 00:00:20\":\n      - emphasis: 原话摘录 · 用户测试显示按钮不容易找到。\n      - generic: 查看原话 · 00:00:20\n    - generic: 当前\n  - generic \"合作反馈 1段原话 · 00:00:40 原话摘录 · 合作反馈来自三位设计师。 查看原话 · 00:00:40 待讨论\":\n    - strong: 合作反馈\n    - generic: 1段原话 · 00:00:40\n    - button \"原话摘录 · 合作反馈来自三位设计师。 查看原话 · 00:00:40\":\n      - emphasis: 原话摘录 · 合作反馈来自三位设计师。\n      - generic: 查看原话 · 00:00:40\n    - generic: 待讨论\n  - generic \"下次议程 还没有匹配的原话 待讨论\":\n    - strong: 下次议程\n    - generic: 还没有匹配的原话\n    - generic: 待讨论\n  - button \"查本地资料\":\n    - generic: 查本地资料\n  - button \"私人便签\":\n    - generic: 私人便签\n  - button \"结束当前记录\":\n    - generic: 结束当前记录\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的\n- complementary \"当前记录控制\":\n  - strong: 用户测试复盘\n  - text: 已暂停 ·\n  - time: 00:40\n  - button \"现场\"\n  - button \"继续\":\n    - generic: 继续\n  - button \"标记重点\":\n    - generic: 标记重点\n  - button \"结束\":\n    - generic: 结束",
+    "capturedAt": "2026-10-12T06:53:26.261Z",
+    "status": "captured",
+    "title": "现场话题 · 没有任务也保留事实重点",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "现场"
+    },
+    "scene": "feedback-facts-live",
+    "bytes": 39686,
+    "sha256": "9db17cb5fe46d1039912b0c0db06f08194ebca546ecad7778c59ff032b35d93b"
+  },
+  {
+    "key": "f13-chapter-facts-overview",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 2:56\n- banner:\n  - button \"返回上一页\"\n  - heading \"会话\" [level=1]\n  - button \"新建记录\"\n- tablist:\n  - tab \"概览\" [selected]\n  - tab \"原文\"\n  - tab \"资料\"\n  - tab \"行动\"\n- main \"会话\":\n  - heading \"用户测试复盘\" [level=2]\n  - paragraph: 会议 · Oops 首版 · 00:40\n  - button \"本次会话工具\"\n  - generic: 已保存 · 待核对\n  - heading \"本次整理\" [level=2]\n  - button \"全部理解\"\n  - generic: 本地示例整理 · 候选需确认\n  - button \"我的视角\"\n  - button \"提醒 还有议题没有讨论依据\":\n    - generic: 提醒\n    - generic: 还有议题没有讨论依据\n  - heading \"讨论中的其他重点\" [level=3]\n  - button \"原话摘录 用户测试显示按钮不容易找到。 查看原话 · 00:00:20\":\n    - generic: 原话摘录\n    - generic: 用户测试显示按钮不容易找到。\n    - strong: 查看原话 · 00:00:20\n  - button \"原话摘录 合作反馈来自三位设计师。 查看原话 · 00:00:40\":\n    - generic: 原话摘录\n    - generic: 合作反馈来自三位设计师。\n    - strong: 查看原话 · 00:00:40\n  - generic: 待确认\n  - button \"提醒 1\"\n  - button \"行动草稿\"\n  - button \"决定与结论\"\n  - button \"全部提醒 1\"\n  - generic: 已保存 · 待整理\n  - button \"编辑\"\n  - heading \"本次确认的结论\" [level=3]\n  - paragraph: 核对上方整理结果后，确认结论会保留在这里。\n  - generic \"已有整理 · 尚待核对\"\n  - heading \"下一步行动\" [level=2]\n  - paragraph: 本次还没有关联行动。\n  - heading \"尚未决定的问题\" [level=2]\n  - paragraph: 尚未记录未决问题。\n  - heading \"本次核对\" [level=3]\n  - paragraph: 身份、行动、记忆与来源分别处理，也可以稍后再说。\n  - button \"查看核对状态\":\n    - generic: 查看核对状态\n  - generic \"重点与原话依据\"\n  - button \"补充一条行动\":\n    - generic: 补充一条行动\n  - button \"导出预览\":\n    - generic: 导出预览\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"我的\":\n    - generic: 我的",
+    "capturedAt": "2026-10-12T06:56:26.103Z",
+    "status": "captured",
+    "title": "会后概览 · 普通事实与原话定位",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "概览"
+    },
+    "scene": "feedback-facts-finished",
+    "bytes": 35495,
+    "sha256": "ae2241f7f8ccb4ff749c9d2c6a858826562e88c9b4f0c2c6246b9a6fdd98628b"
   }
 ]

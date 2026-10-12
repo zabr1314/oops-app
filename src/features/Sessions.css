@@ -205,3 +205,14 @@
 .session-topic-points small { display: block; color: #a28ab8; font-size: 9px; margin-bottom: 4px; }
 .session-topic-points span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 12px; line-height: 1.7; color: #6c547f; overflow-wrap: anywhere; }
 .session-chapter summary em { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 11px; font-style: normal; color: #877397; line-height: 1.6; margin-top: 7px; overflow-wrap: anywhere; }
+.session-topic-point { width: 100%; border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; }
+.session-topic-point > strong, .session-chapter-point > span { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: #7950bc; font-size: 10px; font-weight: 500; line-height: 1.6; }
+.session-chapter-point { display: block; width: 100%; border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; }
+.session-chapter-point .icon { transform: none!important; }
+.session-topic-point:focus-visible, .session-chapter-point:focus-visible { outline: 2px solid #a47bd7; outline-offset: 3px; border-radius: 3px; }
+.session-overview-excerpts { margin-top: 12px; }
+.session-overview-excerpts > h3 { font-size: 12px; color: #8d7c9e; font-weight: 600; margin: 0 0 7px; }
+.session-overview-excerpt { padding: 14px 0; border-bottom: 1px solid #f0ebf6; }
+.session-overview-excerpt:last-child { border-bottom: 0; }
+.session-overview-excerpt > small { display: block; font-size: 10px; color: #9c87ae; margin-bottom: 5px; }
+.session-overview-excerpt > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-size: 13px; line-height: 1.7; color: #574362; overflow-wrap: anywhere; }

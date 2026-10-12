@@ -7,6 +7,8 @@ import { Badge, Button, Card, Chips, Empty, Field, Icon, Notice, Row, Search, Se
 import { taskAttentionReason, taskBelongsToMe, taskIsMyAttention, taskPrimaryAction } from '../taskWorkflow';
 import { assistantQuestion, unansweredAssistantQuestion } from '../assistantLogic';
 import { activeHomeRecording, recordingPeople, homeAssistantWork, assistantStage, homeDeviceSummary } from '../feedbackPresentation';
+import { PrivacyNoticeCard } from './PrivacyNotice';
+import { privacyNoticeAccepted, saveWelcomeChoices } from '../privacyNoticeLogic';
 import './Home.css';
 export function homeTitle(r:Route){return ({home:'首页',assistant:'问 Oops',voice:'说给 Oops 听',search:'搜索',notifications:'通知',welcome:'你好，我是 Oops'} as Record<string,string>)[r.view]||'Oops'}
 export function sessionVisible(d:AppData,id:string){return scopedSessionVisible(d,id)}
@@ -170,4 +172,40 @@ export function Voice(){const {navigate}=useOops();const [stage,setStage]=useSta
 export function SearchScreen(){const {data,navigate}=useOops();const [q,setQ]=useState('');const [kind,setKind]=useState('全部');const results=searchSavedContent(data,q,kind);return <div className="stack"><Search value={q} onChange={setQ} placeholder="搜索原话、会话、任务、记忆…"/><Chips items={['全部','会话','任务','记忆','人物']} value={kind} onChange={setKind}/>{!q&&<div className="search-hints">{['KPI','资料卡','预算','王宁'].map(x=><button className="chip" onClick={()=>setQ(x)} key={x}>{x}</button>)}</div>}<p className="meta">{data.settings.space} · {results.length}项结果</p>{results.length?results.map((r,i)=><Row key={`${r.title}${i}`} title={r.title} subtitle={`${r.kind} · ${r.body.slice(0,65)}`} icon={r.icon} onClick={()=>navigate(r.route)}/>):<Empty title="没有找到相关内容" body="换一个原话关键词，或清除当前筛选。" action="清除筛选" onAction={()=>{setQ('');setKind('全部')}}/>}</div>}
 export function notificationVisible(d:AppData,r:Route){if(r.view.startsWith('task')&&!d.tasks.some(t=>t.id===r.id&&!['已完成','已取消','已拒绝'].includes(t.status)))return false;if(r.view.startsWith('session')&&!d.sessions.some(s=>s.id===r.id&&!s.archived))return false;if(r.view.startsWith('memory')&&!d.memories.some(m=>m.id===r.id&&!m.deleted&&(!['memory-candidate','memory-conflict'].includes(r.view)||!m.confirmed)))return false;if(d.settings.space==='我的空间')return true;if(r.view.startsWith('task'))return d.tasks.some(t=>t.id===r.id&&taskVisible(d,t));if(r.view.startsWith('session'))return !!r.id&&sessionVisible(d,r.id);if(r.view.startsWith('memory'))return d.memories.some(m=>m.id===r.id&&memoryVisible(d,m.id,m.visibility==='项目共享'));return true}
 export function Notifications(){const {data,update,navigate}=useOops();const [filter,setFilter]=useState('全部');const items=data.notifications.filter(n=>notificationVisible(data,n.route)&&(filter==='全部'||!n.read));return <div className="stack"><div className="section-title"><Chips items={['全部','未读']} value={filter} onChange={setFilter}/><button className="text-action" onClick={()=>update(d=>({...d,notifications:d.notifications.map(n=>notificationVisible(d,n.route)?{...n,read:true}:n)}))}>全部已读</button></div>{items.length?items.map(n=><Card key={n.id} className={`notification-card ${!n.read?'unread':''}`} onClick={()=>{update(d=>({...d,notifications:d.notifications.map(x=>x.id===n.id?{...x,read:true}:x)}));navigate(n.route)}}><div><Icon name="bell"/><Badge tone={n.read?'muted':'purple'}>{n.read?'已读':'未读'}</Badge></div><h3>{n.title}</h3><p>{n.body}</p></Card>):<Empty title="都看过了" body="有新的结果和需要确认的内容时会出现在这里。" icon="bell"/>}<Row title="提醒与打扰方式" subtitle="决定哪些提醒需要即时出现" icon="sliders-horizontal" onClick={()=>navigate({view:'settings-notifications'})}/></div>}
-export function Welcome(){const {data,update,navigate}=useOops();const [step,setStep]=useState(0);const [name,setName]=useState(data.settings.name);const [role,setRole]=useState(data.settings.role);const [memory,setMemory]=useState(data.settings.toggles.memory);const [cloud,setCloud]=useState(data.settings.toggles.cloud);return <div className="stack"><div className="onboarding-head"><img src="/brand/mascot.png" alt="Oops"/><Badge>第{step+1}步 / 共3步</Badge><h2>{['先认识一下你','由你决定怎样记住','准备好了'][step]}</h2><p>{['称呼和角色会帮助 Oops 更懂你。','短期暂存和长期保存分别选择。','从一个真实场景开始。'][step]}</p></div>{step===0?<><Field label="怎么称呼你" value={name} onChange={setName}/><Field label="我的角色" value={role} onChange={setRole}/><Button disabled={!name.trim()} onClick={()=>{update(d=>({...d,settings:{...d.settings,name:name.trim(),role}}));setStep(1)}}>继续</Button></>:step===1?<><Notice>记录、长期记忆和声音身份分别选择；姓名核对不会自动共享声纹。</Notice><Toggle label="允许云端处理" value={cloud} onChange={setCloud}/><Toggle label="保存确认后的长期记忆" value={memory} onChange={setMemory}/><Notice>Recall只回看已经取得的最近5分钟片段。完整记录与私人便签在结束时分别选择保存范围。</Notice><Button tone="quiet" onClick={()=>navigate({view:'settings-privacy'})}>查看资料、记录与声音授权</Button><Button onClick={()=>{update(d=>({...d,settings:{...d.settings,toggles:{...d.settings.toggles,cloud,memory}}}));setStep(2)}}>保存选择</Button></>:<><Row title="开始一段记录" subtitle="先记下来，名称和项目之后再补" icon="microphone" onClick={()=>navigate({view:'session-mode'})}/><Row title="导入已有记录" subtitle="粘贴转写，或查看本地录音" icon="upload-simple" onClick={()=>navigate({view:'session-import'})}/><Row title="先问 Oops 一个问题" subtitle="仅自己可见" icon="chat-circle" onClick={()=>navigate({view:'assistant'})}/><Row title="快速设置助理偏好" subtitle="可跳过，用两句话描述你的习惯" icon="sliders-horizontal" onClick={()=>navigate({view:'settings-preferences'})}/><Button onClick={()=>navigate({view:'home'})}>去首页看看</Button></>}<Button tone="quiet" onClick={()=>navigate({view:'home'})}>稍后再设置</Button></div>}
+export function Welcome() {
+  const {data,update,navigate}=useOops();
+  const [step,setStep]=useState(0);
+  const heading=useRef<HTMLDivElement>(null);
+  useEffect(()=>{heading.current?.closest('[data-testid="mobile-scroll"]')?.scrollTo({top:0});},[step]);
+  const [name,setName]=useState(data.settings.name);
+  const [role,setRole]=useState(data.settings.role);
+  const [memory,setMemory]=useState(() => privacyNoticeAccepted(data) && data.settings.toggles.memory);
+  const [cloud,setCloud]=useState(() => privacyNoticeAccepted(data) && data.settings.toggles.cloud);
+  const save=()=>{
+    if(!privacyNoticeAccepted(data)||!name.trim())return;
+    update(current=>saveWelcomeChoices(current,{name,role,cloud,memory}));
+    setStep(2);
+  };
+  return <div className="stack welcome-onboarding">
+    <div className="onboarding-head" ref={heading}>{step!==1&&<img src="/brand/mascot.png" alt="Oops"/>}<Badge>第{step+1}步 / 共3步</Badge>
+      <h2>{['先了解信息怎么用','认识你，按你的选择记住','准备好了'][step]}</h2>
+      <p>{['读完说明后，由你确认是否继续设置。','称呼、角色和可选能力分别由你决定。','选一个场景体验 Oops。'][step]}</p>
+    </div>
+    {step===0?<PrivacyNoticeCard onConfirmed={()=>setStep(1)}/>:step===1?<>
+      <Field label="怎么称呼你" value={name} onChange={setName}/>
+      <Field label="我的角色" value={role} onChange={setRole}/>
+      <Toggle label="允许云端处理" value={cloud} onChange={setCloud} hint="原型设置；接入真实服务时另行说明与授权"/>
+      <Toggle label="保存确认后的长期记忆" value={memory} onChange={setMemory}/>
+      <Notice>这些选项不会开启声音身份或团队共享。记录、私人便签和外部操作仍需分别确认。</Notice>
+      <Button disabled={!name.trim()||!privacyNoticeAccepted(data)} onClick={save}>保存选择</Button>
+      <Button tone="quiet" onClick={()=>setStep(0)}>返回阅读说明</Button>
+    </>:<>
+      <Row title="开始一段记录" subtitle="先记下来，名称和项目之后再补" icon="microphone" onClick={()=>navigate({view:'session-mode'})}/>
+      <Row title="导入已有记录" subtitle="粘贴转写，或查看本地录音" icon="upload-simple" onClick={()=>navigate({view:'session-import'})}/>
+      <Row title="先问 Oops 一个问题" subtitle="仅自己可见" icon="chat-circle" onClick={()=>navigate({view:'assistant'})}/>
+      <Row title="快速设置助理偏好" subtitle="可跳过，用两句话描述你的习惯" icon="sliders-horizontal" onClick={()=>navigate({view:'settings-preferences'})}/>
+      <Button onClick={()=>navigate({view:'home'})}>去首页看看</Button>
+    </>}
+    <Button tone="quiet" onClick={()=>navigate({view:'home'})}>{step===0?'仅浏览示例，稍后设置':'稍后再设置'}</Button>
+  </div>;
+}

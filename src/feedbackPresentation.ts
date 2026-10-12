@@ -1,4 +1,4 @@
-import type { AppData, Session, Task } from './store';
+import type { AppData, Route, Session, Task, Transcript } from './store';
 import { sessionVisible, taskVisible } from './sourceAccess';
 import { taskBelongsToMe, taskClosed } from './taskWorkflow';
 
@@ -51,6 +51,57 @@ export function unknownConversationClues(data: AppData, personId?: string) {
       (personId && turn.personId === personId || anonymous(turn.speaker) && !turn.personId) &&
       data.settings.toggles[`speaker-confirmed:${session.id}:${turn.id}`] !== true
     ).map(turn => ({ session, turn, exactPerson: !!personId && turn.personId === personId })));
+}
+
+export type IdentityClue = { session: Session; turn: Transcript; exactPerson: boolean };
+function clueDateValue(clue: IdentityClue, reference = new Date()) {
+  const date = clue.session.date;
+  const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(reference);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value || 0);
+  let year = part('year'), month = part('month'), day = part('day');
+  const full = date.match(/(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})(?:日)?/);
+  const short = date.match(/(?:^|\s)(\d{1,2})[月/-](\d{1,2})(?:日)?/);
+  if (full) { year = Number(full[1]); month = Number(full[2]); day = Number(full[3]); }
+  else if (short) { month = Number(short[1]); day = Number(short[2]); }
+  else if (/今天|今日|昨天|昨日|前天/.test(date)) day -= /前天/.test(date) ? 2 : /昨天|昨日/.test(date) ? 1 : 0;
+  else return undefined;
+  if (month < 1 || month > 12 || (full || short) && (day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate())) return undefined;
+  const clock = date.match(/(\d{1,2}):(\d{2})/);
+  const hour = Number(clock?.[1] || 0), minute = Number(clock?.[2] || 0);
+  if (hour > 23 || minute > 59) return undefined;
+  const offset = clue.turn.time.split(':').reduce((total, value) => total * 60 + (Number(value) || 0), 0);
+  return Date.UTC(year, month - 1, day, hour - 8, minute) + offset * 1000;
+}
+function recentIdentityClues(clues: IdentityClue[], reference?: Date) {
+  return [...clues].sort((a, b) => (clueDateValue(b, reference) ?? -Infinity) - (clueDateValue(a, reference) ?? -Infinity));
+}
+/** A person's card may show only its explicit ID bindings, never the anonymous pool. */
+export function personIdentityClues(data: AppData, personId: string, reference?: Date): IdentityClue[] {
+  if (!data.people.some(person => person.id === personId)) return [];
+  return recentIdentityClues(unknownConversationClues(data, personId).filter(clue => clue.exactPerson), reference);
+}
+/** Unbound passages are offered separately and require an explicit person selection. */
+export function unboundIdentityClues(data: AppData, reference?: Date): IdentityClue[] {
+  return recentIdentityClues(unknownConversationClues(data).filter(clue => !clue.turn.personId), reference);
+}
+export function identityClueTopics(clue: IdentityClue): string[] {
+  const words = ['资料', '预算', '会议', '任务', '设计', '库存', 'PPT', '用户', '方案', '项目', '数据', '时间', '期限', '进度', '体验', '目标', '协作', '同步', '复盘', '指标', '产品', '研发', '计划', '日程'];
+  return words.filter(word => clue.turn.text.toLowerCase().includes(word.toLowerCase())).sort((a, b) => clue.turn.text.toLowerCase().indexOf(a.toLowerCase()) - clue.turn.text.toLowerCase().indexOf(b.toLowerCase())).slice(0, 3);
+}
+export function identityClueRoute(clue: IdentityClue, personId?: string, create = false): Route {
+  return { view: 'memory-unknown', ...(personId ? { id: personId } : {}), mode: JSON.stringify({ sessionId: clue.session.id, turnId: clue.turn.id, create }) };
+}
+/** Share/deep links cannot preselect another person's bound or now unavailable passage. */
+export function identityClueSelection(data: AppData, personId: string | undefined, mode: string | undefined) {
+  try {
+    const value: unknown = JSON.parse(mode || '');
+    if (!value || typeof value !== 'object') return undefined;
+    const input = value as { sessionId?: unknown; turnId?: unknown; create?: unknown };
+    if (typeof input.sessionId !== 'string' || typeof input.turnId !== 'string') return undefined;
+    const clues = personId ? [...personIdentityClues(data, personId), ...unboundIdentityClues(data)] : unboundIdentityClues(data);
+    const clue = clues.find(item => item.session.id === input.sessionId && item.turn.id === input.turnId);
+    return clue ? { ...clue, create: input.create === true } : undefined;
+  } catch { return undefined; }
 }
 
 export function preferenceDraft(values: { role: string; focus: string; description: string; avoid: string }) {

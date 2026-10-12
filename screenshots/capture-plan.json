@@ -1885,5 +1885,97 @@
         "role": "button"
       }
     ]
+  },
+  {
+    "key": "f07-privacy-notice",
+    "title": "首次使用 · 阅读隐私说明",
+    "group": "首页",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "阅读使用与隐私说明",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f08-welcome-choices",
+    "title": "首次使用 · 明确确认后的独立选择",
+    "group": "首页",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "我已阅读并了解本版使用与隐私说明",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "确认并继续",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f09-unknown-people",
+    "title": "人物列表 · 未关联交流线索与建档",
+    "group": "记忆",
+    "route": {
+      "view": "memory",
+      "mode": "人物"
+    },
+    "scene": "default"
+  },
+  {
+    "key": "f10-unknown-detail",
+    "title": "未知人物 · 匿名片段与档案线索分开",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "p3"
+    },
+    "scene": "default"
+  },
+  {
+    "key": "f11-unknown-build",
+    "title": "从原话建档 · 精确片段与独立声音许可",
+    "group": "记忆",
+    "route": {
+      "view": "memory-unknown",
+      "mode": "{\"sessionId\":\"session-001\",\"turnId\":\"tr3\",\"create\":true}"
+    },
+    "scene": "default"
+  },
+  {
+    "key": "f12-chapter-facts-live",
+    "title": "现场话题 · 没有任务也保留事实重点",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "现场"
+    },
+    "scene": "feedback-facts-live"
+  },
+  {
+    "key": "f13-chapter-facts-overview",
+    "title": "会后概览 · 普通事实与原话定位",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "概览"
+    },
+    "scene": "feedback-facts-finished"
   }
 ]

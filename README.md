@@ -1,13 +1,15 @@
 # Oops · 日常陪伴 App
 
+本轮补齐三项 P0：未知人物时间/话题/原话及建档入口前置，普通事实/观点的章节与会后重点，首次使用的隐私说明阅读与明确确认。新增27项测试，总计231项通过；更新13张实屏，画板共162张截图、185个入口。原Android与后端契约沿用；[实现与验证说明](docs/feedback-p0-gaps-20261012.md)列出具体边界和剩余P1。本轮完成本地浏览器操作与截图，公开站点实屏访问仍受保存的浏览器设置限制。
+
 这是可连续操作的移动 App 交互原型，包含首页、会话、任务、记忆、我的五个主入口。完整源码、素材、画板与运行说明都保存在这个仓库中。
 
 - **[统一体验中心：App / 真实页面 / 交互画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/showcase.html)**（推荐分享此链接）
 - [直接体验完整 App](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/)
 - [在线查看记录体验改进画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/record-improved.html)
-- [在线查看新版真实页面总览（155个页面与状态）](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/board.html)
+- [在线查看新版真实页面总览（162个页面与状态）](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/board.html)
 
-新版真实总览收录 **155 个实际页面与状态**，全部由当前 App 重新截图；[178 项功能交互画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/interactive-board.html) 保留原 131 项编号，新增 41 项 P0 页面与状态及 6 项本轮反馈状态，并连接当前入口。合并页面明确标注实际入口，尚未接通的旧细分能力也在页面说明中标明。两份画板可搜索、分组、缩放、查看实拍或打开对应可操作 App，使用独立示例，不读取或覆盖已保存数据。
+新版真实总览收录 **162 个实际页面与状态**，使用实际 App 截图，本轮重拍变化页面并补充新状态；[185 项功能交互画板](https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/interactive-board.html) 保留原 131 项编号，新增 41 项 P0 页面与状态及 13 项反馈状态，并连接当前入口。合并页面明确标注实际入口，尚未接通的旧细分能力也在页面说明中标明。两份画板可搜索、分组、缩放、查看实拍或打开对应可操作 App，使用独立示例，不读取或覆盖已保存数据。
 
 统一体验中心在同页切换三个模式，保留 App 当前页面与草稿、画板筛选和滚动位置。从画板进入对应 App 示例后，可返回原来的自由体验；示例与已保存个人数据隔离。支持分享当前模式、页面和示例场景，顶部也可直接进入原飞书意见表。旧三个链接继续可用。
 
@@ -107,7 +109,7 @@ npm run test:native-preview
 
 轻量开始、固定准备入口、跨页记录控制、重点备注、结束快照与单独便签选择、集中复盘、今天聊过和人物原话来源已实现。来源失效时，任务与旧成果待复核，授权撤回；显式个人空间覆盖来源共享。活动记录不能归档。键盘失焦和外层手机画面偏移已经修复，保留运行时原有滚动和手机安全区。
 
-记录体验阶段的10张页面实拍位于 `public/record-improved-shots/`，配套 `public/record-improved.html`。记录体验10图保留当时的阶段记录；当前整体版本以新版155张真实总览和178项交互画板为准。
+记录体验阶段的10张页面实拍位于 `public/record-improved-shots/`，配套 `public/record-improved.html`。记录体验10图保留当时的阶段记录；当前整体版本以新版162张真实总览和185项交互画板为准。
 
 ## 2026-10-08 会话与跨模块联动更新
 
