@@ -303,7 +303,15 @@ html, body { background: var(--canvas); }
 .oops-root .native-record-hero .button.primary { min-height: 52px; font-size: 16px !important; }
 .oops-root .native-record-hero #home-record-people { margin: 4px 0 16px; }
 .oops-root .record-under { color: var(--ink-3); font-size: 12px; font-weight: 600; margin: 14px 4px 0; }
-.oops-root .record-under button { color: var(--primary-text); font-weight: 800; border-left-color: var(--line); min-height: 32px; }
+.oops-root .record-under button { color: var(--primary-text); font-weight: 800; border-left-color: var(--line); min-height: 32px; white-space: nowrap; flex: none; }
+.oops-root .record-under > span { word-break: keep-all; }
+/* 360dp phones: keep the hero headline in whole words beside a smaller Pupu. */
+@media (max-width: 380px) {
+  .oops-root .native-record-heading h1 { font-size: 23px; }
+  .oops-root .native-record-hero.is-active .native-record-heading h1 { font-size: 22px; }
+  .oops-root .native-record-heading img, .oops-root .native-record-heading .pupu { width: 80px; }
+  .oops-root .native-record-heading .pupu { height: 80px; }
+}
 
 .oops-root .recording-dot { width: 10px; height: 10px; background: var(--rec); box-shadow: 0 0 0 4px var(--rec-soft); animation: oo-rec-blink 1.2s var(--ease-standard) infinite; }
 .oops-root .recording-dot.idle, .oops-root .recording-dot.paused { background: var(--ink-3) !important; box-shadow: 0 0 0 4px var(--fill) !important; animation: none !important; }
