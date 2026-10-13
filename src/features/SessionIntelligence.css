@@ -1,7 +1,7 @@
 .intelligence-page { gap: 14px; }
-.intelligence-hero { background: linear-gradient(135deg, #f0eaff, #faf8ff); border-color: #e6dcfa; padding: 20px; }
+.intelligence-hero { background: linear-gradient(135deg, var(--canvas), var(--surface)); border-color: var(--line); padding: 20px; }
 .intelligence-hero-top, .intelligence-hero-meta, .intelligence-result-head, .intelligence-card-source { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
-.intelligence-hero-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: #e2d5fb; }
+.intelligence-hero-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: var(--primary-soft); }
 .intelligence-hero h2 { margin: 15px 0 6px; font-size: 22px; letter-spacing: -.5px; }
 .intelligence-hero p { margin: 0; font-size: 12px; line-height: 1.65; color: var(--muted); }
 .intelligence-hero-meta { margin-top: 15px; font-size: 11px; color: var(--brand); }
@@ -11,7 +11,7 @@
 .intelligence-hero-meta .button .icon { width: 15px; height: 15px; }
 .intelligence-caption { display: flex; align-items: center; gap: 6px; margin: 0 2px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .intelligence-result { padding: 17px; }
-.intelligence-result.processed { border-color: #e4ddee; }
+.intelligence-result.processed { border-color: var(--line); }
 .intelligence-result-head { justify-content: flex-start; }
 .intelligence-result-head strong { flex: 1; font-size: 13px; }
 .intelligence-result-symbol { flex: none; width: 30px; height: 30px; display: grid; place-items: center; background: var(--soft); border-radius: 10px; }
@@ -29,20 +29,20 @@
 .intelligence-personal-context small { display: block; font-size: 10px; color: var(--muted); margin-top: 5px; }
 .intelligence-personal-context .button { font-size: 11px; padding: 8px; }
 .intelligence-sheet-text { white-space: pre-wrap; line-height: 1.8; font-size: 14px; color: var(--ink); margin: 6px 0; }
-.intelligence-evidence { background: #faf8ff; padding: 13px 15px; }
+.intelligence-evidence { background: var(--surface); padding: 13px 15px; }
 .intelligence-evidence small { font-size: 10px; color: var(--brand); }
 .intelligence-evidence p { margin: 6px 0 0; white-space: pre-wrap; line-height: 1.7; font-size: 13px; color: var(--ink); }
-.intelligence-quote { border-left: 2px solid #d8c8f3; padding: 0 0 0 12px; }
+.intelligence-quote { border-left: 2px solid var(--line); padding: 0 0 0 12px; }
 .intelligence-quote p { margin: 0 0 6px; white-space: pre-wrap; line-height: 1.7; color: var(--muted); font-size: 12px; }
 .intelligence-quote .source-link { margin: 4px 0; }
 .intelligence-understanding .intelligence-hero { background: white; padding: 17px; }
-.intelligence-understanding .intelligence-result-topic { padding: 21px 18px; background: linear-gradient(135deg, #eee7fd, #faf7ff); border-color: #dcccf1; }
-.intelligence-understanding .intelligence-result-topic .intelligence-body { font-size: 21px; font-weight: 650; line-height: 1.5; color: #402756; }
+.intelligence-understanding .intelligence-result-topic { padding: 21px 18px; background: linear-gradient(135deg, var(--primary-soft), var(--surface)); border-color: var(--line); }
+.intelligence-understanding .intelligence-result-topic .intelligence-body { font-size: 21px; font-weight: 650; line-height: 1.5; color: var(--ink); }
 .intelligence-understanding .intelligence-result:not(.intelligence-result-topic) { padding: 15px; border-radius: 14px; }
-.intelligence-decisions .intelligence-result { border-left: 3px solid #b49ad7; }
-.intelligence-notices .intelligence-hero { background: #fff9ef; border-color: #f0e1c9; }
-.intelligence-notices .intelligence-hero-icon { background: #f8ebd4; }
-.intelligence-notices .intelligence-result { border-left: 3px solid #d5b47c; }
-.intelligence-personal .intelligence-hero { background: linear-gradient(135deg, #f2eafb, #fcfaff); }
-.intelligence-personal .intelligence-result { border-radius: 14px; background: #fff; }
-.intelligence-local-label { color: #a195ad; font-size: 10px; }
+.intelligence-decisions .intelligence-result { border-left: 3px solid var(--line-strong); }
+.intelligence-notices .intelligence-hero { background: var(--warning-soft); border-color: var(--warning-soft); }
+.intelligence-notices .intelligence-hero-icon { background: var(--warning-soft); }
+.intelligence-notices .intelligence-result { border-left: 3px solid var(--warning); }
+.intelligence-personal .intelligence-hero { background: linear-gradient(135deg, var(--fill), var(--surface)); }
+.intelligence-personal .intelligence-result { border-radius: 14px; background: var(--surface); }
+.intelligence-local-label { color: var(--ink-3); font-size: 10px; }

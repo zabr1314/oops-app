@@ -1,12 +1,14 @@
-import { useId, type ReactNode } from 'react';
+import { useId, type CSSProperties, type ReactNode } from 'react';
 import { BottomSheet, Carousel, KeyboardInput, KeyboardTextarea, useKeyboard } from './mobile';
+import { Pupu, type PupuMood } from './Pupu';
 
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   if (target instanceof HTMLTextAreaElement) return !target.disabled && !target.readOnly;
   return target instanceof HTMLInputElement && !target.disabled && !target.readOnly && ['text', 'search', 'email', 'tel', 'url', 'password', 'number'].includes(target.type);
 }
 
-export function Icon({name,size=22}:{name:string;size?:number}){return <img className="icon" src={`/icons/${name}.svg`} alt="" width={size} height={size} draggable={false}/>}
+// Icons are drawn as masks (prototype.css .icon) so they take the colour of the text around them.
+export function Icon({name,size=22}:{name:string;size?:number}){return <span className="icon" aria-hidden="true" style={{'--icon':`url(/icons/${name}.svg)`,'--icon-size':`${size}px`} as CSSProperties}/>}
 export function Button({children,onClick,tone='primary',disabled=false,type='button',icon}:{children:ReactNode;onClick?:()=>void;tone?:'primary'|'secondary'|'danger'|'quiet';disabled?:boolean;type?:'button'|'submit';icon?:string}){const keyboard=useKeyboard();return <button className={`button ${tone}`} onClick={()=>{keyboard.hide();onClick?.()}} disabled={disabled} type={type}>{icon&&<Icon name={icon}/>}<span>{children}</span></button>}
 export function Card({children,className='',onClick}:{children:ReactNode;className?:string;onClick?:()=>void}){return onClick?<button className={`card clickable ${className}`} onClick={onClick}>{children}</button>:<section className={`card ${className}`}>{children}</section>}
 export function Row({title,subtitle,icon='file-text',trailing,onClick,badge}:{title:string;subtitle?:string;icon?:string;trailing?:ReactNode;onClick?:()=>void;badge?:string}){const keyboard=useKeyboard();const content=<><span className="row-icon"><Icon name={icon}/></span><span className="row-copy"><strong>{title}</strong>{subtitle&&<small>{subtitle}</small>}</span>{badge&&<Badge>{badge}</Badge>}{trailing||(onClick?<Icon name="caret-right" size={18}/>:null)}</>;return onClick?<button className="list-row" onClick={()=>{keyboard.hide();onClick?.()}}>{content}</button>:<div className="list-row">{content}</div>}
@@ -18,7 +20,8 @@ export function Toggle({label,value,onChange,hint}:{label:string;value:boolean;o
 export function Check({label,value,onChange}:{label:string;value:boolean;onChange:(value:boolean)=>void}){return <label className="check-row"><input aria-label={label} type="checkbox" checked={value} onChange={e=>onChange(e.target.checked)}/><span>{label}</span></label>}
 export function Tabs({items,value,onChange}:{items:string[];value:string;onChange:(value:string)=>void}){const keyboard=useKeyboard();return <div className="segmented" role="tablist">{items.map(x=><button key={x} role="tab" aria-selected={value===x} onClick={()=>{keyboard.hide();onChange(x)}}>{x}</button>)}</div>}
 export function Chips({items,value,onChange}:{items:string[];value:string;onChange:(value:string)=>void}){return <Carousel ariaLabel="筛选" className="chip-carousel" contentClassName="chip-track">{items.map(x=><button className={`chip ${value===x?'selected':''}`} key={x} aria-pressed={value===x} onClick={()=>onChange(x)}>{x}</button>)}</Carousel>}
-export function Empty({title,body,action,onAction,icon='tray'}:{title:string;body:string;action?:string;onAction?:()=>void;icon?:string}){return <div className="empty-state"><span><Icon name={icon} size={32}/></span><h3>{title}</h3><p>{body}</p>{action&&<Button onClick={onAction} tone="secondary">{action}</Button>}</div>}
+// `mood` is for emotional moments only (nothing yet, nothing found, all done); boundaries and errors keep the icon.
+export function Empty({title,body,action,onAction,icon='tray',mood}:{title:string;body:string;action?:string;onAction?:()=>void;icon?:string;mood?:PupuMood}){return <div className="empty-state">{mood?<span className="empty-art"><Pupu mood={mood}/></span>:<span><Icon name={icon} size={32}/></span>}<h3>{title}</h3><p>{body}</p>{action&&<Button onClick={onAction} tone="secondary">{action}</Button>}</div>}
 export function Sheet({open,onClose,title,children}:{open:boolean;onClose:()=>void;title:string;children:ReactNode}){return <BottomSheet open={open} onOpenChange={v=>{if(!v)onClose()}} title={title}><div className="sheet-content">{children}</div></BottomSheet>}
 export function Notice({children,tone='soft'}:{children:ReactNode;tone?:string}){return <div className={`notice ${tone}`}>{children}</div>}
 export function Avatar({name}:{name:string}){return <span className="avatar">{name.slice(0,1)}</span>}

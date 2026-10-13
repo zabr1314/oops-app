@@ -213,7 +213,7 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 没有真实 SDK 禁用落盘的可验证接口时，真实录音豆日常模式在初始化前明确阻止，不静默改音源或宣称满足五分钟策略；手机麦和录音豆模拟不受影响。正式会议 SDK 冗余音频只进入本场受管临时目录，传输关闭确认后清理，异常残留仅清理新命名空间；旧 bean 目录不追溯删除。代码检查、公开隔离示例发布、真实服务部署、APK／SDK 编译及真人验收分别记录，详情见 docs/p0-backend-fixes-20261013.md。
 
-## 安卓 H5 采用 Oops 设计语言（2026-10-13）
+## 安卓 H5 与网页端采用 Oops 设计语言（2026-10-13）
 
 用户要求按品牌 logo 设计的「Oops 设计语言」（设计系统 https://claude.ai/artifact/3CTw3hmM1WXNBxmALvaLxh）重新设计安卓 App 的界面、交互和动效，范围是 `android/app/src/main/assets/web/` 的 H5 与原生外壳资源，直接改代码。样式集中在 `oops-design.css`（在 `proto.css`、`app.css` 之后加载，只改外观不改行为），吉祥物由 `pupu.js` 绘制；业务规则、桥接协议、接口和保存策略不变。
 
@@ -222,3 +222,4 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 - 每屏一个渐变重点（主按钮）；红色只表示正在录音；所有可点元素按下有果冻回弹；页面、面板、Toast、新转写句子有短暂入场动画。
 - 录音控制在会话现场页完整显示，其他页面默认收成一行，「找回刚才」与「结束」一点即达，可展开；展开状态不跨页面或分栏继承（与 React 版定稿一致）。
 - 启动图标用官方噗噗原图（自适应图标，主题图标用剪影），通知栏小图标为聆听中的噗噗剪影。本机无 Android SDK，图标与原生改动未构建 APK、未真机验收。详情与验证见 `docs/android-design-language-20261013.md`。
+- 网页端（React，2026-10-13 用户要求「一起改了」）用同一套语言：令牌在 `src/prototype.css` 开头（定义在 `:root`，底部面板在 `.oops-root` 之外也能取到），设计层在文件末尾，噗噗组件是 `src/Pupu.tsx`。新样式只用令牌，不再写零散色值；通用组件规则保持原样式的权重，页面自己的尺寸规则优先。卡片里的主按钮用纯主色，页面主操作保留渐变。`Empty` 只在情绪时刻传 `mood`（空、没找到、完成、等待），权限边界和错误提示保留图标。受保护的运行时文件未动；底部面板的弹出动画属于运行时，不另加。体验中心、安卓流程预览页和两份画板的外层配色已同步到令牌。网页端改版后全部 194 张实屏已重拍、两份画板已重建；网站未重新部署，需用户明确要求后再发布。详情见 `docs/web-design-language-20261013.md`。
