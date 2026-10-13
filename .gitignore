@@ -44,3 +44,10 @@ evidence/
 # Voiceprint prototype: venv, downloaded models, enrolled embeddings
 .venv-voice/
 models/
+
+# Generated from the current Android H5 sources before preview/build.
+/public/native-preview/
+
+# Anker hackathon toolkit: SDK binaries and contest credentials, never committed
+【黑客松智能录音赛道】工具资料包/
+android/app/libs/soundcore/

@@ -1,9 +1,11 @@
 import { budgetEvidence } from '../budgetLogic';
 export { budgetEvidence } from '../budgetLogic';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useOops, type AppData, type Route, type Session, type Transcript, type Memory, type Task } from '../store';
 import { Avatar, Badge, Button, Card, Check, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, SelectField, Sheet, Source, Tabs, Toggle } from '../ui';
 import { useViewState } from '../viewState';
+import { applyStorageDeadlines, availableSessionTurns, isTemporaryDaily, newStoragePolicy, pinSessionEvidence, retentionDays } from '../storagePolicy';
+import { MeetingStorageFields, SessionStorageStatus } from './StoragePolicy';
 import { sharedMemoryEligible } from '../memoryAccess';
 import { findSourceTask, invalidateSessionSources, makeSourceReference, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible } from '../sourceAccess';
 import { buildReviewItems, finishSessionReviewRound, openActionDraft, restoreSessionRevision, reviewDraftSourceMode, sessionNeedsReview, setSessionShared, type ReviewDraft, type SessionReviewItem } from '../sessionLogic';
@@ -12,8 +14,9 @@ import './Sessions.css';
 import { ListeningScreen } from './Listening';
 import { SessionIntelligence } from './SessionIntelligence';
 import { TaskSuggestions } from './TaskSuggestions';
-import { refreshTaskSuggestions, taskSuggestionPendingCount } from '../taskSuggestionsLogic';
-import { refreshSessionIntelligence, readSessionIntelligence, beginIntelligenceTopic } from '../sessionIntelligenceLogic';
+import { refreshTaskSuggestions, taskSuggestionOwners } from '../taskSuggestionsLogic';
+import { refreshSessionIntelligence, beginIntelligenceTopic } from '../sessionIntelligenceLogic';
+import { prepareSessionCandidates, readSessionPresentation } from '../sessionPresentationLogic';
 
 
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -48,14 +51,14 @@ const visibleTask = (data: AppData, task: Task, publicOnly = false) => {
 const readList = (value?: string): string[] => { try { const rows = JSON.parse(value || '[]'); return Array.isArray(rows) ? rows.filter(x => typeof x === 'string') : []; } catch { return []; } };
 const digest = (session: Session, publicOnly = false) => session.transcript.filter(t => !publicOnly || !t.private).slice(-5).map(t => `${t.speaker}：${t.text}`).filter(Boolean);
 const turnLabel = (turn: Transcript, session?: Session) => turn.time || `片段${Math.max(0, session?.transcript.findIndex(t => t.id === turn.id) ?? 0) + 1} · 时间未提供`;
-const sourceMatch = (item: { sourceId?: string; sourceTime?: string }, turn: Transcript) => item.sourceId !== undefined ? item.sourceId === turn.id : !!item.sourceTime && item.sourceTime === turn.time;
+const sourceMatch = (item: { sourceId?: string; sourceTime?: string }, turn: Transcript) => item.sourceId !== undefined ? item.sourceId.replace(/^evidence-/, '') === turn.id.replace(/^evidence-/, '') : !!item.sourceTime && item.sourceTime === turn.time;
 const sessionTasks = (data: AppData, session: Session, publicOnly = false) => data.tasks.filter(task => (task.sourceSession === session.id || (task as ReviewableTask).relatedSessionId === session.id) && visibleTask(data, task, publicOnly));
 type ReviewItem = SessionReviewItem;
 function reviewItems(data: AppData, session: Session): ReviewItem[] {
   try { const items = JSON.parse(data.settings.retention[`session-review-items:${session.id}`] || '[]'); return Array.isArray(items) ? items.filter(x => x && typeof x.id === 'string' && typeof x.text === 'string' && ['conclusion', 'question'].includes(x.kind)) : []; } catch { return []; }
 }
 function sharedReviewEligible(data: AppData, session: Session, item: ReviewItem) {
-  return item.confirmed && !flag(data, `review-${session.id}`) && (item.sourceId === undefined || !!item.sourceId && session.transcript.some(turn => turn.id === item.sourceId && !turn.private));
+  return item.confirmed && !flag(data, `review-${session.id}`) && (item.sourceId === undefined || !!item.sourceId && [...session.transcript, ...(session.savedEvidence || [])].some(turn => turn.id === item.sourceId && !turn.private));
 }
 function confirmedReview(data: AppData, session: Session, publicOnly = false): ReviewItem[] {
   const items = reviewItems(data, session);
@@ -105,14 +108,16 @@ export function useSessionRecorder() {
       let attachments = s.attachments;
       let tasks = current.tasks;
       if (index < script.length && elapsed % 4 === 0) {
-        const line: Transcript = { id: `sample-${s.id}-${index}`, speaker: script[index][0], time: clock(elapsed), text: script[index][1] };
+        const line: Transcript = { receivedAt: Date.now(), id: `sample-${s.id}-${index}`, speaker: script[index][0], time: clock(elapsed), text: script[index][1] };
         transcript = [...transcript, line];
         if (s.kind === '会议' && index === 2 && !attachments.includes('会中资料卡 · 返回方式')) attachments = [...attachments, '会中资料卡 · 返回方式'];
         if (s.kind === '会议' && index === 5 && !attachments.includes('B-108 库存资料 · 示例')) attachments = [...attachments, 'B-108 库存资料 · 示例'];
         if (s.kind === '会议' && index === 4) tasks = [...tasks, { id: uid('TASK'), title: '准备第三季度KPI复盘', description: line.text, owner: '我', requester: '王宁', due: '', priority: '中', status: '待承接', aiStatus: '未启动', relatedSessionId: s.id, sourceSession: s.id, sourceId: line.id, sourceTime: line.time, activities: ['示例讨论形成待承接建议'], results: [], version: 1 }];
       }
       const next = { ...patchSession(current, s.id, { transcript, attachments, participants: [...new Set([...s.participants, ...transcript.map(t => t.speaker)])], duration: elapsed >= 3600 ? clock(elapsed) : clock(elapsed).slice(3) }), tasks, settings: { ...current.settings, retention: { ...current.settings.retention, [`sample-index:${s.id}`]: String(transcript === s.transcript ? index : index + 1) } } };
-      const withSuggestions = transcript !== s.transcript ? refreshTaskSuggestions(next, s.id) : next;
+      const bounded = applyStorageDeadlines(next);
+      if (isTemporaryDaily(s)) return bounded;
+      const withSuggestions = transcript !== s.transcript ? refreshTaskSuggestions(bounded, s.id) : bounded;
       return next.settings.toggles.proactive !== false && (transcript !== s.transcript || elapsed % 30 === 0) ? refreshSessionIntelligence(withSuggestions, s.id, transcript !== s.transcript ? undefined : 'notices') : withSuggestions;
     }), 1000);
     return () => window.clearInterval(interval);
@@ -181,36 +186,52 @@ function sessionDay(session: Session) {
   const delta = Math.round((new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()) / 86400000);
   return delta === 0 ? '今天' : delta === 1 ? '昨天' : `${date.getMonth() + 1}月${date.getDate()}日`;
 }
-const needsSessionReview = (data: AppData, session: Session) => sessionNeedsReview(data, session, data.settings.space === '我的空间' ? reviewQueue(data, session).length : 0);
+const needsSessionReview = (data: AppData, session: Session) => sessionNeedsReview(data, session, data.settings.space === '我的空间' ? readSessionPresentation(data, session).pendingCount : 0);
 
 function SessionList() {
   const { data, update, navigate, toast, route } = useOops();
   const root = useRef<HTMLDivElement>(null);
   const visibleProjects = data.projects.filter(p => data.settings.space === '我的空间' || (data.settings.retention[`project-space:${p.id}`] || 'Oops 产品团队') === data.settings.space);
   const projectContext = visibleProjects.some(p => p.name === route.mode) ? route.mode! : 'all';
+  const currentRecording = data.sessions.find(item => item.id === data.activeSessionId && canViewSession(data, item) && ['进行中', '暂停'].includes(item.status));
+  const presentations = useMemo(() => new Map(data.sessions.filter(s => canViewSession(data, s)).map(s => [s.id, readSessionPresentation(data, s, data.settings.space !== '我的空间')])), [data]);
+  const needsReview = (s: Session) => sessionNeedsReview(data, s, presentations.get(s.id)?.pendingCount || 0);
   const [filters, setFilters] = useViewState(`session-list:${data.settings.space}:${projectContext}`, { query: '', project: projectContext === 'all' ? '全部项目' : projectContext, kind: '全部', status: '全部', archive: '未归档' });
   const [filterOpen, setFilterOpen] = useState(false), [selected, setSelected] = useState<Session | null>(null), [recycleOpen, setRecycleOpen] = useState(false);
   useReadingPosition(root, `session-list-scroll:${data.settings.space}:${projectContext}`);
   const change = (key: keyof typeof filters, value: string) => setFilters(current => ({ ...current, [key]: value }));
   const clear = () => setFilters({ query: '', project: '全部项目', kind: '全部', status: '全部', archive: '未归档' });
   const deleted = Object.entries(data.settings.retention).filter(([key]) => key.startsWith('deleted-session:')).flatMap(([, value]) => { try { return [JSON.parse(value) as Session]; } catch { return []; } });
-  const rows = data.sessions.filter(s => canViewSession(data, s) && (filters.project === '全部项目' || s.project === filters.project) && (filters.archive === '全部记录' || filters.archive === '已归档' ? filters.archive === '全部记录' || s.archived : !s.archived) && (filters.kind === '全部' || s.kind === filters.kind) && (filters.status === '全部' || filters.status === '待核对' ? filters.status === '全部' || needsSessionReview(data, s) : s.status === filters.status) && `${s.title} ${s.project} ${s.transcript.filter(t => data.settings.space === '我的空间' || !t.private).map(t => t.text).join(' ')}`.toLowerCase().includes(filters.query.trim().toLowerCase())).sort((a, b) => sessionDateValue(b) - sessionDateValue(a));
+  const rows = data.sessions.filter(s => canViewSession(data, s) && (filters.project === '全部项目' || s.project === filters.project) && (filters.archive === '全部记录' || filters.archive === '已归档' ? filters.archive === '全部记录' || s.archived : !s.archived) && (filters.kind === '全部' || s.kind === filters.kind) && (filters.status === '全部' || filters.status === '待核对' ? filters.status === '全部' || needsReview(s) : s.status === filters.status) && `${s.title} ${s.project} ${s.transcript.filter(t => data.settings.space === '我的空间' || !t.private).map(t => t.text).join(' ')}`.toLowerCase().includes(filters.query.trim().toLowerCase())).sort((a, b) => sessionDateValue(b) - sessionDateValue(a));
   const groups = new Map<string, Session[]>();
   for (const s of rows) {
-    const group = s.id === data.activeSessionId && ['进行中', '暂停'].includes(s.status) ? '正在记录' : needsSessionReview(data, s) ? '待核对' : s.status === '待开始' ? '计划记录' : sessionDay(s);
+    const group = s.id === data.activeSessionId && ['进行中', '暂停'].includes(s.status) ? '正在记录' : needsReview(s) ? '待核对' : s.status === '待开始' ? '计划记录' : sessionDay(s);
     groups.set(group, [...groups.get(group) || [], s]);
   }
   const ordered = [...['正在记录', '待核对', '计划记录'].filter(k => groups.has(k)), ...Array.from(groups.keys()).filter(k => !['正在记录', '待核对', '计划记录'].includes(k))];
   const filterCount = Number(filters.project !== '全部项目') + Number(filters.kind !== '全部') + Number(filters.status !== '全部') + Number(filters.archive !== '未归档');
   return <div className="stack sessions-feature" ref={root}>
-    <Button icon="microphone" onClick={() => navigate({ view: 'session-mode' })}>开始记录</Button>
+    {currentRecording ? <Row title="继续当前记录" subtitle={currentRecording.title} icon="waveform" onClick={() => navigate({ view: 'session-detail', id: currentRecording.id, mode: '现场' })} /> : <Button icon="microphone" onClick={() => navigate({ view: 'session-mode' })}>开始记录</Button>}
     <div className="session-list-search"><Search value={filters.query} onChange={v => change('query', v)} placeholder="搜索记录或原话" /><button className="session-filter-button" onClick={() => setFilterOpen(true)} aria-label="筛选记录"><Icon name="sliders-horizontal" size={20} />{filterCount > 0 && <b>{filterCount}</b>}</button></div>
     <div className="session-list-secondary"><button onClick={() => navigate({ view: 'session-import' })}><Icon name="upload-simple" size={17} />导入已有记录</button><span>{rows.length}段记录{filterCount ? ' · 已筛选' : ''}</span></div>
     {filterCount > 0 && <div className="session-filter-summary"><span>{[filters.project !== '全部项目' && filters.project, filters.kind !== '全部' && filters.kind, filters.status !== '全部' && filters.status, filters.archive !== '未归档' && filters.archive].filter(Boolean).join(' · ')}</span><button onClick={clear}>清除</button></div>}
     {ordered.map(group => <section className="session-list-group" key={group}><SectionTitle>{group}</SectionTitle>{groups.get(group)!.map(s => {
-      const tasks = sessionTasks(data, s), needsReview = needsSessionReview(data, s), personal = data.settings.space === '我的空间';
-      const action = needsReview ? '查看并核对' : s.id === data.activeSessionId ? '继续当前记录' : tasks.some(t => !['已完成', '已取消', '已拒绝'].includes(t.status)) ? `${tasks.filter(t => !['已完成', '已取消', '已拒绝'].includes(t.status)).length}项行动跟进中` : s.status === '待开始' ? '准备后开始' : '查看已保存内容';
-      return <div className="session-list-item" key={s.id}><Card onClick={() => navigate({ view: s.status === '待开始' ? 'session-create' : 'session-detail', id: s.id })}><div className="session-card-top"><span className="session-kind"><Icon name={s.kind === '会议' ? 'users-three' : s.kind === '灵感' ? 'lightbulb' : 'waveform'} /></span><Badge tone={needsReview ? 'amber' : s.id === data.activeSessionId ? 'purple' : 'gray'}>{s.archived ? '已归档' : needsReview ? '待核对' : s.status === '已结束' && personal ? '已核对' : s.status}</Badge></div><h3>{s.title}</h3><p className="meta">{s.date} · {s.duration || '待开始'} · {s.kind}</p><p className="session-preview">{(personal ? confirmedReview(data, s).find(x => x.kind === 'conclusion')?.text || s.summary[0] : digest(s, true)[0]) || s.agenda[0] || '名称与计划可稍后补充'}</p><div className="session-card-bottom"><span>{s.project || '个人记录'}</span><strong>{action}</strong></div></Card>{personal && <button className="session-more" aria-label={`管理${s.title}`} onClick={() => setSelected(s)}><Icon name="dots-three" /></button>}</div>;
+      const tasks = sessionTasks(data, s), personal = data.settings.space === '我的空间';
+      const results = presentations.get(s.id)!, needsReviewItem = needsReview(s);
+      const action = s.id === data.activeSessionId ? '继续当前记录' : s.status === '待开始' ? '准备后开始' : '打开本次记录';
+      const enter = () => navigate({ view: s.status === '待开始' ? 'session-create' : 'session-detail', id: s.id });
+      return <div className="session-list-item" key={s.id}><Card className="session-record-card">
+        <button className="session-record-open" onClick={enter}><div className="session-card-top"><span className="session-kind"><Icon name={s.kind === '会议' ? 'users-three' : s.kind === '灵感' ? 'lightbulb' : 'waveform'} /></span><Badge tone={needsReviewItem ? 'amber' : s.id === data.activeSessionId ? 'purple' : 'gray'}>{s.archived ? '已归档' : s.status}</Badge></div><h3>{s.title}</h3><p className="meta">{s.date} · {s.duration || '待开始'} · {s.kind}</p></button>
+        <button className="session-topic-link" onClick={() => navigate({ view: personal ? 'session-understanding' : 'session-detail', id: s.id })}><Icon name="chat-circle-text" size={14} /><span>话题 · {results.topic || '尚未开始讨论'}</span><Icon name="caret-right" size={13} /></button>
+        <div className="session-result-tags">
+          {results.decisions.length > 0 && <button onClick={() => navigate({ view: 'session-decisions', id: s.id })}>决定 / 结论 <b>{results.decisions.length}</b></button>}
+          {(results.actions.length > 0 || tasks.length > 0) && <button onClick={() => navigate({ view: 'session-detail', id: s.id, mode: '行动' })}>行动 <b>{results.actions.length + tasks.length}</b></button>}
+          {personal && s.kind === '灵感' && <button onClick={() => navigate({ view: 'session-inspiration', id: s.id })}>灵感 <Icon name="arrow-up-right" size={12} /></button>}
+        </div>
+        {results.checks.length > 0 && <div className="session-pending-links"><span>待确认</span>{results.checks.map(check => <button key={check.label} onClick={() => navigate(check.route)}>{check.label} {check.count}<Icon name="caret-right" size={11} /></button>)}</div>}
+        <div className="session-card-bottom"><span>{s.project || '个人记录'}</span><button onClick={enter}>{action}<Icon name="caret-right" size={13} /></button></div>
+      </Card>{personal && <button className="session-more" aria-label={`管理${s.title}`} onClick={() => setSelected(s)}><Icon name="dots-three" /></button>}</div>;
+
     })}</section>)}
     {!rows.length && <Empty title="没有匹配记录" body="换个关键词，或调整筛选条件。" action="清除筛选" onAction={clear} />}
     <Sheet open={filterOpen} onClose={() => setFilterOpen(false)} title="筛选记录"><SelectField label="项目" value={filters.project} onChange={v => change('project', v)} options={['全部项目', ...visibleProjects.map(p => p.name)]} /><SelectField label="记录类型" value={filters.kind} onChange={v => change('kind', v)} options={['全部', '会议', '日常', '灵感', '练习', 'Recall']} /><SelectField label="状态" value={filters.status} onChange={v => change('status', v)} options={['全部', '进行中', '暂停', '待开始', '待核对', '已结束']} /><SelectField label="归档" value={filters.archive} onChange={v => change('archive', v)} options={['未归档', '已归档', '全部记录']} /><Button onClick={() => setFilterOpen(false)}>查看筛选结果</Button><Button tone="quiet" onClick={clear}>清除全部条件</Button></Sheet>
@@ -224,7 +245,10 @@ function QuickStart() {
   const { data, update, route, navigate, toast, requestEnd } = useOops();
   const kinds: Session['kind'][] = ['会议', '日常', '灵感', '练习'];
   const recent = data.settings.retention['record-last-kind'];
-  const [kind, setKind] = useState<Session['kind']>(kinds.includes(route.mode as Session['kind']) ? route.mode as Session['kind'] : kinds.includes(recent as Session['kind']) ? recent as Session['kind'] : '会议');
+  const [kind, setKind] = useState<Session['kind']>(kinds.includes(route.mode as Session['kind']) ? route.mode as Session['kind'] : kinds.includes(recent as Session['kind']) ? recent as Session['kind'] : '日常');
+  const [cloudSave, setCloudSave] = useState(false);
+  const [audioDays, setAudioDays] = useState(String(retentionDays(data.settings.retention['meeting-audio-days'])));
+  const [textDays, setTextDays] = useState(String(retentionDays(data.settings.retention['meeting-transcript-days'])));
   const active = data.sessions.find(x => x.id === data.activeSessionId && ['进行中', '暂停'].includes(x.status));
   const activeVisible = !!active && canViewSession(data, active);
   function continueActive() {
@@ -234,12 +258,13 @@ function QuickStart() {
   }
   function start() {
     if (active) { continueActive(); return; }
+    if (kind === '会议' && !cloudSave) { toast('先明确选择会议云端保存，或使用日常临时聆听'); return; }
     const id = uid('session');
-    const record: Session = { id, title: untitled(kind), kind, date: dateLabel(), duration: '00:00', status: '进行中', transcript: [], summary: [], agenda: [], participants: ['我'], attachments: [], privateNotes: [], project: '个人记录' };
+    const record: Session = { id, title: untitled(kind), kind, date: dateLabel(), duration: '00:00', status: '进行中', transcript: [], summary: [], agenda: [], participants: ['我'], attachments: [], privateNotes: [], project: '个人记录', storage: { ...newStoragePolicy(data, kind === '会议' ? 'meeting' : 'daily', cloudSave), audioRetentionDays: retentionDays(audioDays), transcriptRetentionDays: retentionDays(textDays) } };
     update(c => ({ ...c, sessions: [record, ...c.sessions], activeSessionId: id, settings: { ...c.settings, space: '我的空间', toggles: { ...c.settings.toggles, [`shared-${id}`]: false }, retention: { ...c.settings.retention, 'record-last-kind': kind, [`session-${id}`]: '完整保存' } } }));
     toast('本地示例记录已开始，名称与参与者可稍后补充'); navigate({ view: 'session-detail', id });
   }
-  return <div className="stack session-quickstart"><div className="session-start-heading"><Icon name="microphone" size={30} /><h2>先把这一刻留下</h2><p>名称、项目和参与者，之后再补。</p></div>{active && <Card className="session-active-card"><Badge>{activeVisible ? active.status : '活动记录'}</Badge><h3>{activeVisible ? active.title : '另一个空间已有活动记录'}</h3><p className="meta">{activeVisible ? `${active.duration} · 同时保留一段活动记录` : '回到我的空间后，可继续或结束这段记录。'}</p><Button icon="arrow-right" onClick={continueActive}>{activeVisible ? '继续当前记录' : '回到当前记录'}</Button>{activeVisible && data.settings.space === '我的空间' && <Button tone="secondary" onClick={() => { update(c => ({ ...c, settings: { ...c.settings, retention: { ...c.settings.retention, 'record-next-kind': kind } } })); requestEnd(active.id); }}>结束后新建</Button>}</Card>}<SectionTitle>这次用来做什么？</SectionTitle><div className="session-kind-grid">{kinds.map(k => <button key={k} type="button" className={kind === k ? 'selected' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}><Icon name={{会议:'users-three',日常:'chat-circle',灵感:'lightbulb',练习:'sparkle',Recall:'clock-counter-clockwise'}[k]} size={24} /><strong>{k}</strong><small>{{会议:'留下讨论与行动',日常:'随手记住沟通',灵感:'接住零散想法',练习:'练习清楚表达',Recall:''}[k]}</small></button>)}</div><div className="session-start-scope"><span><Icon name="waveform" size={16} />本地示例输入</span><span><Icon name="lock-key" size={16} />保存到我的空间</span></div><Button disabled={!!active} icon="play" onClick={start}>现在开始</Button><p className="meta">预设内容演示，不打开麦克风。默认只有“我”，其他声音出现后再核对。</p><Row title="智能聆听" subtitle="先检测对话，再决定是否开始记录" icon="waveform" onClick={() => navigate({ view: 'session-listening' })} /><Row title="完整会议准备" subtitle="可选名称、项目、成员与议程" icon="list-checks" onClick={() => navigate({ view: 'session-create', mode: kind })} /><Row title="找回最近5分钟" subtitle="短期暂存，选择后才长期留下" icon="clock-counter-clockwise" onClick={() => navigate({ view: 'session-recall' })} /><Row title="导入已有内容" subtitle="粘贴文字或选择本地文件" icon="upload-simple" onClick={() => navigate({ view: 'session-import' })} /></div>;
+  return <div className="stack session-quickstart"><div className="session-start-heading"><Icon name="microphone" size={30} /><h2>先把这一刻留下</h2><p>名称、项目和参与者，之后再补。</p></div>{active && <Card className="session-active-card"><Badge>{activeVisible ? active.status : '活动记录'}</Badge><h3>{activeVisible ? active.title : '另一个空间已有活动记录'}</h3><p className="meta">{activeVisible ? `${active.duration} · 同时保留一段活动记录` : '回到我的空间后，可继续或结束这段记录。'}</p><Button icon="arrow-right" onClick={continueActive}>{activeVisible ? '继续当前记录' : '回到当前记录'}</Button>{activeVisible && data.settings.space === '我的空间' && <Button tone="secondary" onClick={() => { update(c => ({ ...c, settings: { ...c.settings, retention: { ...c.settings.retention, 'record-next-kind': kind } } })); requestEnd(active.id); }}>结束后新建</Button>}</Card>}<SectionTitle>这次用来做什么？</SectionTitle><div className="session-kind-grid">{kinds.map(k => <button key={k} type="button" className={kind === k ? 'selected' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}><Icon name={{会议:'users-three',日常:'chat-circle',灵感:'lightbulb',练习:'sparkle',Recall:'clock-counter-clockwise'}[k]} size={24} /><strong>{k}</strong><small>{{会议:'留下讨论与行动',日常:'随手记住沟通',灵感:'接住零散想法',练习:'练习清楚表达',Recall:''}[k]}</small></button>)}</div><div className="session-start-scope"><span><Icon name="waveform" size={16} />本地示例输入</span><span><Icon name="lock-key" size={16} />保存到我的空间</span></div>{kind === '会议' ? <MeetingStorageFields confirmed={cloudSave} onConfirmed={setCloudSave} audioDays={audioDays} onAudioDays={setAudioDays} textDays={textDays} onTextDays={setTextDays} /> : <Notice>完整原音与全文只暂存最近5分钟，停止后清除。私人候选重点需核对才进入长期记忆。</Notice>}<Button disabled={!!active || kind === '会议' && !cloudSave} icon="play" onClick={start}>现在开始</Button><p className="meta">预设内容演示，不打开麦克风。默认只有“我”，其他声音出现后再核对。</p><Row title="智能聆听" subtitle="先检测对话，再决定是否开始记录" icon="waveform" onClick={() => navigate({ view: 'session-listening' })} /><Row title="完整会议准备" subtitle="可选名称、项目、成员与议程" icon="list-checks" onClick={() => navigate({ view: 'session-create', mode: kind })} /><Row title="找回最近5分钟" subtitle="短期暂存，选择后才长期留下" icon="clock-counter-clockwise" onClick={() => navigate({ view: 'session-recall' })} /><Row title="导入已有内容" subtitle="粘贴文字或选择本地文件" icon="upload-simple" onClick={() => navigate({ view: 'session-import' })} /></div>;
 }
 
 function CreateSession() {
@@ -248,6 +273,9 @@ function CreateSession() {
   const savedScope = data.settings.retention[`session-${existing?.id}`];
   const [draft, setDraft] = useViewState(`session-prepare:${route.id || 'new'}:${route.id ? '' : route.mode || '会议'}:${data.settings.space}`, { title: existing?.title || '', kind: existing?.kind || (route.mode as Session['kind']) || '会议', project: existing?.project || '个人记录', members: existing?.participants || ['我'], agenda: existing?.agenda.join('\n') || '', allowShare: existing ? flag(data, `shared-${existing.id}`) : false, scope: savedScope === '结束后选择片段' ? '手动选择片段' : ['完整保存', '手动选择片段', '仅保存非敏感片段'].includes(savedScope || '') ? savedScope : '完整保存' });
   const { title, kind, project, members, agenda, allowShare, scope } = draft;
+  const [cloudSave, setCloudSave] = useState(existing?.storage?.cloudSaveConfirmed === true);
+  const [audioDays, setAudioDays] = useState(String(existing?.storage?.audioRetentionDays || retentionDays(data.settings.retention['meeting-audio-days'])));
+  const [textDays, setTextDays] = useState(String(existing?.storage?.transcriptRetentionDays || retentionDays(data.settings.retention['meeting-transcript-days'])));
   const setTitle = (title: string) => setDraft(d => ({ ...d, title })), setKind = (kind: Session['kind']) => setDraft(d => ({ ...d, kind })), setProject = (project: string) => setDraft(d => ({ ...d, project })), setAgenda = (agenda: string) => setDraft(d => ({ ...d, agenda })), setAllowShare = (allowShare: boolean) => setDraft(d => ({ ...d, allowShare })), setScope = (scope: string) => setDraft(d => ({ ...d, scope }));
   const setMembers = (value: string[] | ((members: string[]) => string[])) => setDraft(d => ({ ...d, members: typeof value === 'function' ? value(d.members) : value }));
   const [error, setError] = useState('');
@@ -263,19 +291,21 @@ function CreateSession() {
   const busy = !!active && active.id !== existing?.id;
   function save(start: boolean) {
     if (kind === 'Recall') { navigate({ view: 'session-recall' }); return; }
+    if (start && kind === '会议' && !cloudSave) { setError('请明确选择会议云端保存'); return; }
+    if (existing && ['进行中', '暂停'].includes(existing.status) && kind !== existing.kind) { setError('活动记录请从保存模式入口切换，不改变已记录内容的边界'); return; }
     if (start && busy) { setError('先继续或结束当前记录，再开始新的记录'); return; }
     const reuse = existing && !(start && existing.status === '已结束');
     const id = reuse ? existing.id : uid('session');
     const name = title.trim() || untitled(kind);
-    const record: Session = { id, title: start && existing?.status === '已结束' ? `${name} · 后续` : name, kind, project: project || '个人记录', date: reuse ? existing.date : dateLabel(), duration: reuse ? existing.duration || '00:00' : '00:00', status: start ? '进行中' : existing?.status || '待开始', participants: members.length ? members : ['我'], agenda: agenda.split('\n').map(x => x.trim()).filter(Boolean), transcript: reuse ? existing.transcript : [], attachments: reuse ? existing.attachments : [], summary: reuse ? existing.summary : [], privateNotes: reuse ? existing.privateNotes : [], ...(reuse ? { archived: start ? false : existing.archived } : {}) };
+    const record: Session = { id, title: start && existing?.status === '已结束' ? `${name} · 后续` : name, kind, project: project || '个人记录', date: reuse ? existing.date : dateLabel(), duration: reuse ? existing.duration || '00:00' : '00:00', status: start ? '进行中' : existing?.status || '待开始', participants: members.length ? members : ['我'], agenda: agenda.split('\n').map(x => x.trim()).filter(Boolean), transcript: reuse ? existing.transcript : [], attachments: reuse ? existing.attachments : [], summary: reuse ? existing.summary : [], privateNotes: reuse ? existing.privateNotes : [], ...(reuse ? { archived: start ? false : existing.archived } : {}), storage: start ? existing?.storage && reuse ? existing.storage : { ...newStoragePolicy(data, kind === '会议' ? 'meeting' : 'daily', cloudSave), audioRetentionDays: retentionDays(audioDays), transcriptRetentionDays: retentionDays(textDays) } : existing?.storage };
     update(c => {
-      const saved = { ...c, sessions: reuse ? c.sessions.map(x => x.id === id ? { ...x, title: record.title, kind: record.kind, project: record.project, participants: record.participants, agenda: record.agenda, status: start ? '进行中' as const : x.status, archived: start ? false : x.archived } : x) : [record, ...c.sessions], activeSessionId: start ? id : c.activeSessionId };
-      const shared = setSessionShared(saved, id, allowShare);
+      const saved = { ...c, sessions: reuse ? c.sessions.map(x => x.id === id ? { ...x, title: record.title, kind: record.kind, project: record.project, participants: record.participants, agenda: record.agenda, storage: record.storage, status: start ? '进行中' as const : x.status, archived: start ? false : x.archived } : x) : [record, ...c.sessions], activeSessionId: start ? id : c.activeSessionId };
+      const shared = setSessionShared(saved, id, kind === '会议' && allowShare);
       return { ...shared, settings: { ...shared.settings, space: allowShare ? shared.settings.space : '我的空间', retention: { ...shared.settings.retention, 'record-last-kind': kind, [`session-${id}`]: scope, [`session-space:${id}`]: reuse ? shared.settings.retention[`session-space:${id}`] || 'Oops 产品团队' : c.settings.space === '我的空间' ? 'Oops 产品团队' : c.settings.space } } };
     });
     toast(start ? '本地示例记录已开始' : '可选准备已保存'); navigate({ view: start ? 'session-detail' : 'sessions', id: start ? id : undefined });
   }
-  return <form id="oops-session-prepare-form" className="stack session-prepare" onSubmit={e => { e.preventDefault(); save(true); }}><Notice>本地示例输入 · {allowShare ? '共同纪要可供所选项目查看' : '保存到我的空间'}。以下准备均可稍后补充。</Notice>{busy && <Card className="session-active-card"><Badge>{activeVisible ? active.status : '活动记录'}</Badge><h3>{activeVisible ? '已有一段活动记录' : '另一个空间已有活动记录'}</h3><p>{activeVisible ? active.title : '回到我的空间后，可继续或结束这段记录。'}</p><Button tone="secondary" onClick={continueActive}>{activeVisible ? '继续当前记录' : '回到当前记录'}</Button>{activeVisible && data.settings.space === '我的空间' && <Button tone="quiet" onClick={() => { update(c => ({ ...c, settings: { ...c.settings, retention: { ...c.settings.retention, 'record-next-kind': kind } } })); requestEnd(active.id); }}>结束后再新建</Button>}</Card>}<Field label="记录名称（可选）" value={title} onChange={setTitle} placeholder="留空会使用类型与当前时间命名" /><SelectField label="记录方式" value={kind} options={['会议', '日常', '灵感', '练习', 'Recall']} onChange={v => setKind(v as Session['kind'])} /><SelectField label="关联项目（可选）" value={project} options={['个人记录', ...visibleProjects.map(p => p.name)]} onChange={setProject} /><Card><SectionTitle>计划参与者（可选）</SectionTitle><p className="meta">选择成员不代表已经识别声音；也可以记录后再核对。</p>{['我', ...visiblePeople.map(p => p.name)].filter((x, i, a) => a.indexOf(x) === i).map(name => <Check key={name} label={name} value={members.includes(name)} onChange={checked => setMembers(a => checked ? [...a, name] : a.filter(x => x !== name))} />)}<Field label="临时参与者" value={members.filter(x => !['我', ...visiblePeople.map(p => p.name)].includes(x)).join('、')} onChange={v => setMembers(a => [...a.filter(x => ['我', ...visiblePeople.map(p => p.name)].includes(x)), ...v.split(/[、,，]/).map(x => x.trim()).filter(Boolean)])} placeholder="可稍后填写，用顿号分隔" /></Card><Field label={kind === '会议' ? '议程与目标（可选）' : '想留下什么（可选）'} value={agenda} onChange={setAgenda} multiline hint="每行一个主题；空白也可以开始。" /><SelectField label="结束后的保留方式" value={scope} options={['完整保存', '手动选择片段', '仅保存非敏感片段']} onChange={setScope} /><Toggle label="允许项目内查看共同纪要" value={allowShare} onChange={setAllowShare} hint="默认私有；私人便签、敏感片段与未选资料不会共享。" />{error && <p className="error-text" role="alert">{error}</p>}<Button tone="secondary" onClick={() => save(false)}>保存准备，稍后开始</Button></form>;
+  return <form id="oops-session-prepare-form" className="stack session-prepare" onSubmit={e => { e.preventDefault(); save(true); }}><Notice>本地示例输入 · {allowShare ? '共同纪要可供所选项目查看' : '保存到我的空间'}。以下准备均可稍后补充。</Notice>{busy && <Card className="session-active-card"><Badge>{activeVisible ? active.status : '活动记录'}</Badge><h3>{activeVisible ? '已有一段活动记录' : '另一个空间已有活动记录'}</h3><p>{activeVisible ? active.title : '回到我的空间后，可继续或结束这段记录。'}</p><Button tone="secondary" onClick={continueActive}>{activeVisible ? '继续当前记录' : '回到当前记录'}</Button>{activeVisible && data.settings.space === '我的空间' && <Button tone="quiet" onClick={() => { update(c => ({ ...c, settings: { ...c.settings, retention: { ...c.settings.retention, 'record-next-kind': kind } } })); requestEnd(active.id); }}>结束后再新建</Button>}</Card>}<Field label="记录名称（可选）" value={title} onChange={setTitle} placeholder="留空会使用类型与当前时间命名" /><SelectField label="记录方式" value={kind} options={['会议', '日常', '灵感', '练习', 'Recall']} onChange={v => setKind(v as Session['kind'])} /><SelectField label="关联项目（可选）" value={project} options={['个人记录', ...visibleProjects.map(p => p.name)]} onChange={setProject} /><Card><SectionTitle>计划参与者（可选）</SectionTitle><p className="meta">选择成员不代表已经识别声音；也可以记录后再核对。</p>{['我', ...visiblePeople.map(p => p.name)].filter((x, i, a) => a.indexOf(x) === i).map(name => <Check key={name} label={name} value={members.includes(name)} onChange={checked => setMembers(a => checked ? [...a, name] : a.filter(x => x !== name))} />)}<Field label="临时参与者" value={members.filter(x => !['我', ...visiblePeople.map(p => p.name)].includes(x)).join('、')} onChange={v => setMembers(a => [...a.filter(x => ['我', ...visiblePeople.map(p => p.name)].includes(x)), ...v.split(/[、,，]/).map(x => x.trim()).filter(Boolean)])} placeholder="可稍后填写，用顿号分隔" /></Card><Field label={kind === '会议' ? '议程与目标（可选）' : '想留下什么（可选）'} value={agenda} onChange={setAgenda} multiline hint="每行一个主题；空白也可以开始。" />{kind === '会议' ? <MeetingStorageFields confirmed={cloudSave} onConfirmed={setCloudSave} audioDays={audioDays} onAudioDays={setAudioDays} textDays={textDays} onTextDays={setTextDays} /> : <Notice>日常完整原音与全文仅暂存最近5分钟；停止清除，私人候选单独核对。不会同步团队。</Notice>}{kind === '会议' && <SelectField label="结束后的保留方式" value={scope} options={['完整保存', '手动选择片段', '仅保存非敏感片段']} onChange={setScope} />}{kind === '会议' && <Toggle label="允许项目内查看共同纪要" value={allowShare} onChange={setAllowShare} hint="默认私有；私人便签、敏感片段与未选资料不会共享。" />}{error && <p className="error-text" role="alert">{error}</p>}<Button tone="secondary" onClick={() => save(false)}>保存准备，稍后开始</Button></form>;
 }
 
 export function parseImportedTranscript(content: string, prefix = 'import'): Transcript[] {
@@ -359,6 +389,20 @@ export function SessionTabBar() {
   return <Tabs items={[active ? '现场' : '概览', '原文', '资料', '行动']} value={normalizeSessionTab(reader.tab, active)} onChange={tab => setReader(current => ({ ...current, tab }))} />;
 }
 
+function SessionFindings({ session, live = false }: { session: Session; live?: boolean }) {
+  const { data, navigate } = useOops();
+  const results = readSessionPresentation(data, session);
+  const excerpts = live ? [] : results.excerptPoints;
+  return <section className="session-findings">
+    <SectionTitle action="全部理解" onAction={() => navigate({ view: 'session-understanding', id: session.id })}>{live ? 'Oops 重要发现' : '本次整理'}</SectionTitle>
+    <div className="session-findings-caption"><span>{!results.findings.length && excerpts.length ? '原话重点 · 尚未确认为结论或任务' : '本地示例整理 · 候选需确认'}</span><button onClick={() => navigate({ view: 'session-personal', id: session.id })}>我的视角<Icon name="caret-right" size={12} /></button></div>
+    {results.findings.length ? <Card className="session-findings-card">{results.findings.slice(0, live ? 2 : 3).map(finding => <button className={`session-finding finding-${finding.kind}`} key={finding.id} onClick={() => navigate(finding.route)}><Badge tone={finding.kind === '提醒' ? 'orange' : 'purple'}>{finding.kind}</Badge><span>{finding.text}</span><Icon name="caret-right" size={14} /></button>)}</Card> : !excerpts.length && <p className="session-findings-empty">{session.transcript.some(turn => !turn.private) ? '继续记录具体想法、决定或下一步，发现会显示在这里。' : '有了可用原话，话题与候选结果会显示在这里。'}</p>}
+    {excerpts.length > 0 && <div className="session-overview-excerpts">{results.findings.length > 0 && <h3>讨论中的其他重点</h3>}<Card className="session-findings-card">{excerpts.map(point => <button className="session-topic-point session-overview-excerpt" key={point.id} onClick={() => navigate(point.route)}><small>{point.label}</small><span>{point.text}</span><strong>查看原话 · {point.sourceTime || '时间未提供'}<Icon name="arrow-up-right" size={11} /></strong></button>)}</Card></div>}
+    {results.checks.length > 0 && <div className="session-pending-links"><span>待确认</span>{results.checks.map(check => <button key={check.label} onClick={() => navigate(check.route)}>{check.label} {check.count}<Icon name="caret-right" size={11} /></button>)}</div>}
+    <div className="session-result-links"><button onClick={() => navigate({ view: 'session-task-suggestions', id: session.id })}>行动草稿 {results.actions.length || ''}</button><button onClick={() => navigate({ view: 'session-decisions', id: session.id })}>决定与结论 {results.decisions.length || ''}</button><button onClick={() => navigate({ view: 'session-notices', id: session.id })}>全部提醒 {results.notices.length || ''}</button></div>
+  </section>;
+}
+
 function SessionExperience({ session: s }: { session: Session }) {
   const { data, update, route, navigate, toast, requestEnd } = useOops();
   const root = useRef<HTMLDivElement>(null);
@@ -370,7 +414,12 @@ function SessionExperience({ session: s }: { session: Session }) {
   const [selectedId, setSelectedId] = useState(''), [toolsOpen, setToolsOpen] = useState(false), [noteOpen, setNoteOpen] = useState(false), [researchOpen, setResearchOpen] = useState(false), [taskOpen, setTaskOpen] = useState(false), [playing, setPlaying] = useState(false), [speed, setSpeed] = useState('1倍速'), [playId, setPlayId] = useState('');
   const [, setReviewReturn] = useViewState(`session-review-return:${s.id}:我的空间`, '');
   const shared = team || reader.view === '共享纪要';
-  const currentTranscript = s.transcript.filter(t => !shared || !t.private);
+  const currentTranscript = availableSessionTurns(s).filter(t => !shared || !t.private);
+  const candidateBasis = JSON.stringify([s.transcript, s.agenda, data.settings.retention[`agenda-${s.id}`], s.status]);
+  useEffect(() => {
+    if (!shared && !isTemporaryDaily(s)) update(current => prepareSessionCandidates(current, s.id));
+  }, [s.id, candidateBasis, shared, update]);
+
   const transcript = currentTranscript.filter(t => (reader.speaker === '全部' || t.speaker === reader.speaker) && `${t.text}${t.speaker}`.includes(reader.query));
   const modeTabs: Record<string, string> = { 转写: '原文', 原文: '原文', 任务: '行动', 行动: '行动', 复盘: '概览', 概览: '概览', 资料: '资料', 现场: active ? '现场' : '概览' };
   const tab = normalizeSessionTab(reader.tab, active);
@@ -383,7 +432,7 @@ function SessionExperience({ session: s }: { session: Session }) {
   }, [route.view, route.mode, s.id]);
   useEffect(() => { setReviewReturn(''); }, [s.id, route.view]);
   const attachments = s.attachments.filter(name => !shared || canShareMaterial(data, s, name));
-  const tasks = sessionTasks(data, s, shared), pending = tasks.filter(t => t.status === '待承接');
+  const tasks = sessionTasks(data, s, shared);
   const unknown = [...new Set(currentTranscript.filter(t => unknownSpeaker(t.speaker)).map(t => t.speaker))];
   const selected = currentTranscript.find(t => t.id === selectedId);
   const foundTask = selected ? findSourceTask(data, { sourceSession: s.id, sourceId: selected.id }) : undefined;
@@ -407,14 +456,14 @@ function SessionExperience({ session: s }: { session: Session }) {
     if (existing && !draft.another) { setTaskOpen(false); toast('这段原话已有行动，可直接查看'); navigate({ view: 'task-detail', id: existing.id }); return; }
     const id = uid('TASK');
     const task: Task = { id, title: draft.title.trim(), description: draft.body.trim(), owner: '我', requester: '我', due: draft.due, priority: '中', status: '待承接', aiStatus: '未启动', relatedSessionId: s.id, ...(chosenSource ? { sourceSession: s.id, sourceId: chosenSource.id, sourceTime: chosenSource.time || undefined } : {}), activities: [chosenSource ? `从${turnLabel(chosenSource, s)}手工整理，尚未承接或授权助手` : `手工关联会话「${s.title}」，没有原话出处`], results: [], version: 1 };
-    update(current => ({ ...current, tasks: [task, ...current.tasks], settings: { ...current.settings, retention: { ...current.settings.retention, [`task-space:${id}`]: current.settings.space } } }));
+    update(current => { const pinned = chosenSource && s.storage ? pinSessionEvidence(current, s.id, chosenSource) : undefined; const base = pinned?.data || current; return { ...base, tasks: [{ ...task, ...(pinned ? { sourceId: pinned.source.id, sourceTime: pinned.source.time } : {}) }, ...base.tasks], settings: { ...base.settings, retention: { ...base.settings.retention, [`task-space:${id}`]: base.settings.space } } }; });
     setDraft({ title: '', body: '', due: '', sourceId: '', another: false }); setTaskOpen(false); switchTab('行动'); toast('行动草稿已留在本次会话');
   }
   function candidate(source: Transcript, another = false) {
     const existing = data.memories.find(m => !m.deleted && m.sourceSession === s.id && !m.tags.includes('修订历史') && !m.tags.includes('资料') && sourceMatch(m, source));
     if (existing && !another) { navigate({ view: existing.confirmed ? 'memory-detail' : 'memory-candidate', id: existing.id }); return; }
     const memory: Memory = { id: uid('MEM'), title: `${source.speaker} · ${source.text.slice(0, 22)}`, body: source.text, category: s.kind === '灵感' ? '灵感' : '记忆', tags: ['待确认', '复盘候选', s.project], visibility: '私有', updated: dateLabel(), confirmed: false, sourceSession: s.id, sourceId: source.id, sourceTime: source.time || undefined };
-    update(current => ({ ...current, memories: [memory, ...current.memories] })); setSelectedId(''); toast('已留为私人候选，确认后才长期记住');
+    update(current => { const pinned = s.storage ? pinSessionEvidence(current, s.id, source) : undefined; const base = pinned?.data || current; return { ...base, memories: [{ ...memory, ...(pinned ? { body: pinned.source.text, sourceId: pinned.source.id } : {}) }, ...base.memories] }; }); setSelectedId(''); toast('已留为私人候选，确认后才长期记住');
   }
   function research() {
     if (!lookup.query.trim()) return;
@@ -439,22 +488,34 @@ function SessionExperience({ session: s }: { session: Session }) {
   const focusMemory = data.memories.find(m => m.title === focus && m.sourceSession === s.id && !m.deleted);
   const focusSource = focusMemory?.sourceId ? currentTranscript.find(t => t.id === focusMemory.sourceId) : undefined;
   const budgetConflict = budgetState(data, s, shared).pending;
-  const p0TaskSuggestions = taskSuggestionPendingCount(data, s.id);
-  const p0PendingNotices = readSessionIntelligence(data, s.id, 'notices').items.filter(item => item.state === 'pending').length;
-  const kindTitle = s.kind === '会议' ? '本次讨论' : s.kind === '日常' ? '刚才聊到的事' : s.kind === '灵感' ? '这次的核心想法' : '这段表达';
+  const presentation = readSessionPresentation(data, s, shared);
+  const owners = taskSuggestionOwners(data);
+  const currentChapter = presentation.chapters.find(chapter => chapter.state === '当前');
+  const previousChapters = presentation.chapters.filter(chapter => chapter.state === '已讨论');
+  const nextChapter = presentation.chapters.find(chapter => chapter.state === '待讨论');
   return <div className="stack sessions-feature" ref={root}>
     <div className="session-heading"><div><h2>{s.title}</h2><p className="meta">{s.kind} · {s.project} · {s.duration || '待开始'}</p></div><button className="session-filter-button" aria-label="本次会话工具" onClick={() => setToolsOpen(true)}><Icon name="dots-three" /></button></div>
+    <SessionStorageStatus session={s} allowSwitch={active && !shared} />
     <div className="session-stage"><Badge tone={active ? 'purple' : flag(data, `review-${s.id}`) ? 'amber' : 'gray'}>{active ? s.status : s.status === '待开始' ? '待开始' : flag(data, `review-${s.id}`) ? '来源待复核' : needsSessionReview(data, s) && !shared ? '已保存 · 待核对' : '已保存'}</Badge>{shared && <span><Icon name="users" size={14} />共同视角</span>}</div>
-    {!shared && ['现场', '概览'].includes(tab) && <Card className="session-p0-entry"><div className="session-p0-grid"><button onClick={() => open('session-understanding')}><Icon name="sparkle" size={19} /><span>对话理解</span></button><button onClick={() => open('session-notices')}><Icon name="bell" size={19} /><span>会议提醒{p0PendingNotices ? ` · ${p0PendingNotices}` : ''}</span></button><button onClick={() => open('session-decisions')}><Icon name="check-circle" size={19} /><span>决定与结论</span></button><button onClick={() => open('session-personal')}><Icon name="user-circle" size={19} /><span>我的结果</span></button></div></Card>}
     {tab === '现场' && <>
-      <div className="session-recording"><span className={s.status === '进行中' ? 'recording-dot' : 'recording-dot paused'} /><div><strong>{s.status === '进行中' ? '正在记录本地示例' : '记录已暂停'}</strong><small>预设文字 · 麦克风未开启</small></div></div>
-      <div className="session-live-summary"><button onClick={() => unknown.length && !shared ? open('session-identity') : switchTab('原文')}><Icon name="user-circle" size={18} /><strong>{unknown.length ? `${unknown.length}个身份待核对` : `${new Set(currentTranscript.map(t => t.speaker)).size || 1}个发言标签`}</strong></button><button onClick={() => switchTab('行动')}><Icon name="check-square" size={18} /><strong>{pending.length ? `${pending.length}项行动草稿` : '本次行动'}</strong></button></div>
-      {s.kind === '会议' && <Row title={s.agenda[Number(data.settings.retention[`agenda-${s.id}`] || 0)] || '本次议程'} subtitle={s.agenda.length ? '查看进度与时间' : '没有预设议题，也可以继续记录'} icon="list-checks" onClick={() => open('session-agenda')} />}
-      {s.kind !== '会议' && !shared && <Card className="session-kind-focus"><Badge tone="gray">{s.kind}</Badge><h3>{s.kind === '灵感' ? '先留下想法，再整理表达' : s.kind === '练习' ? '先说一遍，再回看结构' : '记住这次聊天中要跟进的事'}</h3><Button tone="secondary" icon={s.kind === '练习' ? 'sparkle' : 'lightbulb'} onClick={() => open(s.kind === '练习' ? 'session-growth' : 'session-inspiration')}>{s.kind === '灵感' ? '整理核心观点与提纲' : s.kind === '练习' ? '进入私人表达练习' : '整理便签与联系草稿'}</Button></Card>}
-      {p0PendingNotices > 0 && !shared && <Row title={`${p0PendingNotices}条会议提醒待处理`} subtitle="查看原话、议程与历史依据" icon="bell" badge="待处理" onClick={() => open('session-notices')} />}
-      {budgetConflict && <Row title="预算提醒待核对" subtitle="原话金额与当前基准需要核对" icon="bell" badge="待确认" onClick={() => open('session-reminders')} />}
-      <SectionTitle action="完整原文" onAction={() => switchTab('原文')}>{kindTitle}</SectionTitle>
-      {currentTranscript.length ? currentTranscript.slice(-3).map(t => <div data-turn-id={t.id} key={t.id}><TranscriptCard item={t} label={turnLabel(t, s)} onClick={() => setSelectedId(t.id)} /></div>) : <Empty title="等待第一段内容" body="示例每4秒追加一段文字。" />}
+      <div className="session-recording session-recording-compact"><span className={s.status === '进行中' ? 'recording-dot' : 'recording-dot paused'} /><div><strong>{s.status === '进行中' ? '示例记录中' : '记录已暂停'}</strong><small>预设文字 · 麦克风未开启</small></div><button onClick={() => unknown.length && !shared ? open('session-identity') : switchTab('原文')}><Icon name="user-circle" size={16} />{unknown.length ? `${unknown.length}待核对` : `${new Set(currentTranscript.map(t => t.speaker)).size}个发言标签`}</button></div>
+      <Card className="session-current-topic"><div className="session-topic-eyebrow"><span>当前话题重点</span>{s.kind === '会议' && <button onClick={() => open('session-agenda')}>议程<Icon name="caret-right" size={13} /></button>}</div><h3>{presentation.topic || s.title}</h3>
+        {presentation.topicPoints.length > 0 && <ul className="session-topic-points">{presentation.topicPoints.map(point => <li key={point.id}><button className="session-topic-point" onClick={() => navigate(point.route)}><small>{point.label}</small><span>{point.text}</span><strong>查看原话 · {point.sourceTime || '时间未提供'}<Icon name="arrow-up-right" size={11} /></strong></button></li>)}</ul>}
+        {s.kind === '会议' && s.agenda.length > 0 && <div className="session-agenda-progress"><span>{previousChapters.length}项已讨论</span><strong>当前 {Math.min(s.agenda.length, previousChapters.length + 1)} / {s.agenda.length}</strong><span>{nextChapter ? `下一项：${nextChapter.topic}` : '最后一项议题'}</span></div>}
+        {!shared && <button className="session-topic-detail" onClick={() => open('session-understanding')}>查看重点与上下文<Icon name="arrow-up-right" size={13} /></button>}
+      </Card>
+      {!shared && <SessionFindings session={s} live />}
+      {budgetConflict && !presentation.notices.some(item => item.kind === 'budget-conflict') && <Row title="预算提醒待核对" subtitle="原话金额与当前基准需要核对" icon="bell" badge="待确认" onClick={() => open('session-reminders')} />}
+      {s.kind !== '会议' && !shared && <Row title={s.kind === '灵感' ? '核心观点与口播提纲' : s.kind === '练习' ? '私人表达练习' : '便签与联系草稿'} icon={s.kind === '练习' ? 'sparkle' : 'lightbulb'} onClick={() => open(s.kind === '练习' ? 'session-growth' : 'session-inspiration')} />}
+      <SectionTitle action="完整原文" onAction={() => switchTab('原文')}>按话题回看原话</SectionTitle>
+      <p className="session-chapter-caption">章节按本地关键词归类；议程推进由你确认，不代表结论已定。</p>
+      {presentation.chapters.length ? presentation.chapters.map(chapter => {
+        const point = presentation.chapterPoints[chapter.id]?.[0];
+        return <details className={`session-chapter ${chapter.id === currentChapter?.id ? 'current' : ''}`} key={chapter.id}>
+          <summary><span><strong>{chapter.topic}</strong><small>{chapter.turns.length ? `${chapter.turns.length}段原话 · ${turnLabel(chapter.turns[0], s)}` : '还没有匹配的原话'}</small>{point && <button className="session-chapter-point" onClick={event => { event.preventDefault(); event.stopPropagation(); navigate(point.route); }}><em>{point.label} · {point.text}</em><span>查看原话 · {point.sourceTime || '时间未提供'}<Icon name="arrow-up-right" size={11} /></span></button>}</span><Badge tone={chapter.state === '当前' ? 'purple' : 'gray'}>{chapter.state}</Badge><Icon name="caret-down" size={14} /></summary>
+          <div className="session-chapter-body">{chapter.turns.length ? chapter.turns.map(t => <div data-turn-id={t.id} key={t.id}><TranscriptCard item={t} label={turnLabel(t, s)} onClick={() => setSelectedId(t.id)} /></div>) : <p className="meta">可到完整原文查看未归类片段。</p>}<Button tone="quiet" onClick={() => chapter.turns[0] ? open('session-transcript', chapter.turns[0].id) : switchTab('原文')}>在完整原文中查看</Button></div>
+        </details>;
+      }) : <Empty title="等待第一段内容" body="示例每4秒追加一段文字。" />}
       {focus && attachments.includes(focus) && <Card className="session-returned-material"><Badge tone="gray">资料已返回</Badge><h3>{focus}</h3><p className="meta">{focusSource ? `对应${turnLabel(focusSource, s)}的讨论` : '手工查询，未指定原话出处'}</p><Button tone="quiet" onClick={() => open('session-source', focus)}>查看资料与依据</Button>{focusSource && <Source title="查看关联原话" time={turnLabel(focusSource, s)} onClick={() => open('session-transcript', focusSource.id)} />}</Card>}
       {!shared && <div className="action-grid"><Button tone="secondary" icon="magnifying-glass" onClick={() => showResearch()}>查本地资料</Button><Button tone="secondary" icon="note-pencil" onClick={() => setNoteOpen(true)}>私人便签{s.privateNotes.length ? ` · ${s.privateNotes.length}` : ''}</Button></div>}
     </>}
@@ -462,17 +523,18 @@ function SessionExperience({ session: s }: { session: Session }) {
     {tab === '原文' && <>
       <Search value={reader.query} onChange={query => setReader(current => ({ ...current, query }))} placeholder="搜索这次原文" /><Chips items={['全部', ...new Set(currentTranscript.map(t => t.speaker))]} value={reader.speaker} onChange={speaker => setReader(current => ({ ...current, speaker }))} />
       {route.view === 'session-transcript' && route.mode && !modeTabs[route.mode] && !routeSource && <Notice tone="warning">这个来源片段已移除或不可见，不会定位到其他原话。</Notice>}
-      <div className="session-playback"><Button tone="secondary" disabled={!currentTranscript.length} icon={playing ? 'pause' : 'play'} onClick={() => { setPlayId(currentTranscript[0]?.id || ''); setPlaying(value => !value); }}>{playing ? '暂停示例回看' : '示例时间轴'}</Button><button onClick={() => setSpeed(speed === '1倍速' ? '2倍速' : '1倍速')}>{speed}</button></div><p className="meta">仅模拟片段高亮，不播放音频。无时间文字按片段编号引用。</p>
+      <div className="session-playback"><Button tone="secondary" disabled={!currentTranscript.length || !!s.storage && s.storage.audioState !== 'available'} icon={playing ? 'pause' : 'play'} onClick={() => { setPlayId(currentTranscript[0]?.id || ''); setPlaying(value => !value); }}>{playing ? '暂停示例回看' : '示例时间轴'}</Button><button onClick={() => setSpeed(speed === '1倍速' ? '2倍速' : '1倍速')}>{speed}</button></div><p className="meta">仅模拟片段高亮，不播放音频。无时间文字按片段编号引用。</p>
       {transcript.length ? transcript.map(t => <div key={t.id} data-turn-id={t.id}><TranscriptCard item={t} label={turnLabel(t, s)} active={routeSource?.id === t.id || playId === t.id} onClick={() => { setPlaying(false); setSelectedId(t.id); }} /></div>) : <Empty title="没有匹配片段" body="换个关键词或说话人。" />}
     </>}
     {tab === '资料' && <>
       <SectionTitle>本次资料 · {attachments.length}</SectionTitle>{attachments.length ? attachments.map(name => <Row key={name} title={name} subtitle="查看正文、出处与数据时间" onClick={() => open('session-source', name)} />) : <Empty title={shared ? '还没有获准共享的资料' : '本次还没有资料'} body={shared ? '由本人逐份核对共享范围。' : '添加到这次会话，之后可继续引用。'} />}
       {!shared && <div className="action-grid"><Button tone="secondary" icon="plus" onClick={() => open('session-material-import')}>添加本次资料</Button><Button tone="secondary" icon="magnifying-glass" onClick={() => showResearch()}>查本地资料</Button></div>}
     </>}
-    {tab === '行动' && !shared && <Row title="识别到的任务建议" subtitle={p0TaskSuggestions ? `${p0TaskSuggestions}项待确认 · 负责人、期限与优先级` : '按原话核对负责人、期限与优先级'} icon="sparkle" onClick={() => open('session-task-suggestions')} />}{tab === '行动' && <>
+    {tab === '行动' && <>
+      {!shared && <section className="session-action-drafts"><SectionTitle action="查看全部" onAction={() => open('session-task-suggestions')}>行动草稿{presentation.actions.length ? ` · ${presentation.actions.length}` : ''}</SectionTitle><p className="session-findings-caption">本地示例按原话整理，确认后才建立任务。</p>{presentation.actions.slice(0, 3).map(value => <Card key={value.id} className="session-action-draft" onClick={() => open('session-task-suggestions', value.id)}><div><Badge tone="orange">待确认</Badge><Icon name="caret-right" size={16} /></div><h3>{value.title}</h3><p>{owners.find(owner => owner.id === value.ownerId)?.name || '负责人待确认'} · {value.due ? value.due.replace('T', ' ') : value.dueHint}</p><span>核对要求与负责人</span></Card>)}{!presentation.actions.length && <p className="meta">当前没有待确认草稿。可补充遗漏，或重新查看已有建议。</p>}<Button icon="sparkle" onClick={() => open('session-task-suggestions')}>{presentation.actions.length ? '核对行动草稿' : '查看行动草稿'}</Button></section>}
       {(['待承接', '执行中', '待验收', '已完成', '其他'] as const).map(group => { const list = tasks.filter(t => group === '待承接' ? t.status === '待承接' : group === '执行中' ? ['已承接', '进行中', '待转交'].includes(t.status) : group === '待验收' ? t.status === '待验收' : group === '已完成' ? t.status === '已完成' : ['已拒绝', '已取消'].includes(t.status)); return list.length ? <section className="session-list-group" key={group}><SectionTitle>{group}</SectionTitle>{list.map(t => <Card key={t.id} onClick={() => navigate({ view: 'task-detail', id: t.id })}><div className="session-task-top"><h3>{t.title}</h3><Badge tone={t.needsReview ? 'amber' : 'gray'}>{t.needsReview ? '需复核' : t.status}</Badge></div><p className="meta">{t.owner} · {t.due ? t.due.replace('T', ' ') : '期限未定'}</p><p className="meta">{t.sourceSession ? '保留原话出处' : '手工关联，无原话出处'} · 助手{t.aiStatus}</p></Card>)}</section> : null; })}
-      {!tasks.length && <Empty title="这次还没有行动" body="从原话整理，或手工写下下一步；承接与助手授权分别确认。" />}
-      <Button icon="plus" onClick={() => openTask()}>手工整理本次行动</Button><Button tone="quiet" onClick={() => navigate({ view: 'tasks' })}>查看全部任务</Button>
+      {!tasks.length && <p className="meta">还没有已建立的任务，草稿确认后会显示在这里。</p>}
+      <Button tone="secondary" icon="plus" onClick={() => openTask()}>补充一条行动</Button><Button tone="quiet" onClick={() => navigate({ view: 'tasks' })}>查看全部任务</Button>
     </>}
     {active && <Button tone="quiet" onClick={() => requestEnd(s.id)}>结束当前记录</Button>}
     {s.status === '待开始' && <Button onClick={() => open('session-create')}>准备并开始</Button>}
@@ -492,22 +554,24 @@ function ReviewPanel({ session: s, shared, tasks, onTask, onOriginal }: { sessio
   let marks: RecordMark[] = []; try { const parsed = JSON.parse(data.settings.retention[`record-marks:${s.id}`] || '[]'); if (Array.isArray(parsed)) marks = parsed.filter(x => x && typeof x.id === 'string'); } catch { /* Invalid metadata is not rendered. */ }
   const taskLabel = (task: Task) => `${task.owner} · ${task.due ? task.due.replace('T', ' ') : '期限待定'} · ${task.needsReview ? '待复核' : task.status}`;
   return <div className="stack session-overview">
-    <Card className="session-result-card"><div className="session-task-top"><Badge tone={changed ? 'amber' : 'gray'}>{shared ? '共同可见结果' : changed ? '来源变化 · 需复核' : queue.length ? `仍有${queue.length}项待核对` : data.settings.retention[`session-review-completed:${s.id}`] ? '本次已核对' : data.settings.retention[`session-reviewed:${s.id}`] ? '已有人工确认' : '已保存 · 待整理'}</Badge>{!shared && <button className="text-action" onClick={() => navigate({ view: 'session-review-edit', id: s.id })}>编辑</button>}</div><h3>{shared ? '获准共享的结论' : changed ? '需要重新核对的旧结论' : '本次确认的结论'}</h3>{conclusions.length ? conclusions.map(item => <p className="session-result-line" key={item.id}>{item.text}</p>) : <p className="meta">{shared ? '尚未逐项共享已确认结论。下面仅显示当前非敏感原话摘录。' : '还没有人工确认的结论，可以先查看原文，再按需要整理。'}</p>}{!shared && !conclusions.length && s.summary.length > 0 && <details className="session-details"><summary>已有整理 · 尚待核对</summary>{s.summary.map((text, i) => <p key={i}>{text}</p>)}</details>}</Card>
+    {!shared && <SessionFindings session={s} />}
+    <Card className="session-result-card"><div className="session-task-top"><Badge tone={changed ? 'amber' : 'gray'}>{shared ? '共同可见结果' : changed ? '来源变化 · 需复核' : queue.length ? `仍有${queue.length}项待核对` : data.settings.retention[`session-review-completed:${s.id}`] ? '本次已核对' : data.settings.retention[`session-reviewed:${s.id}`] ? '已有人工确认' : '已保存 · 待整理'}</Badge>{!shared && <button className="text-action" onClick={() => navigate({ view: 'session-review-edit', id: s.id })}>编辑</button>}</div><h3>{shared ? '获准共享的结论' : changed ? '需要重新核对的旧结论' : '本次确认的结论'}</h3>{conclusions.length ? conclusions.map(item => <p className="session-result-line" key={item.id}>{item.text}</p>) : <p className="meta">{shared ? '尚未逐项共享已确认结论。下面仅显示当前非敏感原话摘录。' : '核对上方整理结果后，确认结论会保留在这里。'}</p>}{!shared && !conclusions.length && s.summary.length > 0 && <details className="session-details"><summary>已有整理 · 尚待核对</summary>{s.summary.map((text, i) => <p key={i}>{text}</p>)}</details>}</Card>
     <SectionTitle>{s.kind === '灵感' ? '验证下一步' : s.kind === '练习' ? '下次练习与行动' : '下一步行动'}</SectionTitle>{tasks.length ? tasks.map(task => <Row key={task.id} title={task.title} subtitle={taskLabel(task)} icon="check-square" badge={task.needsReview ? '待复核' : task.status} onClick={() => navigate({ view: 'task-detail', id: task.id })} />) : <p className="meta">本次还没有关联行动。</p>}
     <SectionTitle>尚未决定的问题</SectionTitle>{questions.length ? questions.map(item => <p className="session-result-line" key={item.id}>{item.text}</p>) : <p className="meta">{shared ? '没有获准共享的未决问题。' : '尚未记录未决问题。'}</p>}
     {!shared && <><Card className="session-review-entry"><div><h3>{queue.length ? `${queue.length}项可以逐项核对` : '本次核对'}</h3><p className="meta">身份、行动、记忆与来源分别处理，也可以稍后再说。</p></div><Button onClick={() => navigate({ view: 'session-review', id: s.id })}>{queue.length ? '开始 / 继续核对' : '查看核对状态'}</Button></Card>{s.kind !== '会议' && <Row title={s.kind === '练习' ? '回看与改写这段表达' : s.kind === '灵感' ? '整理核心观点与口播提纲' : '整理需要记住的事与联系草稿'} icon={s.kind === '练习' ? 'sparkle' : 'lightbulb'} onClick={() => navigate({ view: s.kind === '练习' ? 'session-growth' : 'session-inspiration', id: s.id })} />}</>}
     <details className="session-details"><summary>{shared ? '非敏感原话摘录' : '重点与原话依据'}</summary>{!shared && marks.map(mark => { const source = mark.sourceId ? lines.find(t => t.id === mark.sourceId) : mark.sourceTime ? lines.find(t => t.time === mark.sourceTime) : undefined; return <Card key={mark.id}><Badge tone="gray">{mark.time}</Badge><p>{mark.note || '已标记重点'}</p>{source ? <Source title="查看标记来源" time={turnLabel(source, s)} onClick={() => navigate({ view: 'session-transcript', id: s.id, mode: source.id })} /> : <p className="meta">{mark.sourceId || mark.sourceTime ? '来源片段已移除，待核对' : '时间标记，未绑定原话'}</p>}</Card>; })}{lines.slice(-5).map(line => <Card key={line.id}><p className="meta">{turnLabel(line, s)} · {line.speaker}</p><p>{line.text}</p><Source title="定位这段原话" time={turnLabel(line, s)} onClick={() => navigate({ view: 'session-transcript', id: s.id, mode: line.id })} /></Card>)}<Button tone="quiet" onClick={onOriginal}>查看完整原文</Button></details>
-    <div className="action-grid">{!shared && <Button tone="secondary" onClick={() => onTask()}>手工整理行动</Button>}<Button tone="secondary" icon="export" onClick={() => navigate({ view: 'session-export', id: s.id })}>导出预览</Button></div>
+    <div className="action-grid">{!shared && <Button tone="secondary" onClick={() => onTask()}>补充一条行动</Button>}<Button tone="secondary" icon="export" onClick={() => navigate({ view: 'session-export', id: s.id })}>导出预览</Button></div>
   </div>;
 }
 
 function ReviewEditor({ session: s }: { session: Session }) {
   const { data, update, route, navigate, toast } = useOops();
   const items = confirmedReview(data, s);
-  const [draft, setDraft] = useViewState<ReviewDraft>(`session-conclusion-draft:${s.id}:${data.settings.space}:${route.mode || 'general'}`, { conclusions: items.filter(x => x.kind === 'conclusion').map(x => x.text).join('\n') || (flag(data, `review-${s.id}`) ? readList(data.settings.retention[`session-conclusions:${s.id}`]).join('\n') : ''), questions: items.filter(x => x.kind === 'question').map(x => x.text).join('\n'), sourceId: s.transcript.some(turn => turn.id === route.mode) ? route.mode || '' : '', sourceMode: s.transcript.some(turn => turn.id === route.mode) ? 'selected' : 'preserve' });
+  const available = availableSessionTurns(s);
+  const [draft, setDraft] = useViewState<ReviewDraft>(`session-conclusion-draft:${s.id}:${data.settings.space}:${route.mode || 'general'}`, { conclusions: items.filter(x => x.kind === 'conclusion').map(x => x.text).join('\n') || (flag(data, `review-${s.id}`) ? readList(data.settings.retention[`session-conclusions:${s.id}`]).join('\n') : ''), questions: items.filter(x => x.kind === 'question').map(x => x.text).join('\n'), sourceId: available.some(turn => turn.id === route.mode) ? route.mode || '' : '', sourceMode: available.some(turn => turn.id === route.mode) ? 'selected' : 'preserve' });
   const [returnTo] = useViewState(`session-review-return:${s.id}:我的空间`, '');
   const label = (t: Transcript) => `${turnLabel(t, s)} ${t.speaker} · ${t.id}`;
-  const source = s.transcript.find(t => t.id === draft.sourceId);
+  const source = available.find(t => t.id === draft.sourceId);
   const sourceMode = reviewDraftSourceMode(draft);
   function save() {
     const result = buildReviewItems(s, items, draft, kind => uid(kind === 'conclusion' ? 'CON' : 'QUE'));
@@ -516,7 +580,7 @@ function ReviewEditor({ session: s }: { session: Session }) {
     update(current => refreshSessionIntelligence({ ...patchSession(current, s.id, { summary: conclusions }), settings: { ...current.settings, toggles: { ...current.settings.toggles, [`review-${s.id}`]: false }, retention: { ...current.settings.retention, [`session-conclusions:${s.id}`]: JSON.stringify(conclusions), [`session-questions:${s.id}`]: JSON.stringify(questions), [`session-review-items:${s.id}`]: JSON.stringify(next), [`session-reviewed:${s.id}`]: dateLabel() } } }, s.id, 'notices'));
     toast('已保存人工确认结果，保持私人'); navigate({ view: returnTo === 'queue' ? 'session-review' : 'session-detail', id: s.id, mode: returnTo === 'queue' ? undefined : '概览' });
   }
-  return <div className="stack"><Notice>{flag(data, `review-${s.id}`) ? '来源已变化，请重新核对；保存不会恢复旧资料或助手授权。' : '由你填写并确认，不会自动生成会议结论。'}</Notice>{!draft.conclusions && s.summary.length > 0 && <Button tone="secondary" onClick={() => setDraft(current => ({ ...current, conclusions: s.summary.join('\n') }))}>将已有整理带入草稿</Button>}<Field label="我确认的结论" value={draft.conclusions} onChange={conclusions => setDraft(current => ({ ...current, conclusions }))} multiline hint="每行一条，保存前请按实际保留内容核对。" /><Field label="尚未决定的问题" value={draft.questions} onChange={questions => setDraft(current => ({ ...current, questions }))} multiline /><SelectField label="本次结果的原话出处" value={sourceMode === 'preserve' ? '保留未改条目的已有出处' : sourceMode === 'clear' ? '人工整理，无单段出处' : source ? label(source) : '已选出处已移除，请重新选择'} options={['保留未改条目的已有出处', '人工整理，无单段出处', ...s.transcript.map(label)]} onChange={value => { const turn = s.transcript.find(t => label(t) === value); setDraft(current => ({ ...current, sourceId: turn?.id || '', sourceMode: turn ? 'selected' : value === '人工整理，无单段出处' ? 'clear' : 'preserve' })); }} /><p className="meta">保留出处时，新增或改写的条目按人工整理保存；选择一段原话会用于本次全部条目。</p>{sourceMode === 'selected' && source && <TranscriptCard item={source} label={turnLabel(source, s)} />}<Button onClick={save}>确认并保存私人结果</Button><Button tone="quiet" onClick={() => navigate({ view: returnTo === 'queue' ? 'session-review' : 'session-detail', id: s.id, mode: returnTo === 'queue' ? undefined : '概览' })}>稍后再整理</Button></div>;
+  return <div className="stack"><Notice>{flag(data, `review-${s.id}`) ? '来源已变化，请重新核对；保存不会恢复旧资料或助手授权。' : '由你填写并确认，不会自动生成会议结论。'}</Notice>{!draft.conclusions && s.summary.length > 0 && <Button tone="secondary" onClick={() => setDraft(current => ({ ...current, conclusions: s.summary.join('\n') }))}>将已有整理带入草稿</Button>}<Field label="我确认的结论" value={draft.conclusions} onChange={conclusions => setDraft(current => ({ ...current, conclusions }))} multiline hint="每行一条，保存前请按实际保留内容核对。" /><Field label="尚未决定的问题" value={draft.questions} onChange={questions => setDraft(current => ({ ...current, questions }))} multiline /><SelectField label="本次结果的原话出处" value={sourceMode === 'preserve' ? '保留未改条目的已有出处' : sourceMode === 'clear' ? '人工整理，无单段出处' : source ? label(source) : '已选出处已移除，请重新选择'} options={['保留未改条目的已有出处', '人工整理，无单段出处', ...available.map(label)]} onChange={value => { const turn = available.find(t => label(t) === value); setDraft(current => ({ ...current, sourceId: turn?.id || '', sourceMode: turn ? 'selected' : value === '人工整理，无单段出处' ? 'clear' : 'preserve' })); }} /><p className="meta">保留出处时，新增或改写的条目按人工整理保存；选择一段原话会用于本次全部条目。</p>{sourceMode === 'selected' && source && <TranscriptCard item={source} label={turnLabel(source, s)} />}<Button onClick={save}>确认并保存私人结果</Button><Button tone="quiet" onClick={() => navigate({ view: returnTo === 'queue' ? 'session-review' : 'session-detail', id: s.id, mode: returnTo === 'queue' ? undefined : '概览' })}>稍后再整理</Button></div>;
 }
 
 function ReviewQueue({ session: s }: { session: Session }) {

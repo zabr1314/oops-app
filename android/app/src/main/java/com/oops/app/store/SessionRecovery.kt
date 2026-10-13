@@ -15,11 +15,12 @@ import java.time.Instant
 object SessionRecovery {
     /** (session id, estimated end) for every unfinished session whose end has not been sent yet. */
     fun scan(dir: File, active: String?): List<Pair<String, String>> {
+        RecordingExpiry.prune(dir, active)
         val result = mutableListOf<Pair<String, String>>()
         val metas = dir.listFiles { f -> f.name.endsWith(".json") && f.name.count { it == '.' } == 1 }.orEmpty()
         for (metaFile in metas.sortedBy { it.lastModified() }) {
             val id = metaFile.name.removeSuffix(".json")
-            if (id == active || File(dir, "$id.ended").exists()) continue
+            if (id == active || File(dir, "$id.ended").exists() || File(dir, "$id.expired").exists()) continue
             val meta = runCatching { JSONObject(metaFile.readText()) }.getOrNull() ?: continue
             if (!meta.has("audio_ended_at")) {
                 val end = estimateEnd(dir, id) ?: continue
@@ -32,8 +33,15 @@ object SessionRecovery {
     }
 
     /** Only the end: no start (the server already has it), no sentences and no agenda, which the server keeps. */
-    fun endBody(id: String, endedAt: String): JSONObject = JSONObject().put("session_id", id).put("ended_at", endedAt)
-        .put("recovered", true).put("utterances", JSONArray()).put("notices", JSONArray())
+    fun endBody(id: String, endedAt: String, meta: JSONObject? = null): JSONObject {
+        val body = JSONObject().put("session_id", id).put("ended_at", endedAt)
+            .put("recovered", true).put("utterances", JSONArray()).put("notices", JSONArray())
+        if (meta != null) RecordingPolicy.fromMeta(meta)?.contract(meta.getString("archive_started_at"))?.let { contract ->
+            contract.keys().forEach { key -> body.put(key, contract.get(key)) }
+            body.put("started_at", meta.getString("archive_started_at")).put("time_zone", meta.optString("time_zone", "UTC"))
+        }
+        return body
+    }
 
     fun markSent(dir: File, id: String) {
         File(dir, "$id.ended").writeText(Instant.now().toString())

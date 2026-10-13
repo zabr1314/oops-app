@@ -4,7 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** One session and endpoint per queue. Ack removes only the exact revision sent. Text only. */
-class MeetingSync(val sessionId: String, private val startedAt: String, private val timeZone: String) {
+class MeetingSync(val sessionId: String, private val startedAt: String, private val timeZone: String, private val archiveContract: JSONObject? = null) {
+    val explicitArchive: Boolean get() = archiveContract != null
     data class Batch(val body: JSONObject, internal val utterances: Map<String, String>, internal val notices: Map<String, String>, internal val revision: Long)
     private val utterances = linkedMapOf<String, String>()
     private val notices = linkedMapOf<String, String>()
@@ -48,6 +49,7 @@ class MeetingSync(val sessionId: String, private val startedAt: String, private 
             // End only, and no agenda: the server keeps the one it has.
             val body = JSONObject().put("session_id", sessionId).put("started_at", startedAt).put("time_zone", timeZone)
                 .put("ended_at", endedAt).put("utterances", JSONArray()).put("notices", JSONArray())
+            attachContract(body)
             return Batch(body, emptyMap(), emptyMap(), revision)
         }
         if (!force && utterances.size < 30 && now - lastAttempt < 20_000) return null
@@ -57,8 +59,10 @@ class MeetingSync(val sessionId: String, private val startedAt: String, private 
         val body = JSONObject().put("session_id", sessionId).put("started_at", startedAt).put("time_zone", timeZone)
             .put("ended_at", endedAt ?: JSONObject.NULL).put("agenda", if (agenda == "null") JSONObject.NULL else JSONObject(agenda))
             .put("utterances", JSONArray(u.values.map(::JSONObject))).put("notices", JSONArray(n.values.map(::JSONObject)))
+        attachContract(body)
         return Batch(body, u, n, revision)
     }
+    private fun attachContract(body: JSONObject) { archiveContract?.let { contract -> contract.keys().forEach { key -> body.put(key, contract.get(key)) } } }
     @Synchronized fun complete(batch: Batch, now: Long, success: Boolean, supported: Boolean = true) {
         require(batch.body.getString("session_id") == sessionId)
         sending = false

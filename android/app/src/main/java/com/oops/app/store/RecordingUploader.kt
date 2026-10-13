@@ -17,21 +17,25 @@ interface RecordingTransport {
 }
 
 class ResumeAt(val received: Long) : IOException("resume at $received")
+class RecordingAssetExpired(val asset: String?) : IOException("recording asset expired")
 
 /**
  * Uploads each finished session's raw audio, finals and raw ASR stream, resumably and verified.
  * A session is marked `<id>.uploaded` only after the server re-hashed every whole file; until then
- * [SessionRecorder.prune] keeps it no matter how old it is.
+ * new archives expire per asset even when upload failed; legacy archives keep their existing rule.
  */
 class RecordingUploader(private val dir: File, private val transport: RecordingTransport,
                         private val chunkBytes: Int = 1_000_000) {
     private val names = linkedMapOf("audio.pcm" to "pcm", "finals.jsonl" to "finals.jsonl",
         "asr.jsonl" to "asr.jsonl", "timing.jsonl" to "timing.jsonl", "meta.json" to "json")
 
-    fun pending(active: String?): List<String> = dir.listFiles { f -> f.name.endsWith(".pcm") }.orEmpty()
-        .map { it.name.removeSuffix(".pcm") }
-        .filter { it != active && needsUpload(it) }
-        .sortedBy { File(dir, "$it.pcm").lastModified() }
+    fun pending(active: String?): List<String> {
+        RecordingExpiry.prune(dir, active)
+        return dir.listFiles { f -> f.name.endsWith(".json") && f.name.count { it == '.' } == 1 }.orEmpty()
+            .map { it.name.removeSuffix(".json") }
+            .filter { it != active && !File(dir, "$it.expired").exists() && needsUpload(it) && files(it).keys.any { name -> name != "meta.json" } }
+            .sortedBy { File(dir, "$it.json").lastModified() }
+    }
 
     private fun files(id: String) = names.mapValues { File(dir, "$id.${it.value}") }.filterValues { it.isFile }
 
@@ -46,12 +50,18 @@ class RecordingUploader(private val dir: File, private val transport: RecordingT
      * server keeps what it received and the next pass resumes from there.
      */
     fun upload(id: String, shouldContinue: () -> Boolean = { true }): Boolean {
+        RecordingExpiry.prune(dir)
+        if (File(dir, "$id.expired").exists()) return false
         val files = files(id)
-        if ("audio.pcm" !in files) return false
+        if (files.keys.none { it != "meta.json" }) return false
+        val meta = runCatching { JSONObject(files.getValue("meta.json").readText()) }.getOrDefault(JSONObject())
+        val policy = RecordingPolicy.fromMeta(meta)
+        try {
         val declared = files.mapValues { (_, f) -> f.length() to sha256(f) }
         val manifest = JSONObject().put("files", JSONArray(declared.map { (name, v) ->
             JSONObject().put("name", name).put("size", v.first).put("sha256", v.second) }))
-            .put("meta", runCatching { JSONObject(files.getValue("meta.json").readText()) }.getOrNull() ?: JSONObject())
+            .put("meta", meta)
+        policy?.contract(meta.getString("archive_started_at"))?.let { contract -> contract.keys().forEach { key -> manifest.put(key, contract.get(key)) } }
         val state = transport.recordingManifest(id, manifest)
         if (!state.optBoolean("complete")) {
             val received = state.optJSONObject("received") ?: JSONObject()
@@ -61,6 +71,10 @@ class RecordingUploader(private val dir: File, private val transport: RecordingT
                 RandomAccessFile(file, "r").use { raf ->
                     while (offset < size) {
                         if (!shouldContinue()) return false
+                        if (policy != null && name != "meta.json" && RecordingExpiry.expired(meta, if (name == "audio.pcm") "audio" else "transcript")) {
+                            RecordingExpiry.removeAsset(dir, id, if (name == "audio.pcm") "audio" else "transcript")
+                            return false
+                        }
                         val bytes = ByteArray(minOf(chunkBytes.toLong(), size - offset).toInt())
                         raf.seek(offset)
                         raf.readFully(bytes)
@@ -78,6 +92,10 @@ class RecordingUploader(private val dir: File, private val transport: RecordingT
             .put("files", JSONObject(declared.mapValues { JSONObject().put("size", it.value.first).put("sha256", it.value.second) }))
             .toString(2))
         return true
+        } catch (expired: RecordingAssetExpired) {
+            (expired.asset?.let { listOf(it) } ?: listOf("audio", "transcript")).forEach { RecordingExpiry.removeAsset(dir, id, it) }
+            return false
+        }
     }
 
     companion object {

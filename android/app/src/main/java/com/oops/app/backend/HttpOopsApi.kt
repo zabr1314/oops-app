@@ -10,10 +10,18 @@ import org.json.JSONObject
 import java.io.IOException
 
 /** The real backend (洪玉麟's service), see docs/api.md. */
-class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val token: String = "") : OopsApi,
+class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val token: String = "", private val sessionMode: (String) -> String? = { null }) : OopsApi,
     com.oops.app.store.RecordingTransport {
     override val name = "http"
     private val base = baseUrl.trim().trimEnd('/')
+    @Volatile private var archivePolicySupported = false
+    private fun requirePolicySupportBlocking() {
+        if (archivePolicySupported) return
+        val health = blocking(request("/healthz").get().build())
+        require(health.optInt("archive_policy_version") >= 1) { "当前服务尚不支持日常临时处理和分别保存期限，请更新服务后重试" }
+        archivePolicySupported = true
+    }
+    suspend fun requireArchivePolicy() = withContext(Dispatchers.IO) { requirePolicySupportBlocking() }
 
     private fun request(path: String): Request.Builder {
         val builder = Request.Builder().url(base + path)
@@ -27,12 +35,30 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
 
     override suspend fun notice(request: JSONObject): JSONObject? =
         optional("/v1/notices", request)?.let { NoticeJson.validate(it, request) }
-    override suspend fun syncMeeting(request: JSONObject) = optional("/v1/meetings/sync", request)
+    override suspend fun syncMeeting(request: JSONObject): JSONObject? {
+        val result = optional("/v1/meetings/sync", request)
+        if (request.has("recording_mode") && result != null) {
+            val accepted = result.optJSONObject("storage_policy") ?: throw IOException("服务未确认本次保存期限")
+            for (key in listOf("recording_mode", "cloud_save_confirmed", "audio_retention_days", "transcript_retention_days"))
+                require(accepted.opt(key) == request.opt(key)) { "服务确认的保存方式与本次选择不一致" }
+            require(java.time.Duration.between(java.time.Instant.parse(accepted.getString("archive_started_at")), java.time.Instant.parse(request.getString("archive_started_at"))).abs() <= java.time.Duration.ofNanos(1_000)) { "服务确认的保存起点与本次选择不一致" }
+        }
+        return result
+    }
     override suspend fun historyList() = optionalGet("/v1/meetings?limit=30")
     override suspend fun historyOpen(id: String): JSONObject? {
         require(id.matches(Regex("[A-Za-z0-9_-]{1,100}")))
         return optionalGet("/v1/meetings/$id")
     }
+    override suspend fun historyMinutes(id: String): JSONObject? {
+        require(id.matches(Regex("[A-Za-z0-9_-]{1,100}")))
+        return optionalGet("/v1/meetings/$id/minutes")
+    }
+    override suspend fun meetingBoard(id: String): JSONObject? {
+        require(id.matches(Regex("[A-Za-z0-9_-]{1,100}")))
+        return optionalGet("/v1/meetings/$id/board")
+    }
+    override suspend fun retainMeeting(request: JSONObject) = optional("/v1/meetings/retain", request)
     override suspend fun historyDelete(id: String) = optional("/v1/meetings/delete", JSONObject().put("session_id", id).put("confirm", true))
     override suspend fun historySearch(query: String) = optional("/v1/meetings/search", JSONObject().put("query", query))
     override suspend fun reviewMeeting(request: JSONObject) = optional("/v1/meetings/review", request)
@@ -56,6 +82,7 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
             when {
                 response.code == 404 || response.code == 501 -> null
                 response.code == 409 -> throw HttpFailure(409, "录音还没上传到这一段")
+                response.code == 410 -> throw com.oops.app.store.RecordingAssetExpired("audio")
                 !response.isSuccessful -> throw HttpFailure(response.code, "原声接口返回 HTTP ${response.code}")
                 else -> com.oops.app.core.Wav.openPcm(response.body.byteStream()).use { it.readBytes() }
             }
@@ -97,7 +124,7 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
     suspend fun deleteVoiceprint(body: JSONObject): JSONObject = post("/v1/voiceprints/delete", body)
 
     private suspend fun optional(path: String, json: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
-        http.newCall(request(path).post(json.toString().toRequestBody(JSON)).build()).execute().use { response ->
+        http.newCall(request(path).post(scoped(json).toString().toRequestBody(JSON)).build()).execute().use { response ->
             if (response.code == 404 || response.code == 501) null
             else if (!response.isSuccessful) throw HttpFailure(response.code, "分析接口返回 HTTP ${response.code}")
             else JSONObject(response.body.string())
@@ -118,12 +145,18 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
         val text = response.body.string()
         val error = runCatching { JSONObject(text).optJSONObject("error") }.getOrNull()
         if (response.code == 409 && error?.has("received") == true) throw com.oops.app.store.ResumeAt(error.getLong("received"))
+        if (response.code == 410) {
+            val asset = error?.optString("asset")?.takeIf { it in setOf("audio", "transcript") }
+                ?: error?.optJSONObject("extra")?.optString("asset")?.takeIf { it in setOf("audio", "transcript") }
+                ?: runCatching { JSONObject(text).optJSONObject("extra")?.optString("asset") }.getOrNull()?.takeIf { it in setOf("audio", "transcript") }
+            throw com.oops.app.store.RecordingAssetExpired(asset)
+        }
         if (!response.isSuccessful) throw HttpFailure(response.code, "录音上传返回 HTTP ${response.code}：${error?.optString("message") ?: ""}")
         JSONObject(text)
     }
 
     override fun recordingManifest(sessionId: String, body: JSONObject) =
-        blocking(request(recordingPath(sessionId) + "/manifest").post(body.toString().toRequestBody(JSON)).build())
+        blocking(request(recordingPath(sessionId) + "/manifest").post(scoped(body).toString().toRequestBody(JSON)).build())
 
     override fun recordingChunk(sessionId: String, name: String, offset: Long, bytes: ByteArray, sha256: String): Long {
         require(name in setOf("audio.pcm", "finals.jsonl", "asr.jsonl", "timing.jsonl", "meta.json"))
@@ -134,8 +167,15 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
     override fun recordingComplete(sessionId: String) =
         blocking(request(recordingPath(sessionId) + "/complete").post("{}".toRequestBody(JSON)).build())
 
-    private suspend fun post(path: String, body: JSONObject): JSONObject =
-        call(request(path).post(body.toString().toRequestBody(JSON)).build())
+    private fun scoped(body: JSONObject): JSONObject {
+        sessionMode(body.optString("session_id"))?.let { body.put("recording_mode", it) }
+        if (body.has("recording_mode")) requirePolicySupportBlocking()
+        return body
+    }
+
+    private suspend fun post(path: String, body: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        call(request(path).post(scoped(body).toString().toRequestBody(JSON)).build())
+    }
 
     private suspend fun call(request: Request): JSONObject = withContext(Dispatchers.IO) {
         http.newCall(request).execute().use { response ->

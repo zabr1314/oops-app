@@ -711,8 +711,8 @@
   },
   {
     "key": "u01-settings",
-    "title": "我的",
-    "group": "我的",
+    "title": "设置",
+    "group": "设置",
     "route": {
       "view": "settings"
     },
@@ -721,7 +721,7 @@
   {
     "key": "u02-settings-identity",
     "title": "身份与角色",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-identity"
     },
@@ -730,7 +730,7 @@
   {
     "key": "u03-settings-preferences",
     "title": "助理偏好",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-preferences"
     },
@@ -739,7 +739,7 @@
   {
     "key": "u04-settings-voice",
     "title": "我的声音身份",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-voice"
     },
@@ -748,7 +748,7 @@
   {
     "key": "u05-settings-devices",
     "title": "设备与声音入口",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-devices"
     },
@@ -757,7 +757,7 @@
   {
     "key": "u06-settings-device",
     "title": "设备详情",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-device",
       "id": "录音豆"
@@ -767,7 +767,7 @@
   {
     "key": "u07-settings-pair",
     "title": "添加设备",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-pair",
       "id": "录音豆"
@@ -777,7 +777,7 @@
   {
     "key": "u08-settings-deskpet",
     "title": "桌面伙伴",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-deskpet"
     },
@@ -786,7 +786,7 @@
   {
     "key": "u09-settings-tools",
     "title": "工具连接",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-tools"
     },
@@ -795,7 +795,7 @@
   {
     "key": "u10-settings-tool",
     "title": "连接与权限",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-tool",
       "id": "电脑助手"
@@ -805,7 +805,7 @@
   {
     "key": "u11-settings-sync",
     "title": "离线记录",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-sync"
     },
@@ -814,7 +814,7 @@
   {
     "key": "u12-settings-sharing",
     "title": "分享管理",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-sharing"
     },
@@ -823,7 +823,7 @@
   {
     "key": "u13-settings-retention",
     "title": "保存期限",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-retention"
     },
@@ -831,8 +831,8 @@
   },
   {
     "key": "u14-settings-spaces",
-    "title": "工作空间",
-    "group": "我的",
+    "title": "内容范围与共享",
+    "group": "设置",
     "route": {
       "view": "settings-spaces"
     },
@@ -840,8 +840,8 @@
   },
   {
     "key": "u15-settings-members",
-    "title": "团队成员与邀请",
-    "group": "我的",
+    "title": "协作与共享 · 兼容入口",
+    "group": "设置",
     "route": {
       "view": "settings-members"
     },
@@ -850,7 +850,7 @@
   {
     "key": "u16-settings-trash",
     "title": "回收站",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-trash"
     },
@@ -859,7 +859,7 @@
   {
     "key": "u17-settings-privacy",
     "title": "隐私与数据",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-privacy"
     },
@@ -868,7 +868,7 @@
   {
     "key": "u18-settings-export",
     "title": "导出与清理",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-export"
     },
@@ -877,7 +877,7 @@
   {
     "key": "u19-settings-logs",
     "title": "操作记录",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-logs"
     },
@@ -886,7 +886,7 @@
   {
     "key": "u20-settings-notifications",
     "title": "通知与自主等级",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-notifications"
     },
@@ -895,7 +895,7 @@
   {
     "key": "u21-settings-account",
     "title": "账户与安全",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-account"
     },
@@ -904,7 +904,7 @@
   {
     "key": "u22-settings-usage",
     "title": "用量与方案",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-usage"
     },
@@ -1193,7 +1193,7 @@
   {
     "key": "p10-settings-listening-10",
     "title": "智能聆听 · 唤醒与起止设置",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-listening"
     },
@@ -1221,7 +1221,7 @@
   {
     "key": "p12-settings-voice-identities-12",
     "title": "声音身份 · 样本与明确关联",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-voice-identities"
     },
@@ -1230,7 +1230,7 @@
   {
     "key": "p13-settings-voice-match-13",
     "title": "声音身份 · 已匹配结果",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1247,7 +1247,7 @@
   {
     "key": "p14-settings-voice-match-14",
     "title": "声音身份 · 低把握待确认",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1264,7 +1264,7 @@
   {
     "key": "p15-settings-voice-match-15",
     "title": "声音身份 · 识别失败",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1281,7 +1281,7 @@
   {
     "key": "p16-settings-voice-match-16",
     "title": "声音身份 · 人工核对关联",
-    "group": "我的",
+    "group": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1671,7 +1671,7 @@
     "actions": [
       {
         "kind": "click",
-        "name": "核对并整理",
+        "name": "核对并建立任务",
         "exact": true,
         "role": "button",
         "nth": 2
@@ -1714,7 +1714,7 @@
     "actions": [
       {
         "kind": "click",
-        "name": "核对并整理",
+        "name": "核对并建立任务",
         "exact": true,
         "role": "button",
         "nth": 2
@@ -1771,5 +1771,749 @@
       "mode": "board-p0-feishu-receipt"
     },
     "scene": "p0-feishu-receipt"
+  },
+  {
+    "key": "f01-home-recording",
+    "title": "首页 · 记录中与真实工作阶段",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "recording"
+  },
+  {
+    "key": "f02-home-paused",
+    "title": "首页 · 暂停后的继续与结束",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "paused"
+  },
+  {
+    "key": "f03-home-device",
+    "title": "首页 · 紧凑设备状态",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "devices"
+  },
+  {
+    "key": "f04-tasks-date-filter",
+    "title": "任务 · 日期与状态独立筛选",
+    "group": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "具体日期",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "具体日期",
+        "value": "2026-10-12",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "f05-preference-custom",
+    "title": "助理偏好 · 自定义方式与长度",
+    "group": "设置",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "回答方式",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "我希望怎样回答",
+        "value": "先给三个要点，再列出不确定的地方",
+        "exact": true
+      },
+      {
+        "kind": "select",
+        "label": "回答长度",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "长度要求",
+        "value": "100字以内，需要时再展开",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "f06-preference-draft",
+    "title": "助理偏好 · 可修改的引导草稿",
+    "group": "设置",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "快速整理我的偏好",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "你希望 Oops 怎么回答？",
+        "value": "我时间很紧，先给结论，简短一点",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "整理可修改的偏好草稿",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f07-privacy-notice",
+    "title": "首次使用 · 阅读隐私说明",
+    "group": "首页",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "阅读使用与隐私说明",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f08-welcome-choices",
+    "title": "首次使用 · 明确确认后的独立选择",
+    "group": "首页",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "我已阅读并了解本版使用与隐私说明",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "确认并继续",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f09-unknown-people",
+    "title": "人物列表 · 未关联交流线索与建档",
+    "group": "记忆",
+    "route": {
+      "view": "memory",
+      "mode": "人物"
+    },
+    "scene": "default"
+  },
+  {
+    "key": "f10-unknown-detail",
+    "title": "未知人物 · 匿名片段与档案线索分开",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "p3"
+    },
+    "scene": "default"
+  },
+  {
+    "key": "f11-unknown-build",
+    "title": "从原话建档 · 精确片段与独立声音许可",
+    "group": "记忆",
+    "route": {
+      "view": "memory-unknown",
+      "mode": "{\"sessionId\":\"session-001\",\"turnId\":\"tr3\",\"create\":true}"
+    },
+    "scene": "default"
+  },
+  {
+    "key": "f12-chapter-facts-live",
+    "title": "现场话题 · 没有任务也保留事实重点",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "现场"
+    },
+    "scene": "feedback-facts-live"
+  },
+  {
+    "key": "f13-chapter-facts-overview",
+    "title": "会后概览 · 普通事实与原话定位",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "概览"
+    },
+    "scene": "feedback-facts-finished"
+  },
+  {
+    "key": "f14-memory-understanding",
+    "title": "个人理解 · 场景、更新时间与纠正",
+    "group": "记忆",
+    "route": {
+      "view": "memory"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "核对",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f15-document-role-source",
+    "title": "文档角色 · 选定来源与原话",
+    "group": "设置",
+    "route": {
+      "view": "settings-role-import"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "选择示例飞书文档",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f16-document-role-draft",
+    "title": "文档角色 · 可修改并明确应用的草稿",
+    "group": "设置",
+    "route": {
+      "view": "settings-role-import"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "选择示例飞书文档",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "原文 1",
+        "exact": false,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "整理角色建议",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f17-recording-compact",
+    "title": "跨页记录 · 紧凑控制与直接暂停结束",
+    "group": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "recording",
+    "actions": []
+  },
+  {
+    "key": "f18-recording-expanded",
+    "title": "跨页记录 · 展开标记与返回现场",
+    "group": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "recording",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "展开记录控制",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f19-assistant-work-ppt",
+    "title": "工作助手 · PPT 类型与使用范围",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-plan",
+    "actions": []
+  },
+  {
+    "key": "f20-assistant-work-offline",
+    "title": "工作助手 · 离线等待与恢复在线",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "助手离线",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f21-assistant-work-generation-failure",
+    "title": "工作助手 · 生成失败与重新核对",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "生成失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f22-assistant-work-delivery-failure",
+    "title": "工作助手 · 交付失败只重读结果",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "交付失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f23-assistant-work-recovered",
+    "title": "工作助手 · 同一请求恢复与已有草稿",
+    "group": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "交付失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "重试读取示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f24-home-preparing",
+    "title": "首页伙伴 · 本人草稿准备状态",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "tasks-in-progress",
+    "actions": []
+  },
+  {
+    "key": "f25-home-failed",
+    "title": "首页伙伴 · 准备中断与重试入口",
+    "group": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "tasks-failure",
+    "actions": []
+  },
+  {
+    "key": "f26-daily-buffer",
+    "title": "日常 · 五分钟临时缓冲",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "actions": []
+  },
+  {
+    "key": "f27-daily-stop",
+    "title": "日常 · 停止并清除全文",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "结束当前记录",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f28-daily-finished",
+    "title": "日常 · 候选与短证据",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "概览"
+    },
+    "scene": "p0-daily-finished",
+    "actions": []
+  },
+  {
+    "key": "f29-daily-to-meeting",
+    "title": "日常转会议 · 单独选择云保存",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "切换为正式会议",
+        "exact": true,
+        "role": "button"
+      }
+    ]
+  },
+  {
+    "key": "f30-meeting-cloud-choice",
+    "title": "正式会议 · 独立期限与云保存",
+    "group": "会话",
+    "route": {
+      "view": "session-mode",
+      "mode": "会议"
+    },
+    "scene": "default",
+    "actions": []
+  },
+  {
+    "key": "f31-meeting-retention",
+    "title": "正式会议 · 原音与全文期限",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-meeting-retention",
+    "actions": []
+  },
+  {
+    "key": "f32-meeting-expired",
+    "title": "会议到期 · 仅独立短证据",
+    "group": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "原文"
+    },
+    "scene": "p0-meeting-expired",
+    "actions": []
+  },
+  {
+    "key": "f33-project-sharing",
+    "title": "项目 · 上下文与同一任务",
+    "group": "记忆",
+    "route": {
+      "view": "memory-project",
+      "id": "project-1"
+    },
+    "scene": "default",
+    "actions": []
+  },
+  {
+    "key": "d01-device-p1-pair",
+    "title": "首次配对 · 开机聆听默认未选",
+    "group": "设置",
+    "route": {
+      "view": "settings-pair",
+      "id": "录音豆"
+    },
+    "scene": "default",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "扫描示例设备",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "d02-device-p1-listening",
+    "title": "设备开机 · 日常临时聆听",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-listening"
+  },
+  {
+    "key": "d03-device-p1-permission",
+    "title": "设备启动 · 声音权限缺失",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-permission"
+  },
+  {
+    "key": "d04-device-p1-background",
+    "title": "设备启动 · 后台受限",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-background"
+  },
+  {
+    "key": "d05-device-p1-disconnected",
+    "title": "设备启动 · 设备断连",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-disconnected"
+  },
+  {
+    "key": "d06-device-p1-quiet",
+    "title": "设备启动 · 安静时段",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-quiet"
+  },
+  {
+    "key": "d07-device-p1-service",
+    "title": "设备启动 · 服务不可用",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-service"
+  },
+  {
+    "key": "d08-device-p1-recovery",
+    "title": "条件恢复 · 等待明确继续",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-recovery"
+  },
+  {
+    "key": "d09-device-p1-paused",
+    "title": "暂停后重连 · 不自行恢复",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-paused"
+  },
+  {
+    "key": "d10-device-p1-stopped",
+    "title": "停止后重连 · 不重新开始",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-stopped"
+  },
+  {
+    "key": "d11-device-p1-meeting",
+    "title": "已有会议 · 设备启动让位",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-meeting"
+  },
+  {
+    "key": "d12-device-p1-enable",
+    "title": "开机聆听 · 独立开启确认",
+    "group": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-enable",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "switch",
+        "name": "开机自动聆听",
+        "exact": true
+      }
+    ]
   }
 ]

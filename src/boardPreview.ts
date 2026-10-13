@@ -7,6 +7,8 @@ import { setSessionShared, type SessionReviewItem } from './sessionLogic';
 import { refreshTaskSuggestions } from './taskSuggestionsLogic';
 import { refreshSessionIntelligence, saveNoticePlan, readSessionIntelligence, updateIntelligenceItem } from './sessionIntelligenceLogic';
 import { SELF_VOICE_ID, addVoiceSample, bindVoiceSample, runVoiceMatch } from './voiceIdentityLogic';
+import { applyStorageDeadlines, finishDailySession, newStoragePolicy, pinSessionEvidence } from './storagePolicy';
+import { pairStartupDevice, transitionDeviceStartup, reconcileDeviceStartupHolds, type DeviceCondition } from './deviceStartupLogic';
 
 const PERSONAL = '我的空间';
 const TEAM = 'Oops 产品团队';
@@ -130,9 +132,75 @@ function p0VoiceData(data: AppData, scenario?: '匹配' | '低置信度' | '识�
   return scenario ? runVoiceMatch(data, 'p0-voice-sample', scenario, 'p0-voice-result', '10月9日 10:01').data : data;
 }
 
+function deviceStartupPreview(data: AppData, scene: string): AppData {
+  const now = new Date();
+  data = pairStartupDevice(data, '录音豆', scene !== 'device-p1-enable');
+  let condition: DeviceCondition = 'ready';
+  if (['device-p1-listening', 'device-p1-paused', 'device-p1-stopped', 'device-p1-recovery'].includes(scene)) {
+    data = transitionDeviceStartup(data, { condition: 'ready', recoveryRequired: false }, '录音豆', { type: 'signal' }, { sessionId: 'device-p1-daily', now }).data;
+  }
+  if (scene === 'device-p1-paused') data = transitionDeviceStartup(data, { condition: 'ready', recoveryRequired: false }, '录音豆', { type: 'pause' }, { sessionId: '', now }).data;
+  if (scene === 'device-p1-stopped') data = reconcileDeviceStartupHolds(data, finishDailySession(data, 'device-p1-daily', [], now.getTime()));
+  if (scene === 'device-p1-meeting') {
+    data.activeSessionId = 'session-001';
+    data.sessions = data.sessions.map(s => s.id === 'session-001' ? { ...s, status: '进行中', storage: newStoragePolicy(data, 'meeting', true, now.getTime()) } : s);
+  }
+  const blocked: Record<string, DeviceCondition> = { 'device-p1-permission': 'permission', 'device-p1-background': 'background',
+    'device-p1-disconnected': 'disconnected', 'device-p1-quiet': 'quiet', 'device-p1-service': 'service' };
+  if (blocked[scene]) condition = blocked[scene];
+  if (scene === 'device-p1-recovery') {
+    const result = transitionDeviceStartup(data, { condition: 'ready', recoveryRequired: false }, '录音豆', { type: 'condition', condition: 'disconnected' }, { sessionId: '', now });
+    data = result.data;
+  }
+  data.settings.retention['board-device-condition'] = condition;
+  data.settings.toggles['board-device-recovery'] = scene === 'device-p1-recovery' || !!blocked[scene];
+  return data;
+}
+
 export function boardPreviewData(scene: string): AppData {
   let data = baseData();
   switch (scene) {
+    case 'p0-daily-active':
+    case 'p0-daily-finished':
+    case 'p0-meeting-retention':
+    case 'p0-meeting-expired': {
+      const daily = scene.startsWith('p0-daily');
+      const now = Date.now();
+      const turns = [{ id: 'policy-turn-1', speaker: '我', time: '00:00:08', text: '下午和同事核对素材准备的进度。', receivedAt: now - 12000 },
+        { id: 'policy-turn-2', speaker: '同事', time: '00:00:16', text: '先把两个方案的差别列出来，明天再确认。', receivedAt: now - 4000 }];
+      data.sessions = [{ id: 'session-policy', title: daily ? '午后沟通' : '首版项目会议', kind: daily ? '日常' : '会议', date: '今天 14:00', duration: '00:20', status: '暂停',
+        transcript: turns, summary: [], agenda: ['方案比较'], participants: ['我', '同事'], attachments: [], privateNotes: [], project: 'Oops 首版',
+        storage: { ...newStoragePolicy(data, daily ? 'daily' : 'meeting', !daily, scene === 'p0-meeting-expired' ? now - 31 * 86400000 : now - 20000), audioRetentionDays: 7, transcriptRetentionDays: 30 } }, ...data.sessions];
+      data.activeSessionId = 'session-policy';
+      if (scene === 'p0-daily-finished') data = finishDailySession(data, 'session-policy', [], now);
+      if (scene === 'p0-meeting-expired') {
+        data = pinSessionEvidence(data, 'session-policy', turns[0]).data;
+        data.sessions[0].status = '已结束'; data.activeSessionId = undefined;
+        data = applyStorageDeadlines(data, now);
+      }
+      break;
+    }
+    case 'feedback-facts-live':
+    case 'feedback-facts-finished': {
+      const live=scene==='feedback-facts-live';
+      data.activeSessionId=live?'session-001':undefined;
+      data.tasks=[];data.memories=[];
+      data.sessions=data.sessions.map(session=>session.id==='session-001'?{...session,
+        title:'用户测试复盘',kind:'会议',status:live?'暂停':'已结束',duration:'00:40',
+        agenda:['用户测试','合作反馈','下次议程'],
+        summary:['旧版判断：按钮入口已经没有问题。'],
+        transcript:[
+          {id:'fact',speaker:'我',time:'00:00:20',text:'用户测试显示按钮不容易找到。'},
+          {id:'feedback',speaker:'同事',time:'00:00:40',text:'合作反馈来自三位设计师。'}
+        ],attachments:[],privateNotes:[]}:session);
+      delete data.settings.retention['session-review-items:session-001'];
+      delete data.settings.retention['session-reviewed:session-001'];
+      delete data.settings.retention['session-conclusions:session-001'];
+      delete data.settings.retention['session-questions:session-001'];
+      data.settings.retention['session-agenda-index:session-001']='0';
+      break;
+    }
+
     case 'guided-trial':
       data = p0IntelligenceData(data, true);
       data.settings.retention['sample-index:session-001'] = '6';
@@ -285,6 +353,7 @@ export function boardPreviewData(scene: string): AppData {
     default:
       break;
   }
+  if (scene.startsWith('device-p1-')) data = deviceStartupPreview(data, scene);
   // Bind after every scene-specific mutation, so approval always refers to its actual data.
   return bindDrafts(data);
 }

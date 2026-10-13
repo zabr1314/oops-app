@@ -10,7 +10,12 @@ import com.oops.app.asr.RawUtterance
 import com.oops.app.asr.VolcAsrClient
 import com.oops.app.asr.VolcRequest
 import com.oops.app.audio.AudioSource
+import com.oops.app.audio.BeanAudioSource
+import com.oops.app.audio.BeanAuth
+import com.oops.app.audio.BeanSdk
+import com.oops.app.audio.MediaCodecOpusDecoder
 import com.oops.app.audio.MicAudioSource
+import com.oops.app.audio.ReplayBeanLink
 import com.oops.app.audio.RemoteAudioSource
 import com.oops.app.audio.WavFileAudioSource
 import com.oops.app.backend.ActionDraft
@@ -56,6 +61,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
@@ -76,7 +82,10 @@ object OopsEngine {
     /** Shorter sentences carry too little voice to identify reliably. */
     private const val SPEAKER_MIN_MS = 1_000L
     private const val SPLIT_POLLS = 3
+    private const val BOARD_POLL_MS = 6_000L
+    private const val BOARD_POLLS = 6
     private const val TEST_WAV = "test/dialog.wav"
+    private const val TEST_BEAN_STREAM = "test/dialog.opusraw" // dialog.wav through scripts/bean_opus.py encode
     private val MANUAL_OTHER = setOf("other", "multi", "unclear")
     private const val REVIEW_RETRIES = 3
     private const val REVIEW_RETRY_MS = 25_000L
@@ -114,6 +123,8 @@ object OopsEngine {
 
     @Volatile private var api: OopsApi = MockOopsApi(Settings.TEAM)
     @Volatile private var previewApi: OopsApi = api
+    @Volatile private var serviceEpoch = 0L
+    private var configuredService: Triple<Boolean, String, String>? = null
 
     private val _state = MutableStateFlow(EngineState())
     val state: StateFlow<EngineState> = _state.asStateFlow()
@@ -144,13 +155,19 @@ object OopsEngine {
     private var previewRequestedMs = 0L
     private var previewResultMs = 0L
 
+    @Volatile private var recordingPolicy = com.oops.app.store.RecordingPolicy()
+    private val sessionModes = ConcurrentHashMap<String, String>()
     @Volatile private var sessionId = ""
     @Volatile private var recorder: com.oops.app.store.SessionRecorder? = null
     @Volatile private var level = 0f
 
+    private lateinit var dailyCandidateStore: com.oops.app.store.DailyCandidateStore
     private val cards = ConcurrentHashMap<String, RecallCard>()
     private val drafts = ConcurrentHashMap<String, ActionDraft>()
     private val ownerHints = ConcurrentHashMap<String, com.oops.app.backend.DraftResponse>()
+    /** The server's running task list for this session (P0–P3); display only, confirming still goes through drafts. */
+    @Volatile private var taskBoard: JSONObject? = null
+    private var boardPoll: Job? = null
     private val hintEpochs = ConcurrentHashMap<String, Long>()
     private val suggestionEpochs = ConcurrentHashMap<String, Long>()
     private val opIds = ConcurrentHashMap<String, String>() // draftId → op_id, reused on retry
@@ -169,6 +186,7 @@ object OopsEngine {
             com.oops.app.notice.Agenda.fromBridge(JSONObject(settings.agendaJson), ++agendaRevision)
         }.getOrDefault(com.oops.app.notice.Agenda()))
         store = SavedClipStore(File(application.filesDir, "saved"))
+        dailyCandidateStore = com.oops.app.store.DailyCandidateStore(File(application.filesDir, "daily-candidates"))
         operations = ActionOperationStore(File(application.filesDir, "actions"))
         ownerFeedback = com.oops.app.store.OwnerFeedbackStore(File(application.filesDir, "owner-feedback"))
         scope.launch(Dispatchers.IO) {
@@ -205,14 +223,17 @@ object OopsEngine {
     /** A meeting the app never stopped still tells the server it ended, so its minutes go out (see [SessionRecovery]). */
     private fun recoverUnfinishedMeetings() {
         val dir = File(app.filesDir, "recordings")
+        com.oops.app.store.RecordingExpiry.prune(dir)
         val ended = runCatching { com.oops.app.store.SessionRecovery.scan(dir, active = null) }
             .onFailure { Log.w(TAG, "unfinished meeting scan failed: ${it.message}") }.getOrDefault(emptyList())
-        if (ended.isEmpty() || !settings.memorySync) return
+        if (ended.isEmpty()) return
         val client = api
         scope.launch(Dispatchers.IO) {
             for ((id, at) in ended) {
                 try {
-                    client.syncMeeting(com.oops.app.store.SessionRecovery.endBody(id, at))
+                    val meta = runCatching { JSONObject(File(dir, "$id.json").readText()) }.getOrNull()
+                    if (!settings.memorySync && meta?.has("recording_mode") != true) continue
+                    client.syncMeeting(com.oops.app.store.SessionRecovery.endBody(id, at, meta))
                     com.oops.app.store.SessionRecovery.markSent(dir, id)
                     Log.i(TAG, "unfinished meeting $id: end $at sent")
                 } catch (error: CancellationException) { throw error }
@@ -232,12 +253,14 @@ object OopsEngine {
 
     /** Finished sessions go to the team server; never while a meeting is capturing (live ASR keeps the network). */
     fun scheduleUpload(delayMs: Long = 0) {
-        val transport = api as? com.oops.app.backend.HttpOopsApi ?: return
         scope.launch(Dispatchers.IO) {
             delay(delayMs)
             if (!uploading.compareAndSet(false, true)) return@launch
             val dir = File(app.filesDir, "recordings")
             try {
+                com.oops.app.store.RecordingExpiry.prune(dir, active = if (source != null) sessionId else null)
+                expireSessionMemory(dir)
+                val transport = api as? com.oops.app.backend.HttpOopsApi ?: return@launch
                 val uploader = com.oops.app.store.RecordingUploader(dir, transport)
                 fun active() = if (source != null) sessionId else null
                 for (id in uploader.pending(active())) {
@@ -258,35 +281,69 @@ object OopsEngine {
         }
     }
 
+    /** Disk expiry must also invalidate any still-open in-memory copy of this meeting. */
+    private fun expireSessionMemory(dir: File) {
+        val session = sessionId
+        val meta = runCatching { JSONObject(File(dir, "$session.json").readText()) }.getOrNull() ?: return
+        if (!meta.has("recording_mode")) return
+        synchronized(pipeline) {
+            if (session != sessionId) return
+            val audio = meta.optBoolean("audio_expired")
+            val text = meta.optBoolean("transcript_expired")
+            val audioChanged = audio && !_state.value.audioExpired
+            val textChanged = text && !_state.value.transcriptExpired
+            if (audioChanged) { ring.discardAudio(); sessionIndex.discardAudio(); player.stop() }
+            if (textChanged) {
+                val ids = transcript.snapshot().map { it.id }
+                transcript.clear(); sessionIndex.reset(session); cards.clear()
+                drafts.keys.removeAll { !submitted.containsKey(it) }
+                ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear(); topicEvidence.clear(); conflictPairs.clear()
+                tracker = com.oops.app.notice.NoticeTracker(tracker.agenda)
+                emit(OopsEvent.Pruned(ids)); emit(OopsEvent.Json("capture.assetsExpired", JSONObject().put("asset", "transcript")))
+            }
+            if (audioChanged || textChanged) {
+                _state.update { it.copy(audioExpired = audio, transcriptExpired = text) }
+                updateAssistanceState(); publishSessionSummary(session)
+            }
+        }
+    }
+
     // ---- capture -------------------------------------------------------------------------
 
-    fun startCapture(kind: String) {
+    suspend fun requireRecordingPolicySupport() { (api as? HttpOopsApi)?.requireArchivePolicy() }
+
+    fun startCapture(kind: String, policy: com.oops.app.store.RecordingPolicy = com.oops.app.store.RecordingPolicy()) {
         synchronized(pipeline) {
             if (source != null) return
             settings.source = kind
+            recordingPolicy = policy
             ring.reset()
             resetSpeakerPreview()
             transcript.clear()
             cards.clear()
             drafts.keys.removeAll { !submitted.containsKey(it) }
             ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear()
+            taskBoard = null; boardPoll?.cancel()
             sessionId = UUID.randomUUID().toString()
+            sessionModes[sessionId] = policy.mode
+            val archiveStartedAt = Instant.now().toString()
             sessionIndex.reset(sessionId)
             recorder?.closeAudio()
             runCatching { com.oops.app.store.SessionRecorder.prune(File(app.filesDir, "recordings"), keep = null) }
                 .onSuccess { if (it.isNotEmpty()) Log.i(TAG, "pruned recordings: ${it.size}") }
-            recorder = if (!settings.recordSession) null else runCatching {
+            recorder = if (!policy.archives) null else runCatching {
                 com.oops.app.store.SessionRecorder(File(app.filesDir, "recordings"), sessionId,
                     org.json.JSONObject().put("session_id", sessionId).put("source", kind)
-                        .put("started_at", Instant.now().toString()))
+                        .put("started_at", archiveStartedAt).put("time_zone", java.time.ZoneId.systemDefault().id).also { meta ->
+                            val contract = policy.contract(archiveStartedAt); contract.keys().forEach { key -> meta.put(key, contract.get(key)) }
+                        })
             }.onFailure { Log.e(TAG, "session recording unavailable", it) }.getOrNull()
             tracker = com.oops.app.notice.NoticeTracker(tracker.agenda)
             _state.update { it.copy(syncStatus = "idle", recordingCapped = false, micBusy = false) }
             lastTopicAt = 0; lastTopicCount = 0; lastVoiceAt = -5_000
             topicEvidence.clear(); conflictPairs.clear()
-            syncContext = SyncContext(com.oops.app.backend.MeetingSync(sessionId, Instant.now().toString(), java.time.ZoneId.systemDefault().id), api)
-            syncContext!!.queue.agenda(tracker.agenda.wire())
-            syncContexts.add(syncContext!!)
+            syncContext = if (policy.archives) SyncContext(com.oops.app.backend.MeetingSync(sessionId, archiveStartedAt, java.time.ZoneId.systemDefault().id, policy.contract(archiveStartedAt)), api) else null
+            syncContext?.let { it.queue.agenda(tracker.agenda.wire()); syncContexts.add(it) }
             optionalRequests = com.oops.app.backend.OptionalRequests()
             reconnectAttempt = 0
             asrDownSinceMs = null
@@ -294,6 +351,9 @@ object OopsEngine {
             _state.update {
                 it.copy(
                     capturing = true, source = kind, sessionId = sessionId, sessionMs = 0, bufferedMs = 0,
+                    recordingMode = policy.mode, cloudSaveConfirmed = policy.archives,
+                    audioRetentionDays = policy.audioDays, transcriptRetentionDays = policy.transcriptDays,
+                    audioExpired = false, transcriptExpired = false,
                     asr = "connecting", asrDetail = null, asrGaps = emptyList(), sourceDetail = null, sourceReady = false,
                     digestCounts = emptyMap(), notices = emptyList(), commitmentCount = 0, analysisPending = 0, analysisFailed = 0, tagsSupported = null, sessionTruncated = false,
                 )
@@ -340,7 +400,7 @@ object OopsEngine {
         }
         src.stop()
         recorder?.closeAudio() // finals that flush after stop are still appended
-        client?.finish() // the server flushes the sentence in progress, then closes
+        if (recordingPolicy.archives) client?.finish() else client?.cancel() // daily stop cannot flush text back into the cleared buffer
         tickJob?.cancel()
         player.stop()
         level = 0f
@@ -357,6 +417,20 @@ object OopsEngine {
                     }
                 }
             }
+        }
+        if (!recordingPolicy.archives) {
+            synchronized(pipeline) {
+                val ids = transcript.snapshot().map { it.id }
+                sessionId = ""; asrGeneration++; asr = null
+                transcript.clear(); sessionIndex.reset(""); ring.reset(); cards.clear()
+                drafts.keys.removeAll { !submitted.containsKey(it) }
+                ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear(); topicEvidence.clear(); conflictPairs.clear()
+                tracker = com.oops.app.notice.NoticeTracker(tracker.agenda)
+                _state.update { it.copy(sessionId = "", sessionMs = 0, bufferedMs = 0, asr = "off", digestCounts = emptyMap(), notices = emptyList(), commitmentCount = 0, analysisPending = 0) }
+                emit(OopsEvent.Pruned(ids)); emit(OopsEvent.Json("capture.cleared", JSONObject().put("mode", "daily")))
+            }
+            scheduleUpload()
+            return
         }
         val stoppedSession = sessionId
         val stoppedTracker = tracker
@@ -380,6 +454,15 @@ object OopsEngine {
         scheduleUpload(10_000) // after the last finals flush
     }
 
+    /** Starts a new archive at the explicit switch, never copies the previous daily buffer. */
+    fun startMeeting(policy: com.oops.app.store.RecordingPolicy) {
+        require(policy.archives) { "请选择正式会议并确认云端保存" }
+        require(source != null && !recordingPolicy.archives) { "请先开始日常聆听，再切换正式会议" }
+        val kind = source!!.kind
+        stopCapture()
+        startCapture(kind, policy)
+    }
+
     private fun createAudioSource(kind: String): AudioSource = when (kind) {
         Settings.SOURCE_WAV -> WavFileAudioSource {
             val uri = settings.testWavUri
@@ -391,6 +474,9 @@ object OopsEngine {
                 ?: ("127.0.0.1" to RemoteAudioSource.DEFAULT_PORT)
             RemoteAudioSource(host, port)
         }
+        Settings.SOURCE_BEAN -> BeanAudioSource(BeanSdk.link(app, BeanAuth.fromBuildConfig()), ::MediaCodecOpusDecoder, kind)
+        Settings.SOURCE_BEAN_SIM -> BeanAudioSource(
+            ReplayBeanLink("录音豆模拟（内置对话）", { app.assets.open(TEST_BEAN_STREAM) }), ::MediaCodecOpusDecoder, kind)
         else -> MicAudioSource()
     }
 
@@ -499,6 +585,16 @@ object OopsEngine {
     private fun tick() {
         val now = nowMs
         val removed = transcript.prune(now)
+        if (!recordingPolicy.archives) {
+            val removedIds = sessionIndex.prune(now, RETENTION_MS).toSet()
+            ownerHints.keys.removeAll(removedIds); hintEpochs.keys.removeAll(removedIds); suggestionEpochs.keys.removeAll(removedIds)
+            topicEvidence.values.forEach { it.removeAll(removedIds) }
+            cards.entries.removeAll { (_, card) -> card.pool().any { it.endMs < now - RETENTION_MS } }
+            drafts.entries.removeAll { (id, draft) -> !submitted.containsKey(id) && draft.evidence.utteranceIds.any { sessionIndex.get(it) == null } }
+            val noticesChanged = tracker.prune(now - RETENTION_MS, sessionIndex.snapshot().map { it.id }.toSet())
+            if (noticesChanged) updateAssistanceState()
+            if (removedIds.isNotEmpty() || noticesChanged) publishSessionSummary(sessionId)
+        }
         if (removed.isNotEmpty()) {
             emit(OopsEvent.Pruned(removed.map { it.id }))
             Log.i(TAG, "pruned ${removed.size} utterance(s); retained=${transcript.snapshot().size}")
@@ -633,14 +729,15 @@ object OopsEngine {
 
     private fun onAsrFinal(session: String, baseMs: Long, raw: RawUtterance) {
         val u = synchronized(pipeline) {
-            if (session != sessionId) return
+            if (session != sessionId || _state.value.transcriptExpired) return
             val shifted = raw.shift(baseMs)
+            if (!recordingPolicy.archives && (source == null || shifted.endMs < nowMs - RETENTION_MS)) return
             transcript.add(shifted.startMs, shifted.endMs, shifted.text, null, shifted.words)
                 .let { added -> if (api is MockOopsApi) added else
                     transcript.setSpeaker(added.id, added.speaker, speakerState = "pending")!! }
                 .also { sessionIndex.add(session, it) }
         }
-        Log.i(TAG, "final ${u.id} [${u.startMs}-${u.endMs}] ${u.text}")
+        Log.i(TAG, "final ${u.id} [${u.startMs}-${u.endMs}]")
         timing(session, u.id, "final", "final_lag_ms" to synchronized(pipeline) { nowMs - u.endMs },
             "audio_ms" to (u.endMs - u.startMs), "filler" to com.oops.app.core.TextClean.isFiller(u.text))
         recorder?.takeIf { it.sessionId == session }?.let { r -> runCatching { r.final(u) } }
@@ -694,7 +791,8 @@ object OopsEngine {
                         transcript.setTag(u.id, result.tag, result.prob, result.engine)
                         _state.update { it.copy(tagsSupported = true) }
                         if (updated != null) {
-                            if (result.tag in com.oops.app.buffer.SessionIndex.RETAINED_TAGS) {
+                            if (!recordingPolicy.archives) dailyCandidateStore.upsert(session, updated)
+                            if (!_state.value.audioExpired && result.tag in com.oops.app.buffer.SessionIndex.RETAINED_TAGS) {
                                 val slice = ring.readAvailable(Pcm.msToSamples((u.startMs - CLIP_PAD_MS).coerceAtLeast(0)),
                                     Pcm.msToSamples(u.endMs + CLIP_PAD_MS))
                                 if (slice != null && slice.first <= Pcm.msToSamples(u.startMs) &&
@@ -850,7 +948,7 @@ object OopsEngine {
     private fun timing(session: String, id: String, stage: String, vararg fields: Pair<String, Any?>) {
         val line = JSONObject().put("id", id).put("stage", stage).put("at", System.currentTimeMillis())
         fields.forEach { (key, value) -> line.put(key, value ?: JSONObject.NULL) }
-        Log.i(TAG, "timing $line")
+        if (sessionModes[session] == "meeting") Log.i(TAG, "timing $line")
         recorder?.takeIf { it.sessionId == session }?.let { r -> runCatching { r.timing(line) } }
     }
 
@@ -890,21 +988,50 @@ object OopsEngine {
             try {
                 val hintStart = SystemClock.elapsedRealtime()
                 val result = policy.request(reservation) { client.draftAction(DraftRequest(session,
-                    listOf(utterance.toCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toCandidate() })) }
+                    listOf(utterance.toCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toCandidate() }, board = sessionModes[session] == "meeting")) }
                 timing(session, utterance.id, "draft", "http_ms" to (SystemClock.elapsedRealtime() - hintStart))
                 if (result != null && session == sessionId && hintEpochs[utterance.id] == epoch) {
                     ownerHints[utterance.id] = result
                     publishSessionSummary(session)
                 }
+                result?.board?.let { updateTaskBoard(session, it) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { Log.w(TAG, "owner hint unavailable: ${error.javaClass.simpleName}") }
         }.invokeOnCompletion { reservation.close() }
     }
 
+    /** The draft answer carries the list before this sentence; the server folds it in meanwhile, so read it again shortly. */
+    private fun updateTaskBoard(session: String, board: JSONObject) {
+        if (session != sessionId) return
+        val previous = taskBoard
+        if (previous == null || previous.optString("updated_at") != board.optString("updated_at")) {
+            taskBoard = board
+            emit(OopsEvent.Json("tasks.board", JSONObject(board.toString()).put("session_id", session)))
+        }
+        if (!board.optBoolean("pending") || boardPoll?.isActive == true) return
+        val client = api
+        boardPoll = scope.launch {
+            repeat(BOARD_POLLS) {
+                delay(BOARD_POLL_MS)
+                val fresh = try { client.meetingBoard(session) } catch (error: CancellationException) { throw error }
+                    catch (error: Exception) { null } ?: return@repeat
+                if (session != sessionId) return@launch
+                if (taskBoard?.optString("updated_at") != fresh.optString("updated_at")) {
+                    taskBoard = fresh
+                    emit(OopsEvent.Json("tasks.board", JSONObject(fresh.toString()).put("session_id", session)))
+                }
+                if (!fresh.optBoolean("pending")) return@launch
+            }
+        }
+    }
+
+    fun taskBoardSnapshot(): JSONObject? = taskBoard?.let { JSONObject(it.toString()).put("session_id", sessionId) }
+
     private fun refreshDraftSuggestions(session: String, utteranceId: String) {
         drafts.values.filter { utteranceId in it.evidence.utteranceIds && !submitted.containsKey(it.draftId) }.forEach { draft ->
             val revision = suggestionEpochs.merge(draft.draftId, draft.modelRevision + 1) { a, b -> maxOf(a + 1, b) }!!
             val client = api
+            val service = serviceEpoch
             val policy = optionalRequests
             val reservation = policy.tryReserve("draft-suggestion") ?: return@forEach
             scope.launch {
@@ -915,7 +1042,7 @@ object OopsEngine {
                         chosen.map { it.toCandidate() }, sessionIndex.neighbors(draft.evidence.utteranceIds, 4, 1)
                             .filter { it.id !in draft.evidence.utteranceIds }.map { it.toCandidate() })) }
                     synchronized(pipeline) {
-                        if (result == null || session != sessionId || submitted.containsKey(draft.draftId) ||
+                        if (service != serviceEpoch || result == null || session != sessionId || submitted.containsKey(draft.draftId) ||
                             suggestionEpochs[draft.draftId] != revision || "confirm:${draft.draftId}" in inFlight) return@synchronized
                         drafts.computeIfPresent(draft.draftId) { _, current ->
                             com.oops.app.backend.DraftPolicy.updateModel(current, result, revision).also {
@@ -994,7 +1121,7 @@ object OopsEngine {
         }
         val startedAt = SystemClock.elapsedRealtime()
         emit(OopsEvent.RecallPending(trigger))
-        Log.i(TAG, "recall triggered by $trigger, query=$query")
+        Log.i(TAG, "recall triggered by $trigger")
         scope.launch {
             try {
                 recall(trigger, query, startedAt)
@@ -1010,6 +1137,7 @@ object OopsEngine {
     }
 
     private suspend fun recall(trigger: String, query: String?, startedAt: Long) {
+        val session = sessionId
         val now = nowMs
         val all = transcript.snapshot()
         // The recall command itself ("Oops，把刚刚那个想法留下来") is never evidence.
@@ -1022,7 +1150,8 @@ object OopsEngine {
             if (inWindow.isEmpty() || inWindow.size == candidates.size) continue // nothing new to ask about
             windowMs = w
             candidates = inWindow
-            val received = api.recall(RecallRequest(sessionId, trigger, query, now, inWindow.map { it.toCandidate() }))
+            val received = api.recall(RecallRequest(session, trigger, query, now, inWindow.map { it.toCandidate() }))
+            if (session != sessionId) return
             val byId = inWindow.associateBy { it.id }
             response = received.copy(picks = PickPolicy.validated(received.picks, byId.keys) { id ->
                 val u = byId.getValue(id)
@@ -1063,8 +1192,9 @@ object OopsEngine {
             windowMs = windowMs,
             latencyMs = SystemClock.elapsedRealtime() - startedAt,
         )
+        if (session != sessionId || (!recordingPolicy.archives && card.pool().any { sessionIndex.get(it.id) == null })) return
         cards[card.id] = card
-        Log.i(TAG, "recall ${card.id} in ${card.latencyMs}ms via ${card.engine}: " + items.joinToString(" | ") { it.text })
+        Log.i(TAG, "recall ${card.id} in ${card.latencyMs}ms via ${card.engine}")
         emit(OopsEvent.RecallReady(card))
         recordLatency(card.latencyMs)
     }
@@ -1145,6 +1275,35 @@ object OopsEngine {
         cards.remove(cardId)
     }
 
+    fun dailyCandidates() {
+        scope.launch(Dispatchers.IO) { emit(OopsEvent.Json("daily.candidates", JSONObject().put("items", JSONArray(dailyCandidateStore.list())))) }
+    }
+
+    fun discardDailyCandidate(session: String, id: String) {
+        scope.launch(Dispatchers.IO) {
+            if (dailyCandidateStore.find(session, id) != null) dailyCandidateStore.remove(session, id)
+            dailyCandidates()
+        }
+    }
+
+    /** User confirmation saves only this edited short excerpt, never the daily full transcript or audio. */
+    fun confirmDailyCandidate(session: String, id: String, quote: String, confirmed: Boolean) {
+        require(confirmed && quote.isNotBlank() && quote.length <= 280) { "请核对 1–280 字内容后明确确认" }
+        scope.launch(Dispatchers.IO) {
+            val candidates = dailyCandidateStore
+            val candidate = candidates.find(session, id) ?: return@launch fail("save", "候选已失效，请重新打开核对")
+            val savedId = "daily-$session-$id"
+            val line = JSONObject().put("id", id).put("text", quote).put("start_ms", candidate.getLong("start_ms"))
+                .put("end_ms", candidate.getLong("end_ms")).put("tag", candidate.getString("tag"))
+            store.save(savedId, JSONObject().put("id", savedId).put("saved_at", Instant.now().toString()).put("session_id", session)
+                .put("source", "本人核对的日常短摘录").put("visibility", "private").put("confirmed", true)
+                .put("original_available", false).put("audio_expired", true).put("utterances", JSONArray().put(line)), null)
+            candidates.remove(session, id)
+            _state.update { it.copy(savedCount = store.count()) }
+            emit(OopsEvent.Saved(savedId, store.count()))
+        }
+    }
+
     fun savedItems(): List<JSONObject> = store.list()
 
     fun transcriptSnapshot(): List<Utterance> = transcript.snapshot()
@@ -1154,9 +1313,13 @@ object OopsEngine {
     fun draftAction(cardId: String, utteranceIds: List<String>) {
         val card = cards[cardId] ?: return fail("action", "这张卡片已失效")
         if (!inFlight.add("draft:$cardId")) return
+        val client = api
+        val epoch = serviceEpoch
+        val session = sessionId
         scope.launch {
             try {
-                val pool = card.pool().map { sessionIndex.get(it.id) ?: it }
+                if (session != sessionId) return@launch
+                val pool = card.pool().filter { recordingPolicy.archives || sessionIndex.get(it.id) != null }.map { sessionIndex.get(it.id) ?: it }
                 val chosen = pool.filter { it.id in utteranceIds }
                 if (chosen.isEmpty()) {
                     fail("action", "没有选中任何原话")
@@ -1167,9 +1330,10 @@ object OopsEngine {
                     .distinctBy { it.id }
                     .filter { it.id !in chosenIds }
                     .sortedBy { it.startMs }
-                val response = api.draftAction(
-                    DraftRequest(sessionId, chosen.map { it.toCandidate() }, context.map { it.toCandidate() }),
+                val response = client.draftAction(
+                    DraftRequest(session, chosen.map { it.toCandidate() }, context.map { it.toCandidate() }),
                 )
+                if (epoch != serviceEpoch || session != sessionId || (!recordingPolicy.archives && chosen.any { sessionIndex.get(it.id) == null })) return@launch
                 val draft = ActionDraft(
                     draftId = "d" + UUID.randomUUID().toString().take(8),
                     cardId = cardId,
@@ -1191,14 +1355,14 @@ object OopsEngine {
                     modelRevision = 1, context = response.context,
                 )
                 drafts[draft.draftId] = draft
-                Log.i(TAG, "draft ${draft.draftId}: who=${draft.who} what=${draft.what} when=${draft.whenIso}")
+                Log.i(TAG, "draft ${draft.draftId}: ready")
                 emit(OopsEvent.DraftReady(draft))
                 // A speaker answer may have arrived while this extraction request was in flight.
-                chosen.filter { sessionIndex.get(it.id)?.segments != it.segments }.forEach { refreshDraftSuggestions(sessionId, it.id) }
+                chosen.filter { sessionIndex.get(it.id)?.segments != it.segments }.forEach { refreshDraftSuggestions(session, it.id) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                fail("action", "生成行动草稿失败：${e.message ?: e.javaClass.simpleName}")
+                if (epoch == serviceEpoch) fail("action", "生成行动草稿失败：${e.message ?: e.javaClass.simpleName}")
             } finally {
                 inFlight.remove("draft:$cardId")
             }
@@ -1235,7 +1399,9 @@ object OopsEngine {
         if (!inFlight.add("confirm:$draftId")) return // 防连点
         val existing = submitted[draftId]
         val opId = opIds.getOrPut(draftId) { UUID.randomUUID().toString() }
-        val draft = existing?.request?.draft ?: com.oops.app.backend.DraftPolicy.confirm(base, who, what, whenIso, whenRaw, constraint, ownerSelectionSource)
+        val confirmedDraft = com.oops.app.backend.DraftPolicy.confirm(base, who, what, whenIso, whenRaw, constraint, ownerSelectionSource)
+        val draft = existing?.request?.draft ?: if (recordingPolicy.archives) confirmedDraft else confirmedDraft.copy(
+            evidence = confirmedDraft.evidence.copy(quote = confirmedDraft.evidence.quote.take(280)), context = null)
         val operation = existing ?: ActionOperationStore.Operation(
             ConfirmRequest(opId, sessionId, draft), settings.backendBaseUrl, api.name == "mock",
             ActionResult(opId, ActionResult.PENDING, mock = api.name == "mock"),
@@ -1319,7 +1485,7 @@ object OopsEngine {
             require(mode == "test" || name in Settings.TEAM) { "请先选择本人姓名" }
             require(_state.value.voiceprint.phase !in setOf("saving", "testing", "checking", "loading", "recording")) { "请等待当前操作结束" }
             val kind = source?.kind ?: Settings.SOURCE_MIC
-            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE)) { "请先切换到手机或 Mac 麦克风，不能用测试 WAV 注册" }
+            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN)) { "请先切换到手机、Mac 麦克风或录音豆，不能用测试音频注册" }
             val client = api as? HttpOopsApi ?: error("请先连接真实服务器")
             val catalog = _state.value.voiceprint.catalog ?: error("请先刷新声纹列表")
             voiceprintClient = client
@@ -1480,10 +1646,10 @@ object OopsEngine {
     private fun updateAssistanceState() {
         val q = syncContext?.queue
         _state.update { it.copy(agenda = tracker.state(nowMs), notices = tracker.list().map { n -> n.bridge() },
-            voiceTrigger = settings.voiceTrigger, noticeVibrate = settings.noticeVibrate, memorySync = settings.memorySync,
+            voiceTrigger = settings.voiceTrigger, noticeVibrate = settings.noticeVibrate, memorySync = recordingPolicy.archives,
             selfName = settings.selfName,
             syncPending = q?.pendingCount() ?: 0,
-            syncStatus = when { !settings.memorySync -> "off"; q == null -> "idle"; q.unsupported -> "unsupported"; q.failed -> "failed";
+            syncStatus = when { !recordingPolicy.archives -> "off"; q == null -> "idle"; q.unsupported -> "unsupported"; q.failed -> "failed";
                 q.pendingCount() > 0 -> if (it.syncStatus == "retrying") "retrying" else "pending"; else -> "synced" }) }
     }
 
@@ -1519,7 +1685,7 @@ object OopsEngine {
         if (ctx.job?.isActive == true) return@synchronized
         ctx.job = scope.launch(Dispatchers.IO) {
             while (isActive) {
-                if (settings.memorySync) {
+                if (settings.memorySync || ctx.queue.explicitArchive) {
                     val batch = ctx.queue.batch(SystemClock.elapsedRealtime(), force = ctx.stopped)
                     if (batch != null) {
                         try {
@@ -1557,7 +1723,7 @@ object OopsEngine {
             try {
                 val response = client.recall(RecallRequest(session, trigger, query, now, candidates.map { it.toCandidate() }))
                 if (session != sessionId) return@launch
-                val byId = candidates.associateBy { it.id }
+                val byId = candidates.filter { recordingPolicy.archives || sessionIndex.get(it.id) != null }.associateBy { it.id }
                 val picks = PickPolicy.decide(PickPolicy.validated(response.picks, byId.keys))
                 if (picks == null) emit(OopsEvent.RecallNotFound("本场原话里没有找到答案"))
                 else {
@@ -1666,7 +1832,7 @@ object OopsEngine {
         scope.launch {
             try {
                 val result = policy.request(reservation) { client.notice(request) } ?: return@launch
-                if (session != sessionId || t !== tracker || !result.getBoolean("conflict")) return@launch
+                if (session != sessionId || t !== tracker || (!recordingPolicy.archives && sessionIndex.get(u.id) == null) || !result.getBoolean("conflict")) return@launch
                 val h = result.getJSONObject("with"); val otherId = h.getString("id")
                 val prior = previous.firstOrNull { it.id == otherId }
                 if (prior == null && !otherId.startsWith("h:")) return@launch
@@ -1691,6 +1857,9 @@ object OopsEngine {
 
     fun history(action: String, value: String = "", confirm: Boolean = false) {
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "history.$action")
+        if (action in setOf("open", "delete")) context.put("sessionId", value)
         scope.launch {
             try {
                 val result = when (action) {
@@ -1700,16 +1869,64 @@ object OopsEngine {
                         require(confirm) { "请确认删除会议文字" }
                         require(value != sessionId || !_state.value.capturing) { "请先停止收音，再删除本场文字" }
                         val result = client.historyDelete(value)
-                        if (result != null) syncContexts.filter { it.queue.sessionId == value }.forEach { it.queue.halt(endToo = true); it.job?.cancel() }
+                        if (epoch != serviceEpoch) return@launch
+                        if (result != null) {
+                            syncContexts.filter { it.queue.sessionId == value }.forEach { it.queue.halt(endToo = true); it.job?.cancel() }
+                            withContext(Dispatchers.IO) {
+                                val dir = File(app.filesDir, "recordings")
+                                listOf("audio", "transcript").forEach { com.oops.app.store.RecordingExpiry.removeAsset(dir, value, it) }
+                                expireSessionMemory(dir)
+                            }
+                        }
                         result
                     }
                     "search" -> { require(value.isNotBlank() && value.length <= 500); client.historySearch(value) }
                     else -> error("未知往期操作")
                 }
-                if (result == null) fail("history", "当前后端不支持往期会议")
-                else emit(OopsEvent.Json("history.$action", result.put("query", if (action == "search") value else "")))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("history", "当前后端不支持往期会议", context)
+                else emit(OopsEvent.Json("history.$action", result.put("query", if (action == "search") value else "")
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("history", "往期会议请求失败：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("history", "往期会议请求失败：${error.message}", context) }
+        }
+    }
+
+    /** Independent confirmed excerpts survive expiry; automatic minutes never call this. */
+    fun retainMeeting(payload: JSONObject) {
+        val body = com.oops.app.store.MeetingRetentionRequest.fromBridge(payload)
+        val client = api; val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "meeting.retain").put("sessionId", body.getString("session_id"))
+            .put("requestId", payload.optString("requestId"))
+        scope.launch {
+            try {
+                val result = client.retainMeeting(body)
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("retention", "当前服务不支持独立保留，请更新服务后重试", context)
+                else emit(OopsEvent.Json("meeting.retained", result.put("sessionId", body.getString("session_id"))
+                    .put("requestId", payload.optString("requestId")).put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (epoch == serviceEpoch) {
+                val changed = e is com.oops.app.backend.HttpFailure && e.status == 409
+                fail("retention", if (changed) "原话已变化，请重新读取会议并核对" else "没有保存：${e.message}", context.put("sourceChanged", changed))
+            } }
+        }
+    }
+
+    /** Read already stored minutes; this endpoint never generates or sends external results. */
+    fun minutes(sessionId: String, requestId: String = "") {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "history.minutes").put("sessionId", sessionId).put("requestId", requestId)
+        scope.launch {
+            try {
+                val result = client.historyMinutes(sessionId)
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("minutes", "当前后端不支持 AI 纪要", context)
+                else emit(OopsEvent.Json("history.minutes", result.put("session_id", sessionId).put("requestId", requestId)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("minutes", "纪要读取失败：${error.message}", context) }
         }
     }
 
@@ -1721,6 +1938,8 @@ object OopsEngine {
      */
     fun correctSpeaker(session: String, utteranceId: String, speaker: String?) {
         require(speaker == null || speaker in Settings.TEAM || speaker in MANUAL_OTHER) { "说话人无效" }
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "speaker.correct").put("sessionId", session).put("utteranceId", utteranceId)
         val live = synchronized(pipeline) {
             if (session != sessionId) return@synchronized null
             sessionIndex.setManual(session, utteranceId, speaker)?.also { transcript.setManual(utteranceId, speaker) }
@@ -1728,8 +1947,8 @@ object OopsEngine {
         if (live != null) {
             emit(OopsEvent.Json("speaker.corrected", corrected(session, utteranceId, speaker, "local")))
             publishSessionSummary(session)
-            if (!settings.memorySync) {
-                emit(OopsEvent.Toast("会议文字同步已关闭，只改了本机显示"))
+            if (!recordingPolicy.archives) {
+                emit(OopsEvent.Toast("仅核对日常临时显示，不写入团队服务器"))
                 return
             }
         }
@@ -1743,10 +1962,12 @@ object OopsEngine {
                 var tries = 0
                 while (result == null && live != null && tries++ < REVIEW_RETRIES) {
                     delay(REVIEW_RETRY_MS)
+                    if (epoch != serviceEpoch) return@launch
                     result = client.reviewMeeting(body)
                 }
+                if (epoch != serviceEpoch) return@launch
                 if (result == null) {
-                    fail("review", if (live != null) "服务器还没有这场会议的文字，改动只在本机" else "当前后端不支持修改说话人")
+                    fail("review", if (live != null) "服务器还没有这场会议的文字，改动只在本机" else "当前后端不支持修改说话人", context)
                     return@launch
                 }
                 emit(OopsEvent.Json("speaker.corrected", corrected(session, utteranceId, speaker, "saved")))
@@ -1756,12 +1977,14 @@ object OopsEngine {
                     refreshDraftSuggestions(session, utteranceId)
                 }
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("review", "说话人修改没有保存到服务器：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("review", "说话人修改没有保存到服务器：${error.message}", context) }
         }
     }
 
     /** After-meeting check of one sentence: verdict (confirmed/rejected) and owner; null clears that field. */
     fun review(session: String, utteranceId: String, fields: JSONObject) {
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "review.set").put("sessionId", session).put("utteranceId", utteranceId)
         val body = JSONObject().put("session_id", session).put("utterance_id", utteranceId)
             .put("by", settings.selfName.ifEmpty { JSONObject.NULL })
         for (key in fields.keys()) {
@@ -1778,26 +2001,31 @@ object OopsEngine {
         scope.launch {
             try {
                 val result = client.reviewMeeting(body)
-                if (result == null) fail("review", "服务器上没有这场会议，核对没有保存")
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("review", "服务器上没有这场会议，核对没有保存", context)
                 else emit(OopsEvent.Json("review.saved", JSONObject().put("sessionId", session).put("utteranceId", utteranceId)
-                    .put("review", result.opt("review") ?: JSONObject.NULL)))
+                    .put("review", result.opt("review") ?: JSONObject.NULL).put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("review", "核对没有保存到服务器：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("review", "核对没有保存到服务器：${error.message}", context) }
         }
     }
 
     private fun corrected(session: String, id: String, speaker: String?, status: String) = JSONObject()
         .put("sessionId", session).put("utteranceId", id).put("speaker", speaker ?: JSONObject.NULL).put("status", status)
+        .put("serviceEpoch", serviceEpoch).put("backendUrl", _state.value.backendUrl)
 
     fun projects(name: String? = null) {
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", if (name == null) "projects.list" else "project.open").put("name", name ?: JSONObject.NULL)
         scope.launch {
             try {
                 val result = if (name == null) client.projects() else client.project(name)
-                if (result == null) fail("projects", "当前后端不支持项目")
-                else emit(OopsEvent.Json(if (name == null) "projects.list" else "project.open", result))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("projects", "当前后端不支持项目", context)
+                else emit(OopsEvent.Json(if (name == null) "projects.list" else "project.open", result.put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("projects", "项目请求失败：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("projects", "项目请求失败：${error.message}", context) }
         }
     }
 
@@ -1807,45 +2035,58 @@ object OopsEngine {
         require(name.length <= 30) { "项目名称最多 30 个字" }
         val live = session == sessionId
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "meeting.project").put("sessionId", session)
         scope.launch {
             try {
                 var result = client.setMeetingProject(session, name)
                 var tries = 0
                 while (result == null && live && tries++ < REVIEW_RETRIES) {
                     delay(REVIEW_RETRY_MS)
+                    if (epoch != serviceEpoch) return@launch
                     result = client.setMeetingProject(session, name)
                 }
-                if (result == null) fail("projects", if (live) "服务器还没有这场会议的文字，稍后再设项目" else "当前后端不支持项目")
-                else emit(OopsEvent.Json("meeting.project", result))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("projects", if (live) "服务器还没有这场会议的文字，稍后再设项目" else "当前后端不支持项目", context)
+                else emit(OopsEvent.Json("meeting.project", result.put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("projects", "项目没有保存：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("projects", "项目没有保存：${error.message}", context) }
         }
     }
 
     fun renameMeeting(session: String, title: String) {
         require(title.trim().length <= 40) { "会议名称最多 40 个字" }
         val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "history.rename").put("sessionId", session)
         scope.launch {
             try {
                 val result = client.renameMeeting(session, title.trim())
-                if (result == null) fail("history", "当前后端不支持改会议名称")
-                else emit(OopsEvent.Json("history.renamed", result))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("history", "当前后端不支持改会议名称", context)
+                else emit(OopsEvent.Json("history.renamed", result.put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("history", "改名没有保存：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("history", "改名没有保存：${error.message}", context) }
         }
     }
 
     /** Plays a sentence from the server's archive (a past meeting, or this one once its recording is uploaded). */
     fun playRemoteClip(key: String, session: String, startMs: Long, endMs: Long) {
         val client = api
+        val epoch = serviceEpoch
         scope.launch {
             try {
                 emit(OopsEvent.Clip(key, "loading"))
                 val pcm = client.recordingClip(session, startMs, endMs)
+                if (epoch != serviceEpoch) return@launch
                 if (pcm == null || pcm.isEmpty()) emit(OopsEvent.Clip(key, "unavailable")) else player.play(key, pcm)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                emit(OopsEvent.Clip(key, "unavailable"))
+                if (epoch != serviceEpoch) return@launch
+                if (error is com.oops.app.store.RecordingAssetExpired) {
+                    withContext(Dispatchers.IO) { com.oops.app.store.RecordingExpiry.removeAsset(File(app.filesDir, "recordings"), session, "audio") }
+                    emit(OopsEvent.Clip(key, "expired"))
+                } else emit(OopsEvent.Clip(key, "unavailable"))
                 fail("clip", "原声取不到：${error.message}")
             }
         }
@@ -1853,15 +2094,19 @@ object OopsEngine {
 
     fun tasks(mine: Boolean, status: String) {
         val client = api
+        val epoch = serviceEpoch
+        val self = settings.selfName.ifEmpty { null }
+        val context = serviceContext(epoch).put("operation", "tasks.list").put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL)
         scope.launch {
             try {
-                val self = settings.selfName.ifEmpty { null }
                 require(!mine || self != null) { "请先在设置里选择本人" }
                 val result = client.tasks(if (mine) self else null, status)
-                if (result == null) fail("tasks", "当前后端不支持任务列表")
-                else emit(OopsEvent.Json("tasks.list", result.put("mine", mine).put("status", status)))
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) fail("tasks", "当前后端不支持任务列表", context)
+                else emit(OopsEvent.Json("tasks.list", result.put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { fail("tasks", "任务列表请求失败：${error.message}") }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("tasks", "任务列表请求失败：${error.message}", context) }
         }
     }
 
@@ -1883,7 +2128,8 @@ object OopsEngine {
         val previousAddress = settings.remoteAddress
         if (json.has("source")) {
             val kind = json.getString("source")
-            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_WAV, Settings.SOURCE_REMOTE)) { "音源无效" }
+            require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_WAV, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN, Settings.SOURCE_BEAN_SIM)) { "音源无效" }
+            require(kind != Settings.SOURCE_BEAN || BeanSdk.included) { "这个安装包没有包含录音豆 SDK" }
             settings.source = kind
         }
         if (json.has("remoteAddress")) {
@@ -1939,9 +2185,13 @@ object OopsEngine {
 
     private fun rebuildApi() {
         val url = settings.backendBaseUrl
-        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken)
+        val nextService = Triple(settings.mockBackend, url, settings.backendToken)
+        val serviceChanged = configuredService != null && configuredService != nextService
+        if (serviceChanged) serviceEpoch += 1
+        configuredService = nextService
+        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken, sessionMode = { sessionModes[it] })
         val previewUrl = if (com.oops.app.BuildConfig.DEBUG) settings.speakerPreviewUrl else ""
-        previewApi = if (previewUrl.isBlank()) api else HttpOopsApi(http, previewUrl, settings.backendTokenFor(previewUrl))
+        previewApi = if (previewUrl.isBlank()) api else HttpOopsApi(http, previewUrl, settings.backendTokenFor(previewUrl), sessionMode = { sessionModes[it] })
         _state.update {
             it.copy(
                 backend = api.name,
@@ -1954,14 +2204,18 @@ object OopsEngine {
                 remoteAddress = settings.remoteAddress,
             )
         }
+        if (serviceChanged) emit(OopsEvent.Json("backend.changed", JSONObject().put("backend", api.name).put("backendUrl", url).put("serviceEpoch", serviceEpoch)))
     }
+
+    private fun serviceContext(epoch: Long) = JSONObject().put("serviceEpoch", epoch).put("backendUrl", _state.value.backendUrl)
 
     private fun emit(event: OopsEvent) {
         _events.tryEmit(event)
     }
 
-    private fun fail(scope: String, message: String) {
-        Log.w(TAG, "$scope: $message")
-        emit(OopsEvent.Failure(scope, message))
+    private fun fail(scope: String, message: String, context: JSONObject? = null) {
+        Log.w(TAG, "$scope: operation failed")
+        if (context == null) emit(OopsEvent.Failure(scope, message))
+        else emit(OopsEvent.Json("error", context.put("scope", scope).put("message", message)))
     }
 }

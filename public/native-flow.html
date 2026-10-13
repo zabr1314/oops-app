@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#795cf4"><title>Oops · 安卓流程预览</title>
+<link rel="stylesheet" href="./native-flow.css"><script src="./native-flow.js" defer></script>
+</head>
+<body>
+<header><a href="./showcase.html?view=app#home" class="brand"><img src="./brand/wordmark.png" alt="Oops"><span>安卓流程预览</span></a><a href="./showcase.html?view=app#home">返回体验中心 ↗</a></header>
+<main>
+<section class="intro"><span class="label">同一份安卓前端代码 · 浏览器模拟</span><h1>失败后，也能把事情接着做完。</h1><p>先在「设置」体验首次配对和开机自动聆听，核对暂停后重连是否保持暂停；也可以选择会议保存方式、单独保留摘要与短依据，重试失败的读取或核对。</p><p class="scope">使用准备好的示例；不会连接真实会议、调用麦克风或写入飞书。修改仅留在当前示例，刷新会重置。此预览不能代替 APK 或真机验证。</p>
+<label for="flow">选择试用情境</label><select id="flow"><option value="normal">正常读取与核对</option><option value="list-failure">列表首次读取失败</option><option value="review-failure">核对保存首次失败</option><option value="minutes-pending">纪要仍在生成</option><option value="minutes-source-changed">核对后旧纪要失效</option><option value="minutes-failure">纪要首次读取失败</option></select>
+<p id="guide" class="guide" aria-live="polite"></p><button id="restart" type="button">重新开始此示例</button>
+<details><summary>界面状态实屏</summary><div id="proofs" class="proofs"><a href="./native-shots/p1-settings.jpg">整理后的设置入口</a><a href="./native-shots/p1-pair-default.jpg">首次配对默认不勾选</a><a href="./native-shots/p1-device-listening.jpg">设备开机日常聆听示例</a><a href="./native-shots/p1-paused-reconnect.jpg">暂停后重连保持暂停</a><a href="./native-shots/list-failure.jpg">列表失败与重试</a><a href="./native-shots/review-failure.jpg">保存失败保留当前项</a><a href="./native-shots/minutes-ready.jpg">已存纪要与原话证据</a><a href="./native-shots/minutes-pending.jpg">纪要尚未完成</a><a href="./native-shots/minutes-source-changed.jpg">来源变化后旧纪要失效</a><a href="./native-shots/minutes-failure.jpg">纪要读取失败</a><a href="./native-shots/storage-retain-choice.jpg">手选短依据与明确确认</a><a href="./native-shots/storage-retain-saved.jpg">独立保留的确认结果</a></div></details>
+</section>
+<section class="app-preview" aria-label="安卓前端模拟"><div class="preview-label"><span>Android H5</span><span>示例环境</span></div><iframe id="native-app" title="Oops 安卓交互前端模拟" src="./native-preview/index.html?preview=1&amp;flow=normal" referrerpolicy="no-referrer"></iframe></section>
+</main>
+</body></html>

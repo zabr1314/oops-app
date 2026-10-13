@@ -18,6 +18,8 @@ class MockOopsApi(
     private val latencyMs: Long = 300,
 ) : OopsApi {
     override val name = "mock"
+    override suspend fun historyMinutes(id: String) = org.json.JSONObject()
+        .put("session_id", id).put("status", "unavailable").put("reason", "mock")
     private val actions = ConcurrentHashMap<String, ActionResult>()
 
     override suspend fun recall(request: RecallRequest): RecallResponse {

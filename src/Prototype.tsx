@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { MobileScroll, useKeyboard, useKeyboardInsets, useMobileDevice, useScreenPortal } from './mobile';
 import { initialData, OopsContext, useOops, type AppData, type Route } from './store';
-import { Icon, Row, Sheet, isTextEntryTarget } from './ui';
+import { Icon, isTextEntryTarget } from './ui';
 import { Assistant, Home, homeTitle, homeTaskAttentionQueue, Notifications, SearchScreen, Voice, Welcome, taskVisible, sessionVisible, notificationVisible } from './features/Home';
 import Tasks, { TaskTabBar, TaskPrimaryFooter, taskTitle } from './features/Tasks';
 import Sessions, { SessionTabBar, sessionTitle, useSessionRecorder } from './features/Sessions';
@@ -11,15 +11,17 @@ import { clearViewState } from './viewState';
 import { migrateStoredData } from './stateMigrations';
 import { boardPreviewData } from './boardPreview';
 import { ListeningScreen } from './features/Listening';
+import { archiveSafeData, applyStorageDeadlines, isTemporaryDaily, pinExplicitDerivations, reconcileSavedEvidence } from './storagePolicy';
+import { setVolatileObjects, clearObjectViewState } from './viewState';
+import { reconcileDeviceStartupHolds } from './deviceStartupLogic';
 
 
 const roots=['home','sessions','tasks','memory','settings'];
-const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'我的',icon:'user'}];
+const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'设置',icon:'gear'}];
 function initialRoute():Route{const p=window.location.hash.slice(1).split('/').map(x=>{try{return decodeURIComponent(x)}catch{return x}});return {view:p[0]||'home',id:p[1]||undefined,mode:p[2]||undefined}}
 function routeHash(r:Route){return '#'+[r.view,r.id||'',r.mode||''].map(encodeURIComponent).join('/').replace(/\/+$/,'')}
-function spaceNames(d:AppData):string[]{try{const rows=JSON.parse(d.settings.retention.spaces||'null');if(Array.isArray(rows))return [...new Set(['我的空间',...rows.map(x=>x.name).filter((x:unknown)=>typeof x==='string')])] as string[]}catch{}return ['我的空间','Oops 产品团队']}
 const previewScene=new URLSearchParams(window.location.search).get('board-preview');
-function readData(){if(previewScene!==null)return boardPreviewData(previewScene||'default');try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return migrateStoredData(d as AppData)}catch{}return initialData()}
+function readData(){if(previewScene!==null)return boardPreviewData(previewScene||'default');try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return archiveSafeData(migrateStoredData(d as AppData))}catch{}return initialData()}
 type EndRequest = { id: string; resume: boolean };
 
 export default function Prototype() {
@@ -33,7 +35,12 @@ export default function Prototype() {
   const restorePosition = useRef<number | null>(null);
   const [message, setMessage] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const update = useCallback((change: Partial<AppData> | ((current: AppData) => AppData)) => setData(d => typeof change === 'function' ? change(d) : { ...d, ...change }), []);
+  const clearedSourceDrafts = useRef(new Set<string>());
+  const temporaryTurnIds = useRef(new Map<string, string[]>());
+  const update = useCallback((change: Partial<AppData> | ((current: AppData) => AppData)) => setData(d => {
+    const next = typeof change === 'function' ? change(d) : { ...d, ...change };
+    return next === d ? d : reconcileDeviceStartupHolds(d, pinExplicitDerivations(d, reconcileSavedEvidence(d, next)));
+  }), []);
   const navigate = (next: Route) => {
     keyboard.hide();
     if (next.view === route.view && next.id === route.id && next.mode === route.mode) return;
@@ -83,9 +90,23 @@ export default function Prototype() {
     window.history.replaceState(null, '', '#home');
   };
   useEffect(() => {
-    try { if(previewScene===null)localStorage.setItem('oops-front-v2', JSON.stringify(data)); }
+    setVolatileObjects(data.sessions.filter(isTemporaryDaily).map(s => s.id));
+    for (const session of data.sessions.filter(isTemporaryDaily)) {
+      const currentIds = session.transcript.map(t => t.id);
+      const previousIds = temporaryTurnIds.current.get(session.id) || [];
+      if (previousIds.some(id => !currentIds.includes(id))) clearObjectViewState(session.id);
+      temporaryTurnIds.current.set(session.id, currentIds);
+    }
+    for (const session of data.sessions) if (session.storage && (session.storage.transcriptState === 'expired' || session.storage.mode === 'daily' && session.status === '已结束') && !clearedSourceDrafts.current.has(session.id)) {
+      clearedSourceDrafts.current.add(session.id); clearObjectViewState(session.id);
+    }
+    try { if(previewScene===null)localStorage.setItem('oops-front-v2', JSON.stringify(archiveSafeData(data))); }
     catch { /* Keep the session usable when the visitor's browser blocks storage. */ }
   }, [data]);
+  useEffect(() => {
+    const timer = window.setInterval(() => update(current => applyStorageDeadlines(current)), 1000);
+    return () => window.clearInterval(timer);
+  }, [update]);
   useLayoutEffect(() => {
     if (restorePosition.current === null) return;
     const scroll = screenRef.current?.querySelector<HTMLElement>('.oops-scroll .mobile-scroll');
@@ -166,7 +187,6 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const { data, route, navigate, back, update } = useOops();
   const { bottomInset, isKeyboardVisible } = useKeyboardInsets();
   const { device } = useMobileDevice();
-  const [spaceOpen, setSpaceOpen] = useState(false);
   const [attentionTime,setAttentionTime]=useState(Date.now);
   useEffect(()=>{const refresh=()=>setAttentionTime(Date.now());const timer=setInterval(refresh,30000);window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh)}},[]);
   useAppFocusGuard(route);
@@ -186,7 +206,7 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const content = route.view === 'settings-listening' ? <ListeningScreen /> : active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
   return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''} ${hasSessionTabs ? 'has-session-tabs' : ''} ${hasTaskTabs ? 'has-task-tabs' : ''} ${hasTaskPrimary ? 'has-task-primary' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
     <header className={`app-header ${isHome ? 'home-header' : ''}`}>
-      {isHome ? <><img className="wordmark" src="/brand/wordmark.png" alt="Oops" /><div className="header-tools"><button className="space-pill" onClick={() => setSpaceOpen(true)}>{data.settings.space}<Icon name="caret-down" size={13} /></button><button className="icon-button notification-button" aria-label="通知" onClick={() => navigate({ view: 'notifications' })}><Icon name="bell" size={25} />{data.notifications.some(n => !n.read && notificationVisible(data, n.route)) && <i />}</button></div></> : <><button className="icon-button" aria-label={isRoot ? '搜索全部内容' : '返回上一页'} onClick={isRoot ? () => navigate({ view: 'search' }) : back}><Icon name={isRoot ? 'magnifying-glass' : 'caret-left'} size={23} /></button><h1>{title}</h1><button className="icon-button" aria-label={active === 'sessions' ? '新建记录' : active === 'tasks' ? '新建任务' : '回到首页'} onClick={() => navigate({ view: active === 'sessions' ? 'session-mode' : active === 'tasks' ? 'task-edit' : 'home' })}><Icon name={['sessions', 'tasks'].includes(active) ? 'plus' : 'house'} size={22} /></button></>}
+      {isHome ? <><img className="wordmark" src="/brand/wordmark.png" alt="Oops" /><div className="header-tools">{data.settings.space !== '我的空间' && <button className="home-scope-return" aria-label={'当前查看' + data.settings.space + '，回到我的内容'} onClick={() => update(current => ({ ...current, settings: { ...current.settings, space: '我的空间' } }))}><span>{data.settings.space}</span><small>回到我的内容</small></button>}<button className="icon-button notification-button" aria-label="通知" onClick={() => navigate({ view: 'notifications' })}><Icon name="bell" size={25} />{data.notifications.some(n => !n.read && notificationVisible(data, n.route)) && <i />}</button></div></> : <><button className="icon-button" aria-label={isRoot ? '搜索全部内容' : '返回上一页'} onClick={isRoot ? () => navigate({ view: 'search' }) : back}><Icon name={isRoot ? 'magnifying-glass' : 'caret-left'} size={23} /></button><h1>{title}</h1><button className="icon-button" aria-label={active === 'sessions' ? '新建记录' : active === 'tasks' ? '新建任务' : '回到首页'} onClick={() => navigate({ view: active === 'sessions' ? 'session-mode' : active === 'tasks' ? 'task-edit' : 'home' })}><Icon name={['sessions', 'tasks'].includes(active) ? 'plus' : 'house'} size={22} /></button></>}
     </header>
     {hasSessionTabs && <div className="session-fixed-tabs"><SessionTabBar /></div>}
     {hasTaskTabs && <div className="task-fixed-tabs"><TaskTabBar /></div>}
@@ -197,6 +217,5 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
     <RecordingControls />
     <EndRecordingSheet request={endRequest} onClose={onCloseEnd} />
     {message && <div className="app-toast" style={{ bottom: bottomInset + (isKeyboardVisible ? 20 : hasRecordingControls ? hasTaskPrimary ? 338 : 248 : hasTaskPrimary ? 176 : hasPrepareFooter ? 146 : 88) }} role="status">{message}</div>}
-    <Sheet open={spaceOpen} onClose={() => setSpaceOpen(false)} title="选择工作空间">{spaceNames(data).map(space => <Row key={space} title={space} subtitle={space === '我的空间' ? '私人提问、记忆与成长' : '项目共享的会话、资料与行动'} icon={space === '我的空间' ? 'user' : 'users-three'} trailing={data.settings.space === space ? <Icon name="check" /> : undefined} onClick={() => { update(d => ({ ...d, settings: { ...d.settings, space } })); setSpaceOpen(false); }} />)}<Row title="管理工作空间" icon="gear-six" onClick={() => { setSpaceOpen(false); navigate({ view: 'settings-spaces' }); }} /></Sheet>
   </div>;
 }

@@ -2,7 +2,7 @@ import type { AppData, Session, SourceReference, Task, Transcript } from './stor
 import { findSourceTask, makeSourceReference, PERSONAL_SPACE, provenanceAvailable, sessionVisible, sourceAvailable, sourceTurn, taskSourceAvailable, taskVisible } from './sourceAccess';
 import { normalizeMoment } from './dateLogic';
 
-export type TaskSuggestionDraft = { title: string; ownerId: string; due: string; priority: Task['priority'] };
+export type TaskSuggestionDraft = { title: string; ownerId: string; due: string; priority: Task['priority']; constraint?: string };
 export type TaskSuggestion = TaskSuggestionDraft & {
   id: string; sourceId: string; sourceTime: string; speaker: string; text: string; sources: SourceReference[];
   dueHint: string; state: 'pending' | 'ignored' | 'created'; edited?: boolean; taskId?: string; taskNeedsReview?: boolean;
@@ -22,7 +22,7 @@ function parseSnapshot(data: AppData, sessionId: string): StoredSuggestions | un
   try {
     const value = JSON.parse(data.settings.retention[taskSuggestionsKey(sessionId)] || 'null');
     if (value?.version !== 1 || value.sessionId !== sessionId || !Array.isArray(value.items)) return undefined;
-    return { version: 1, sessionId, items: value.items.filter((row: TaskSuggestion) => row && typeof row.id === 'string' && typeof row.sourceId === 'string' && typeof row.text === 'string' && typeof row.title === 'string' && typeof row.ownerId === 'string' && typeof row.due === 'string' && ['高', '中', '低'].includes(row.priority) && ['pending', 'ignored', 'created'].includes(row.state) && Array.isArray(row.sources) && row.sources.every(ref => ref && ref.kind === 'session' && typeof ref.id === 'string' && typeof ref.sourceId === 'string')) };
+    return { version: 1, sessionId, items: value.items.filter((row: TaskSuggestion) => row && typeof row.id === 'string' && typeof row.sourceId === 'string' && typeof row.text === 'string' && typeof row.title === 'string' && typeof row.ownerId === 'string' && typeof row.due === 'string' && (row.constraint === undefined || typeof row.constraint === 'string') && ['高', '中', '低'].includes(row.priority) && ['pending', 'ignored', 'created'].includes(row.state) && Array.isArray(row.sources) && row.sources.every(ref => ref && ref.kind === 'session' && typeof ref.id === 'string' && typeof ref.sourceId === 'string')) };
   } catch { return undefined; }
 }
 const put = (data: AppData, sessionId: string, items: TaskSuggestion[]): AppData => ({ ...data, settings: { ...data.settings, retention: { ...data.settings.retention, [taskSuggestionsKey(sessionId)]: JSON.stringify({ version: 1, sessionId, items } satisfies StoredSuggestions) } } });
@@ -88,7 +88,7 @@ function generate(data: AppData, session: Session): TaskSuggestion[] {
     const source = makeSourceReference(data, { kind: 'session', id: session.id, sourceId: turn.id, sourceTime: turn.time });
     const deadline = proposedDeadline(turn.text);
     const title = clause.replace(/^(?:我来|我会|我负责|请|麻烦|我们要|需要)\s*/, '').replace(/\d{4}[-/年].*$/, '').trim().slice(0, 70) || clause.slice(0, 70);
-    return [{ id: `task-suggestion-${session.id}-${turn.id}-${hash(source)}`, sourceId: turn.id, sourceTime: turn.time, speaker: turn.speaker, text: turn.text, sources: [source], title, ownerId: proposedOwner(data, session, turn), ...deadline, priority: /紧急|优先|尽快|立即|务必/.test(turn.text) ? '高' as const : /有空|不急|可选|以后再/.test(turn.text) ? '低' as const : '中' as const, state: 'pending' as const }];
+    return [{ id: `task-suggestion-${session.id}-${turn.id}-${hash(source)}`, sourceId: turn.id, sourceTime: turn.time, speaker: turn.speaker, text: turn.text, sources: [source], title, constraint: turn.text, ownerId: proposedOwner(data, session, turn), ...deadline, priority: /紧急|优先|尽快|立即|务必/.test(turn.text) ? '高' as const : /有空|不急|可选|以后再/.test(turn.text) ? '低' as const : '中' as const, state: 'pending' as const }];
   });
 }
 
@@ -99,7 +99,7 @@ export function refreshTaskSuggestions(data: AppData, sessionId: string): AppDat
   const previous = parseSnapshot(data, sessionId)?.items || [];
   const items = generate(data, session).map(value => {
     const old = previous.find(candidate => candidate.id === value.id && taskSuggestionAvailable(data, sessionId, candidate));
-    return old ? { ...value, state: old.state, taskId: old.taskId, edited: old.edited, ...(old.edited ? { title: old.title, ownerId: old.ownerId, due: old.due, priority: old.priority } : {}) } : value;
+    return old ? { ...value, state: old.state, taskId: old.taskId, edited: old.edited, ...(old.edited ? { title: old.title, ownerId: old.ownerId, due: old.due, priority: old.priority, constraint: old.constraint ?? value.constraint } : {}) } : value;
   });
   return put(data, sessionId, items);
 }
@@ -111,7 +111,8 @@ function validateDraft(data: AppData, draft: TaskSuggestionDraft, requireOwner =
   if (draft.ownerId && !taskSuggestionOwners(data).some(owner => owner.id === draft.ownerId)) return { error: '负责人身份已变化，请重新选择已核对的人物' };
   const due = draft.due.trim() && draft.due.trim() !== '无固定期限' ? normalizeMoment(draft.due.trim()) : '';
   if (draft.due.trim() && draft.due.trim() !== '无固定期限' && !due) return { error: '期限请填写有效日期时间，如2026-10-10 17:00，或留空' };
-  return { draft: { title: draft.title.trim(), ownerId: draft.ownerId, due: due || '', priority: draft.priority } };
+  if (draft.constraint !== undefined && (typeof draft.constraint !== 'string' || !draft.constraint.trim())) return { error: '请填写具体要求，或保留原话中的交付要求' };
+  return { draft: { title: draft.title.trim(), ownerId: draft.ownerId, due: due || '', priority: draft.priority, ...(draft.constraint !== undefined ? { constraint: draft.constraint.trim() } : {}) } };
 }
 
 export function saveTaskSuggestionDraft(data: AppData, sessionId: string, id: string, draft: TaskSuggestionDraft): TaskSuggestionResult {
@@ -144,7 +145,7 @@ export function createTaskFromSuggestion(data: AppData, sessionId: string, id: s
   const original = sourceTurn(data, { sourceSession: sessionId, sourceId: value.sourceId })!;
   const knownPerson = original.personId && data.settings.toggles[`speaker-confirmed:${sessionId}:${original.id}`] === true ? data.people.find(person => person.id === original.personId && !anonymous(person.name)) : undefined;
   const knownSpeaker = knownPerson ? knownPerson.name : !original.personId && (original.speaker === '我' || original.speaker === data.settings.name) ? '我' : '待确认';
-  const task: Task = { id: taskId, title: fields.title, description: original.text, owner: owner.name, ownerPersonId: owner.personId, requester: knownSpeaker, requesterPersonId: knownPerson?.id, due: fields.due, priority: fields.priority, status: '待承接', aiStatus: '未启动', workKind: /PPT|文档|报告|框架|方案|交付/.test(fields.title) ? '交付' : '行动', origin: '会话建议', relatedSessionId: sessionId, sourceSession: sessionId, sourceId: original.id, sourceTime: original.time || undefined, sources: value.sources, results: [], activities: [`${options.created || '本次核对'} · 本人核对会话建议并建立待承接任务；未开启助手`], authorized: false, version: 1 };
+  const task: Task = { id: taskId, title: fields.title, description: fields.constraint ?? value.constraint ?? original.text, owner: owner.name, ownerPersonId: owner.personId, requester: knownSpeaker, requesterPersonId: knownPerson?.id, due: fields.due, priority: fields.priority, status: '待承接', aiStatus: '未启动', workKind: /PPT|文档|报告|框架|方案|交付/.test(fields.title) ? '交付' : '行动', origin: '会话建议', relatedSessionId: sessionId, sourceSession: sessionId, sourceId: original.id, sourceTime: original.time || undefined, sources: value.sources, results: [], activities: [`${options.created || '本次核对'} · 本人核对会话建议并建立待承接任务；未开启助手`], authorized: false, version: 1 };
   const updated = stored!.items.map(row => row.id === id ? { ...row, ...fields, edited: true, state: 'created' as const, taskId } : row);
   const next = put({ ...data, tasks: [task, ...data.tasks], settings: { ...data.settings, retention: { ...data.settings.retention, [`task-space:${taskId}`]: PERSONAL_SPACE, [`task-follow:${taskId}`]: '我', ...(owner.personId ? { [`task-owner-person:${taskId}`]: owner.personId } : {}) } } }, sessionId, updated);
   return { data: next, taskId };

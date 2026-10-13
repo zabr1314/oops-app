@@ -1,7 +1,7 @@
 [
   {
     "id": "H01",
-    "title": "今天想一起解决什么？",
+    "title": "首页 · 开始记录与问 Oops",
     "module": "首页",
     "route": {
       "view": "home"
@@ -51,14 +51,14 @@
   },
   {
     "id": "H06",
-    "title": "选择工作空间",
+    "title": "内容范围与共享入口",
     "module": "首页",
     "route": {
       "view": "home"
     },
     "scene": "default",
     "merged": true,
-    "note": "首页顶栏点击空间名称，打开「选择工作空间」面板；管理入口到 settings-spaces。"
+    "note": "首页默认查看我的内容；内容范围与共享已合并到设置 → 内容范围与共享（settings-spaces），可在对应内容中明确选择共享或撤回。"
   },
   {
     "id": "H07",
@@ -81,7 +81,7 @@
     },
     "scene": "default",
     "merged": true,
-    "note": "首次使用合为三步；此项与 H09 同属第1步「先认识一下你」，没有独立欢迎空页。"
+    "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。"
   },
   {
     "id": "H09",
@@ -92,7 +92,7 @@
     },
     "scene": "default",
     "merged": true,
-    "note": "第1步填写称呼与角色后点「继续」；身份日后在 settings-identity 修改。"
+    "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。"
   },
   {
     "id": "H10",
@@ -103,7 +103,7 @@
     },
     "scene": "default",
     "merged": true,
-    "note": "从第1步点击「继续」进入第2步，分别选择云端处理与确认后的长期记忆。"
+    "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。"
   },
   {
     "id": "H11",
@@ -125,7 +125,7 @@
     },
     "scene": "default",
     "merged": true,
-    "note": "完成称呼和保存选择进入第3步，可轻量开始记录、导入或私人提问，再回首页。"
+    "note": "第一次使用先阅读并明确确认说明，再填写身份和单独选择云端处理/长期记忆；可仅浏览示例。确认不开放声音、共享或外部操作。"
   },
   {
     "id": "H13",
@@ -1117,18 +1117,18 @@
   },
   {
     "id": "U01",
-    "title": "我的",
-    "module": "我的",
+    "title": "设置",
+    "module": "设置",
     "route": {
       "view": "settings"
     },
     "scene": "default",
-    "note": "我的主入口，身份、助理、声音、设备、连接、空间、隐私、通知、账户与用量。"
+    "note": "设置主入口，账户、身份、助理偏好、声音、设备、连接、隐私与共享、通知及用量。"
   },
   {
     "id": "U02",
     "title": "身份与多角色",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-identity"
     },
@@ -1138,7 +1138,7 @@
   {
     "id": "U03",
     "title": "助理偏好",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-preferences"
     },
@@ -1148,7 +1148,7 @@
   {
     "id": "U04",
     "title": "我的声音身份",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice"
     },
@@ -1159,7 +1159,7 @@
   {
     "id": "U05",
     "title": "设备与声音入口",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-devices"
     },
@@ -1169,7 +1169,7 @@
   {
     "id": "U06",
     "title": "配对与连接失败",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-pair",
       "id": "录音豆"
@@ -1180,7 +1180,7 @@
   {
     "id": "U07",
     "title": "桌宠与会议室扩展",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-deskpet"
     },
@@ -1190,7 +1190,7 @@
   {
     "id": "U08",
     "title": "工具连接",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tools"
     },
@@ -1200,7 +1200,7 @@
   {
     "id": "U09",
     "title": "飞书授权与过期",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "飞书"
@@ -1211,7 +1211,7 @@
   {
     "id": "U10",
     "title": "日历与会议同步",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "日历"
@@ -1222,7 +1222,7 @@
   {
     "id": "U11",
     "title": "资料库范围",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "资料库"
@@ -1233,7 +1233,7 @@
   {
     "id": "U12",
     "title": "电脑 Agent",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "电脑助手"
@@ -1244,7 +1244,7 @@
   {
     "id": "U13",
     "title": "录音豆详情",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-device",
       "id": "录音豆"
@@ -1255,7 +1255,7 @@
   {
     "id": "U14",
     "title": "离线记录与同步",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-sync"
     },
@@ -1265,7 +1265,7 @@
   {
     "id": "U15",
     "title": "分享与撤销",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-sharing"
     },
@@ -1275,7 +1275,7 @@
   {
     "id": "U16",
     "title": "保存期限",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-retention"
     },
@@ -1284,28 +1284,29 @@
   },
   {
     "id": "U17",
-    "title": "工作空间",
-    "module": "我的",
+    "title": "内容范围与共享",
+    "module": "设置",
     "route": {
       "view": "settings-spaces"
     },
     "scene": "default",
-    "note": "个人与团队空间、新建／加入本机示例、切换和成员入口；与首页空间选择共用设置。"
+    "note": "查看已有内容范围；不创建或加入团队，不改变资料归属、共享许可与分范围草稿。项目背景和同一任务从记忆→项目继续。"
   },
   {
     "id": "U18",
-    "title": "成员、邀请与权限",
-    "module": "我的",
+    "title": "协作与共享 · 兼容入口",
+    "module": "设置",
     "route": {
       "view": "settings-members"
     },
     "scene": "default",
-    "note": "成员角色、邀请和移除本机示例；不真实发送邀请消息，个人／当前团队可见范围由同一空间状态判断。"
+    "note": "旧成员链接保留兼容承接；成员邀请和本地角色模拟已撤下，改从项目上下文和具体对象管理共享。",
+    "merged": true
   },
   {
     "id": "U19",
     "title": "删除与回收站",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-trash"
     },
@@ -1315,7 +1316,7 @@
   {
     "id": "U20",
     "title": "隐私与数据",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-privacy"
     },
@@ -1325,7 +1326,7 @@
   {
     "id": "U21",
     "title": "数据导出与清理",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-export"
     },
@@ -1335,7 +1336,7 @@
   {
     "id": "U22",
     "title": "访问与操作记录",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-logs"
     },
@@ -1345,7 +1346,7 @@
   {
     "id": "U23",
     "title": "通知与自主等级",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-notifications"
     },
@@ -1355,7 +1356,7 @@
   {
     "id": "U24",
     "title": "登录与账户安全",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-account"
     },
@@ -1365,7 +1366,7 @@
   {
     "id": "U25",
     "title": "用量与方案",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-usage"
     },
@@ -1583,7 +1584,7 @@
   {
     "id": "P10",
     "title": "智能聆听 · 唤醒与起止设置",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-listening"
     },
@@ -1607,7 +1608,7 @@
   {
     "id": "P12",
     "title": "声音身份 · 样本与明确关联",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-identities"
     },
@@ -1618,7 +1619,7 @@
   {
     "id": "P13",
     "title": "声音身份 · 已匹配结果",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1629,7 +1630,7 @@
   {
     "id": "P14",
     "title": "声音身份 · 低把握待确认",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1640,7 +1641,7 @@
   {
     "id": "P15",
     "title": "声音身份 · 识别失败",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1651,7 +1652,7 @@
   {
     "id": "P16",
     "title": "声音身份 · 人工核对关联",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1959,5 +1960,847 @@
     "scene": "p0-feishu-receipt",
     "shot": "p41-task-receipt-feishu",
     "note": "由真实日程确认逻辑形成的前端示例回执，固定当次正文、附件版本及飞书工作日历；后续修改草稿不会覆盖回执。未写入真实日历。"
+  },
+  {
+    "id": "F01",
+    "title": "首页 · 记录中与真实工作阶段",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "recording",
+    "shot": "f01-home-recording",
+    "actions": [],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F02",
+    "title": "首页 · 暂停后的继续与结束",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "paused",
+    "shot": "f02-home-paused",
+    "actions": [],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F03",
+    "title": "首页 · 紧凑设备状态",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "devices",
+    "shot": "f03-home-device",
+    "actions": [],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F04",
+    "title": "任务 · 日期与状态独立筛选",
+    "module": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "default",
+    "shot": "f04-tasks-date-filter",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "具体日期",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "具体日期",
+        "value": "2026-10-12",
+        "exact": true
+      }
+    ],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F05",
+    "title": "助理偏好 · 自定义方式与长度",
+    "module": "设置",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "shot": "f05-preference-custom",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "回答方式",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "我希望怎样回答",
+        "value": "先给三个要点，再列出不确定的地方",
+        "exact": true
+      },
+      {
+        "kind": "select",
+        "label": "回答长度",
+        "value": "自定义",
+        "exact": true
+      },
+      {
+        "kind": "fill",
+        "label": "长度要求",
+        "value": "100字以内，需要时再展开",
+        "exact": true
+      }
+    ],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F06",
+    "title": "助理偏好 · 可修改的引导草稿",
+    "module": "设置",
+    "route": {
+      "view": "settings-preferences"
+    },
+    "scene": "default",
+    "shot": "f06-preference-draft",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "快速整理我的偏好",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "fill",
+        "label": "你希望 Oops 怎么回答？",
+        "value": "我时间很紧，先给结论，简短一点",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "整理可修改的偏好草稿",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "2026-10-12意见优化的实际入口与状态。示例操作仅保留本次预览；未接通真实设备或模型。"
+  },
+  {
+    "id": "F07",
+    "title": "首次使用 · 阅读隐私说明",
+    "module": "首页",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "shot": "f07-privacy-notice",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "阅读使用与隐私说明",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "进入第一次使用后，点击阅读说明。阅读、关闭不代表确认；返回后勾选才能继续。说明是原型流程说明，真实服务需另行确认。"
+  },
+  {
+    "id": "F08",
+    "title": "首次使用 · 明确确认后的独立选择",
+    "module": "首页",
+    "route": {
+      "view": "welcome"
+    },
+    "scene": "default",
+    "shot": "f08-welcome-choices",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "我已阅读并了解本版使用与隐私说明",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "确认并继续",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "勾选本版说明并确认后进入第二步；云端处理与长期记忆首次默认关闭，单独选择。稍后设置不保存未提交的称呼或偏好。"
+  },
+  {
+    "id": "F09",
+    "title": "人物列表 · 未关联交流线索与建档",
+    "module": "记忆",
+    "route": {
+      "view": "memory",
+      "mode": "人物"
+    },
+    "scene": "default",
+    "shot": "f09-unknown-people",
+    "actions": [],
+    "note": "人物页直接展示时间、项目/原文关键词与交流原话；核对身份或建立档案带入精确片段，未关联原话不冒充某人的历史。"
+  },
+  {
+    "id": "F10",
+    "title": "未知人物 · 匿名片段与档案线索分开",
+    "module": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "p3"
+    },
+    "scene": "default",
+    "shot": "f10-unknown-detail",
+    "actions": [],
+    "note": "匿名详情前置交流线索和建档入口；已绑定档案的待核对发言与尚未关联的匿名池分开，空档案不猜测身份。"
+  },
+  {
+    "id": "F11",
+    "title": "从原话建档 · 精确片段与独立声音许可",
+    "module": "记忆",
+    "route": {
+      "view": "memory-unknown",
+      "mode": "{\"sessionId\":\"session-001\",\"turnId\":\"tr3\",\"create\":true}"
+    },
+    "scene": "default",
+    "shot": "f11-unknown-build",
+    "actions": [],
+    "note": "已选中00:16:28的实际原话与新增人物；填姓名、核对后保存。也可改选已有联系人或保持匿名；声音身份许可独立。"
+  },
+  {
+    "id": "F12",
+    "title": "现场话题 · 没有任务也保留事实重点",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "现场"
+    },
+    "scene": "feedback-facts-live",
+    "shot": "f12-chapter-facts-live",
+    "actions": [],
+    "note": "纯事实场景：当前话题与章节显示当前原话摘录，点击定位到fact片段；空章节保持空，旧摘要不混入重点。"
+  },
+  {
+    "id": "F13",
+    "title": "会后概览 · 普通事实与原话定位",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-001",
+      "mode": "概览"
+    },
+    "scene": "feedback-facts-finished",
+    "shot": "f13-chapter-facts-overview",
+    "actions": [],
+    "note": "会后仍显示两个议题的普通事实，点击查看对应原话；提醒与原话摘录分开，摘录不会自动成为结论或任务。"
+  },
+  {
+    "id": "F14",
+    "title": "个人理解 · 场景、更新时间与纠正",
+    "module": "记忆",
+    "route": {
+      "view": "memory"
+    },
+    "scene": "default",
+    "shot": "f14-memory-understanding",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "核对",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "展开本人可纠正的身份、助理偏好及来源有效的已确认目标/背景。适用场景分别展示；旧数据没有精确更新时间就明确未记录。来源可查看，身份与偏好可纠正；不推断人格、关系亲疏或理解百分比。"
+  },
+  {
+    "id": "F15",
+    "title": "文档角色 · 选定来源与原话",
+    "module": "设置",
+    "route": {
+      "view": "settings-role-import"
+    },
+    "scene": "default",
+    "shot": "f15-document-role-source",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "选择示例飞书文档",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "在个人空间选择示例飞书文档，或粘贴本人选定的正文，再手动选一段原文。当前不连接飞书、不上传文档，不会按同名或他人职责认定自己的身份；可跳过返回。"
+  },
+  {
+    "id": "F16",
+    "title": "文档角色 · 可修改并明确应用的草稿",
+    "module": "设置",
+    "route": {
+      "view": "settings-role-import"
+    },
+    "scene": "default",
+    "shot": "f16-document-role-draft",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "选择示例飞书文档",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "原文 1",
+        "exact": false,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "整理角色建议",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "本人选择原文后整理可编辑的本地角色字段。核对勾选默认关闭；明确应用才修改当前身份，并创建私有、待核对的角色背景候选。已确认的旧角色记忆保留。取消或跳过不应用；真实飞书读取和模型分析尚未接通。"
+  },
+  {
+    "id": "F17",
+    "title": "跨页记录 · 紧凑控制与直接暂停结束",
+    "module": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "recording",
+    "shot": "f17-recording-compact",
+    "actions": [],
+    "note": "活动记录跨页默认紧凑，暂停/继续与结束直接可达；展开按钮打开完整控制。这里只显示隔离示例，未调用麦克风。切换会话、空间、页面或分栏清除旧展开状态，键盘打开时隐藏。"
+  },
+  {
+    "id": "F18",
+    "title": "跨页记录 · 展开标记与返回现场",
+    "module": "任务",
+    "route": {
+      "view": "tasks"
+    },
+    "scene": "recording",
+    "shot": "f18-recording-expanded",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "展开记录控制",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "从任务页展开当前示例记录控制，可标记重点、返回现场、暂停/继续或结束。收起恢复紧凑；结束仍先暂停并检查保存快照，取消沿用原恢复逻辑，不改变保存或硬件规则。"
+  },
+  {
+    "id": "F19",
+    "title": "工作助手 · PPT 类型与使用范围",
+    "module": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-plan",
+    "shot": "f19-assistant-work-ppt",
+    "actions": [],
+    "note": "按已有工作助手的查资料、报告与 PPT 能力选择类型，核对任务引用原话与选定资料。当前 App 仅演示本地工作状态；工作提交、在线状态读取及真实文档/文件取回尚未接通，不提供虚构结果地址。"
+  },
+  {
+    "id": "F20",
+    "title": "工作助手 · 离线等待与恢复在线",
+    "module": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "shot": "f20-assistant-work-offline",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "助手离线",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "选择离线示例，并分别核对读取范围与仅体验个人草稿后，进入等待上线状态。可模拟恢复在线或停止示例；不重复提交真实工作，也不改变任务承接、业务完成、成果或外部回执。"
+  },
+  {
+    "id": "F21",
+    "title": "工作助手 · 生成失败与重新核对",
+    "module": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "shot": "f21-assistant-work-generation-failure",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "生成失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "启动后查看本地结果，展示生成失败。已有个人草稿保留；可补资料并重新核对、重新允许。示例不生成新文件，不把失败写成业务已完成，真实工作接口尚未接通。"
+  },
+  {
+    "id": "F22",
+    "title": "工作助手 · 交付失败只重读结果",
+    "module": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "shot": "f22-assistant-work-delivery-failure",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "交付失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "本地示例区分内容生成与服务交付失败；重试读取同一请求结果，不重新生成或对外发送。现有草稿保留，真实回包缺失时不拼造飞书文档、文件下载地址或发送回执。"
+  },
+  {
+    "id": "F23",
+    "title": "工作助手 · 同一请求恢复与已有草稿",
+    "module": "任务",
+    "route": {
+      "view": "task-assistant-work",
+      "id": "TASK-021",
+      "mode": "ppt"
+    },
+    "scene": "tasks-results",
+    "shot": "f23-assistant-work-recovered",
+    "actions": [
+      {
+        "kind": "select",
+        "label": "体验哪种工作状态",
+        "value": "交付失败",
+        "exact": true
+      },
+      {
+        "kind": "click",
+        "name": "已核对本次原话、要求与选定资料",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "仅体验个人草稿，不授权对外发送",
+        "exact": true,
+        "role": "checkbox"
+      },
+      {
+        "kind": "click",
+        "name": "核对并体验工作状态",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "查看本地示例结果",
+        "exact": true,
+        "role": "button"
+      },
+      {
+        "kind": "click",
+        "name": "重试读取示例结果",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "从交付失败重试读取同一示例请求，恢复到结果待本人核对，并可打开已有个人草稿。范围或来源变化仍撤回允许；恢复示例不代表真实服务返回文件，也不自动验收或发送。"
+  },
+  {
+    "id": "F24",
+    "title": "首页伙伴 · 本人草稿准备状态",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "tasks-in-progress",
+    "shot": "f24-home-preparing",
+    "actions": [],
+    "note": "首页官方形象依据当前空间可见且由本人负责的草稿准备状态显示准备姿态与状态文字。只是现有前端对象的轻微动效，遵守减弱动态设置，不证明模型、麦克风或设备正在真实工作。"
+  },
+  {
+    "id": "F25",
+    "title": "首页伙伴 · 准备中断与重试入口",
+    "module": "首页",
+    "route": {
+      "view": "home"
+    },
+    "scene": "tasks-failure",
+    "shot": "f25-home-failed",
+    "actions": [],
+    "note": "首页官方形象显示本人准备任务中断及可继续处理的入口。失败与准备中区别呈现；按任务重新核对范围与来源后再继续，不扩大权限、不把草稿状态等同实际工作完成。"
+  },
+  {
+    "id": "F26",
+    "title": "日常 · 五分钟临时缓冲",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "shot": "f26-daily-buffer",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F27",
+    "title": "日常 · 停止并清除全文",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "shot": "f27-daily-stop",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "结束当前记录",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F28",
+    "title": "日常 · 候选与短证据",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "概览"
+    },
+    "scene": "p0-daily-finished",
+    "shot": "f28-daily-finished",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F29",
+    "title": "日常转会议 · 单独选择云保存",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-daily-active",
+    "shot": "f29-daily-to-meeting",
+    "actions": [
+      {
+        "kind": "click",
+        "name": "切换为正式会议",
+        "exact": true,
+        "role": "button"
+      }
+    ],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F30",
+    "title": "正式会议 · 独立期限与云保存",
+    "module": "会话",
+    "route": {
+      "view": "session-mode",
+      "mode": "会议"
+    },
+    "scene": "default",
+    "shot": "f30-meeting-cloud-choice",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F31",
+    "title": "正式会议 · 原音与全文期限",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "现场"
+    },
+    "scene": "p0-meeting-retention",
+    "shot": "f31-meeting-retention",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F32",
+    "title": "会议到期 · 仅独立短证据",
+    "module": "会话",
+    "route": {
+      "view": "session-detail",
+      "id": "session-policy",
+      "mode": "原文"
+    },
+    "scene": "p0-meeting-expired",
+    "shot": "f32-meeting-expired",
+    "actions": [],
+    "note": "当前隔离示例的真实实屏。日常只留5分钟临时全文，停止清除；正式会议单独选择云保存，原音/全文独立期限。网站未接真实麦克风或服务。"
+  },
+  {
+    "id": "F33",
+    "title": "项目 · 上下文与同一任务",
+    "module": "记忆",
+    "route": {
+      "view": "memory-project",
+      "id": "project-1"
+    },
+    "scene": "default",
+    "shot": "f33-project-sharing",
+    "actions": [],
+    "note": "保留项目背景、历史决定、获准资料及同一任务引用；不另建团队门户。"
+  },
+  {
+    "id": "D01",
+    "title": "首次配对 · 开机聆听默认未选",
+    "module": "设置",
+    "route": {
+      "view": "settings-pair",
+      "id": "录音豆"
+    },
+    "scene": "default",
+    "shot": "d01-device-p1-pair",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "扫描示例设备",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "id": "D02",
+    "title": "设备开机 · 日常临时聆听",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-listening",
+    "shot": "d02-device-p1-listening",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D03",
+    "title": "设备启动 · 声音权限缺失",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-permission",
+    "shot": "d03-device-p1-permission",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D04",
+    "title": "设备启动 · 后台受限",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-background",
+    "shot": "d04-device-p1-background",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D05",
+    "title": "设备启动 · 设备断连",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-disconnected",
+    "shot": "d05-device-p1-disconnected",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D06",
+    "title": "设备启动 · 安静时段",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-quiet",
+    "shot": "d06-device-p1-quiet",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D07",
+    "title": "设备启动 · 服务不可用",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-service",
+    "shot": "d07-device-p1-service",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D08",
+    "title": "条件恢复 · 等待明确继续",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-recovery",
+    "shot": "d08-device-p1-recovery",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D09",
+    "title": "暂停后重连 · 不自行恢复",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-paused",
+    "shot": "d09-device-p1-paused",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D10",
+    "title": "停止后重连 · 不重新开始",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-stopped",
+    "shot": "d10-device-p1-stopped",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D11",
+    "title": "已有会议 · 设备启动让位",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-meeting",
+    "shot": "d11-device-p1-meeting",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D12",
+    "title": "开机聆听 · 独立开启确认",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-enable",
+    "shot": "d12-device-p1-enable",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "switch",
+        "name": "开机自动聆听",
+        "exact": true
+      }
+    ]
   }
 ]

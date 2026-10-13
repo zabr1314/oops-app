@@ -9,6 +9,37 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HttpOopsApiTest {
+    @Test fun cachedMinutesUseAuthenticatedReadEndpointAndKeepUnavailableState() = runTest {
+        val seen = mutableListOf<String>()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            assertEquals("Bearer test-key", exchange.requestHeaders.getFirst("Authorization"))
+            seen.add(exchange.requestMethod + " " + exchange.requestURI.path)
+            val bytes = """{"status":"unavailable","reason":"source_changed","historical_doc_url":"https://example.com/old"}""".toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val api = HttpOopsApi(OkHttpClient(), "http://127.0.0.1:${server.address.port}", "test-key")
+            val result = api.historyMinutes("session-1")!!
+            assertEquals("unavailable", result.getString("status"))
+            assertEquals("source_changed", result.getString("reason"))
+            assertFalse(result.has("minutes"))
+            assertEquals(listOf("GET /v1/meetings/session-1/minutes"), seen)
+            assertTrue(runCatching { api.historyMinutes("../other") }.isFailure)
+            assertTrue(runCatching { api.historyMinutes("session-1?query") }.isFailure)
+        } finally { server.stop(0) }
+    }
+
+    @Test fun oldBackendMinutesRemainUnsupportedWithoutGenerationFallback() = runTest {
+        withServer(404, "{}") { api -> assertNull(api.historyMinutes("session-1")) }
+        withServer(501, "{}") { api -> assertNull(api.historyMinutes("session-1")) }
+        withServer(403, "{}") { api ->
+            assertEquals(403, (runCatching { api.historyMinutes("session-1") }.exceptionOrNull() as HttpFailure).status)
+        }
+    }
+
     @Test fun oldServerDisablesNoticesAndMeetingsWithoutFailingRecall() = runTest {
         withServer(404, "{}") { api ->
             val policy = OptionalRequests()

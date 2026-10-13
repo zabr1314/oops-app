@@ -119,6 +119,7 @@ settings.set 增加 `speakerPreview`，默认 false；state 增加 `speakerPrevi
 | notice.feedback | {id,useful:boolean} | 记录“有用/不准” |
 | history.list | {} | 团队往期会议列表 |
 | history.open | {sessionId} | 读取历史文字与纪要 |
+| history.minutes | {sessionId,requestId?} | 只读服务器已存的 AI 会后纪要，不触发生成或发送；requestId 原样回传 |
 | history.search | {query} | 搜索往期原话 |
 | history.delete | {sessionId,confirm:true} | H5 二次确认后删除；本场收音中须先停止 |
 
@@ -129,3 +130,29 @@ settings.set 增加 `speakerPreview`，默认 false；state 增加 `speakerPrevi
 原生 → H5 的 `notice` 为 {id,kind,title,detail,atMs,evidenceIds,itemId,history?,dismissed,useful}，横幅位于遮罩上方，最多两条，12 秒后收起到“提醒 N”。history 为历史原话的 snake_case 数据。`history.list/open/delete/search` 事件直接携带对应 API 响应，search 增加 query。snapshot/state/session.summary 均可恢复提醒记录；重新载入页面不会重新震动。
 
 说 Oops 或欧普斯/哦普斯/奥普斯可触发，问句走本场问答，其他走召回；整句“把刚刚那个想法留下来”等指令也触发。开关关闭不触发，5秒内去重；语音口令仅在 ASR 定稿后响应，不是独立低功耗热词模型。
+
+## 2026-10-12：读取状态、核对保存与服务切换
+
+- `history.minutes` 回包沿用 `GET /v1/meetings/{id}/minutes`，加 `requestId`。H5 显示 ready/pending/unavailable/读取失败；`source_changed` 只显示失效原因与 `historical_doc_url`，不展示旧正文。404/501 表示此后端不支持，401/403 和网络错误保留失败语义。用户点「重新查询」才重读。
+- `review.saved` 与 `speaker.corrected.status=saved` 才确认服务器保存并推进核对队列。`status=local` 只表示本机显示已改；失败保留当前选择，重试同一条。成功更新本地 `review_queue` 和列表数量；撤销人工说话人且模型仍未知时恢复身份待核对。
+- `error` 可增加 `operation/sessionId/utteranceId/requestId/name/mine/status/selfName/serviceEpoch/backendUrl`，全部可选，旧桥仍兼容。H5 用上下文匹配具体读取或保存，关闭面板后迟到的打开结果不再强制跳转。`tasks.list` 回包增加冻结在请求时的 `selfName`，按 mine/status/selfName 区分缓存。
+- 切换后端类型、规范化服务地址或该地址的访问凭据后，原生递增 `serviceEpoch`，发 `backend.changed {backend,backendUrl,serviceEpoch}`。远端读取与核对回包可附 `serviceEpoch/backendUrl`；原生丢弃旧代请求的成功和错误，H5 清除远端列表、详情、纪要与只读历史面板。改其他设置不递增版本，不中断有效读取。事件不包含访问凭据或其摘要。
+- 已提交的行动沿用原操作的服务地址与 op_id，不因切换服务器改投新地址。收音保存规则继续沿用原设置。
+
+公开站 `/native-flow.html` 从当前 Android H5 源文件生成隔离预览，`preview=1` 不读写浏览器保存记录，不连接真实后端，不创建飞书任务。它用于验证界面流程；不代表 APK 已构建或真机验收。
+
+
+## 2026-10-12：本场任务清单
+
+- 原生 → H5 `tasks.board`：`{session_id, tasks:[{id,what,owner,priority,status,sources,reason}], pending, updated_at}`，服务器的实时任务清单（见 api.md「本场实时任务清单」）。`snapshot` 也带 `board`（没有时为 null）。
+- H5 在「行动」页按 P0–P3 分组显示；点任务打开它最后一句出处，沿用 `digest.open` → 生成行动 → `action.confirm`，不自动确认。浏览器模拟在出现待办时发送一份模拟清单。
+## 2026-10-12：日常临时聆听与会议保存合同
+
+此节替代上文旧的全场默认存盘/文字同步说明；旧记录不套新期限。新 `capture.start` 可带 `recordingMode:"daily"|"meeting"`、`cloudSaveConfirmed`、`audioRetentionDays`、`transcriptRetentionDays`，默认日常；正式会议必须本次明确确认，原音与全文分别7/30/90天、默认30天。`capture.meeting` 采用相同合同，把正在运行的日常结束并从切换时新建会议，不自动复制之前缓冲。真实后端能力不足或未确认时不能静默退回旧的全场归档。
+
+- `state` 增加 `recordingMode/cloudSaveConfirmed/audioRetentionDays/transcriptRetentionDays/audioExpired/transcriptExpired`；`transcript.pruned {ids}` 清除对应原句、旧卡片、临时草稿与提醒。日常停止发 `capture.cleared {mode:"daily"}`，完整内容不能重新显示为已存会话。
+- `daily.candidates {}` 读取私人待核对短依据，返回同名事件 `{items}`。`daily.candidate.confirm {sessionId,id,quote,confirmed:true}` 仅保存本次核对的短文字，不恢复原音/全文、不自动创建任务或共享。`daily.candidate.discard {sessionId,id}` 舍弃候选。
+- `meeting.retain {sessionId,requestId,confirm:true,evidence:[{id,quote,sourceText}],summaries:[{id,text,source_ids}]}` 对应已有会议的独立保留接口。H5 本地桥接携带当前来源供原生计算 UTF-8 SHA256；HTTP 正文只发送短 quote 和 `expected_text_hash`，不发送 `sourceText`。短 quote 最多280字、摘要最多2000字，摘要只能引用本次选择的依据，默认不选、不勾确认。
+- `meeting.retained` 回传 `sessionId/requestId/retained_evidence/retained_summaries`；只有匹配回执才显示已保留。普通错误在 `error.scope=retention` 保留选择并重试同一请求；409来源变化要求重新读取核对，不能重复提交旧确认。
+
+公开安卓浏览器预览继续隔离示例，原生保存与服务端清理需新版后端和实际 APK 部署验证。代码测试、模拟回执不证明真机已经执行。

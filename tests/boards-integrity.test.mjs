@@ -7,6 +7,24 @@ const load=p=>JSON.parse(readFileSync(p,'utf8'));
 const plan=load('screenshots/capture-plan.json'),captures=load('screenshots/capture-results.json'),mapping=load('public/board-routes.json'),manifest=load('public/board-manifest.json');
 const htmlData=path=>JSON.parse(readFileSync(path,'utf8').match(/<script id="board-data" type="application\/json">([\s\S]*?)<\/script>/)[1]);
 test('all current states have the recorded real screenshot, route and DOM evidence',()=>{assert.ok(plan.length>=108);assert.equal(new Set(plan.map(p=>p.key)).size,plan.length);for(const p of plan){const c=captures.find(c=>c.key===p.key);assert.equal(c?.status,'captured',p.key);assert.ok(c.snapshot.includes('main'),p.key);assert.equal(c.route.view,p.route.view);const jpg=readFileSync('public/board-shots/'+p.key+'.jpg');assert.equal(jpg.length,c.bytes,p.key);assert.equal(createHash('sha256').update(jpg).digest('hex'),c.sha256,p.key);assert.ok(jpg.length>2000,'Blank screenshot '+p.key);}});
+test('current screenshots with main navigation show Settings instead of the retired My tab',()=>{
+  let checked=0;
+  for(const page of plan){
+    const lines=captures.find(capture=>capture.key===page.key)?.snapshot.split('\n')||[];
+    for(let index=0;index<lines.length;index++){
+      const match=lines[index].match(/^([ \t]*)- navigation "主导航":/);
+      if(!match)continue;
+      const indent=match[1].length;
+      let end=index+1;
+      while(end<lines.length&&(!lines[end].trim()||lines[end].match(/^[ \t]*/)[0].length>indent))end++;
+      const navigation=lines.slice(index+1,end).join('\n');
+      assert.match(navigation,/- button "设置"(?:\s|:|$)/,page.key+' needs a current Settings navigation screenshot');
+      assert.doesNotMatch(navigation,/- button "我的"(?:\s|:|$)/,page.key+' still shows the retired My navigation tab');
+      checked++;
+    }
+  }
+  assert.ok(checked>0,'No current screenshot includes main navigation evidence');
+});
 test('the real board uses current screenshot routes including task tabs',()=>{const data=htmlData('public/board.html');assert.deepEqual(data.pages.map(p=>p.key),plan.map(p=>p.key));assert.equal(data.metadata.revision,manifest.metadata.revision);for(const tab of ['资料','成果','记录'])assert.ok(data.pages.some(p=>p.route.view==='task-detail'&&p.route.mode===tab));});
 test('the expanded board preserves original coverage and every image can be viewed offline',()=>{const data=htmlData('public/interactive-board.html');assert.equal(mapping.filter(p=>/^[HCTMU]\d+$/.test(p.id)).length,131);assert.equal(new Set(mapping.map(p=>p.id)).size,mapping.length);assert.deepEqual(data.pages.map(p=>p.key),mapping.map(p=>p.id));for(const p of data.pages){assert.ok(p.route.view);assert.ok(data.shots[p.shot]?.startsWith('data:image/jpeg;base64,'),p.key);assert.ok(existsSync('public/board-shots/'+p.shot+'.jpg'));if(p.merged)assert.ok(p.note,p.key);}assert.deepEqual(data.metadata,manifest.metadata);});
 test('review, transfer, completion and historical export states have actual interactive-screen evidence',()=>{for(const key of ['c26-session-review-queue','t06-task-transfer-response','t28-task-history-tab','t29-task-answer','t31-task-history-backup','t32-task-manual-complete'])assert.ok(captures.find(c=>c.key===key)?.snapshot.length>500,key);assert.match(captures.find(c=>c.key==='t31-task-history-backup').snapshot,/dialog|确认/);assert.match(captures.find(c=>c.key==='t28-task-history-tab').snapshot,/历史|原有|完成/);});

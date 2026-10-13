@@ -35,3 +35,14 @@
 .intelligence-quote { border-left: 2px solid #d8c8f3; padding: 0 0 0 12px; }
 .intelligence-quote p { margin: 0 0 6px; white-space: pre-wrap; line-height: 1.7; color: var(--muted); font-size: 12px; }
 .intelligence-quote .source-link { margin: 4px 0; }
+.intelligence-understanding .intelligence-hero { background: white; padding: 17px; }
+.intelligence-understanding .intelligence-result-topic { padding: 21px 18px; background: linear-gradient(135deg, #eee7fd, #faf7ff); border-color: #dcccf1; }
+.intelligence-understanding .intelligence-result-topic .intelligence-body { font-size: 21px; font-weight: 650; line-height: 1.5; color: #402756; }
+.intelligence-understanding .intelligence-result:not(.intelligence-result-topic) { padding: 15px; border-radius: 14px; }
+.intelligence-decisions .intelligence-result { border-left: 3px solid #b49ad7; }
+.intelligence-notices .intelligence-hero { background: #fff9ef; border-color: #f0e1c9; }
+.intelligence-notices .intelligence-hero-icon { background: #f8ebd4; }
+.intelligence-notices .intelligence-result { border-left: 3px solid #d5b47c; }
+.intelligence-personal .intelligence-hero { background: linear-gradient(135deg, #f2eafb, #fcfaff); }
+.intelligence-personal .intelligence-result { border-radius: 14px; background: #fff; }
+.intelligence-local-label { color: #a195ad; font-size: 10px; }

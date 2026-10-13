@@ -23,8 +23,13 @@ class FakeResolver:
         self.asked = 0
 
     def complete_json(self, system, user, timeout=20):
+        """Answers by prompt: analysis, detect, same, answer, quick; "question" stands in for any question step."""
         self.asked += 1
-        answer = self.answers["analysis"] if "follow_ups" in system else self.answers["question"]
+        prompts = {"analysis": "follow_ups", "detect": "kind 取值", "same": "已经在查的问题", "answer": '"answered"', "quick": '"confident"'}
+        key = next((k for k, marker in prompts.items() if marker in system and k in self.answers), "question")
+        answer = self.answers.get(key, {})
+        if callable(answer):
+            answer = answer(user)
         if isinstance(answer, Exception):
             raise answer
         return answer, "fake"
@@ -302,23 +307,72 @@ def test_ledger_failures_resume_without_duplicates():
     assert len(sent_to(calls)) == n
 
 
-def test_unanswered_question_becomes_research():
-    tmp = tempfile.mkdtemp()
-    resolver = FakeResolver({"question": {"answered": False, "worth": True, "question": "A 和 B 哪个便宜"}})
-    actions, meetings, calls = make(tmp, resolver)
-    meetings.sync(dict(session_id="s2", started_at=dt.datetime.now(dt.timezone.utc).isoformat(), time_zone="Asia/Shanghai", utterances=[
+def finish_job(actions, ok=True):
+    job = actions.jobs.take("mac", 0)
+    actions.job_result(job["id"], {"ok": ok, "title": "查价格", "markdown": "# 结论\nB 更便宜", "brief": "B 便宜三成"})
+    wait_for(lambda: actions.jobs.load(job["id"])["status"] == "done")
+    return job["id"]
+
+
+def dms(calls):
+    return [c for c in calls if c[:2] == ["im", "+messages-send"]]
+
+
+QUESTION_START = dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def question_meeting(meetings, sid, extra=()):
+    meetings.sync(dict(session_id=sid, started_at=QUESTION_START, time_zone="Asia/Shanghai", utterances=[
         utter(0, "A 和 B 到底哪个更便宜？", "洪玉麟", start=0),
-        utter(1, "那个镜头里的脸怎么了？", "林春源", start=170_000),
-        utter(2, "我们先说下一个", "林春源", start=200_000)]))
-    assert actions.scan_questions(meetings.load("s2"))
+        utter(1, "A 跟 B 哪个便宜一点啊？", "洪玉麟", start=10_000), *extra]))
+
+
+def test_question_is_researched_at_once_and_shown_only_if_nobody_answers():
+    tmp = tempfile.mkdtemp()
+    detect = lambda user: {"kind": "external", "how": "search", "value": 3, "same_as": "u0" if "u1 [" in user.split("当前这段原话")[1] else None,
+                           "question": "A 和 B 哪个便宜"}
+    resolver = FakeResolver({"detect": detect, "answer": {"answered": False}})
+    actions, meetings, calls = make(tmp, resolver)
+    question_meeting(meetings, "s2")
+    assert not actions.scan_questions(meetings.load("s2"))  # asked moments ago: not settled yet
     jobs = actions.jobs.all()
-    assert len(jobs) == 1 and jobs[0]["payload"]["auto"] and set(jobs[0]["requesters"]) == {"ou_lin", "ou_hong"}
-    # The late question has not waited three minutes yet; nothing is asked twice.
-    actions.scan_questions(meetings.load("s2"))
-    assert len(actions.jobs.all()) == 1
-    # Once the meeting is over, the last minutes' questions are judged too.
-    assert actions.scan_questions(meetings.load("s2"), final=True)
-    assert len(actions.jobs.all()) == 2 and actions.state.get("questions", "s2", "u1") == "research"
+    assert len(jobs) == 1 and jobs[0]["payload"]["hold"] and set(jobs[0]["requesters"]) == {"ou_lin", "ou_hong"}
+    assert actions.state.get("questions", "s2", "u1")["status"] == "repeat"  # the second asking is the same question
+    finish_job(actions)
+    assert dms(calls) == []  # the result is held: the room may still answer
+    question_meeting(meetings, "s2", [utter(2, "我们先说下一个", "林春源", start=100_000)])
+    assert actions.scan_questions(meetings.load("s2"))
+    assert actions.state.get("questions", "s2", "u0")["final"] == "release"
+    assert {c[c.index("--user-id") + 1] for c in dms(calls)} == {"ou_lin", "ou_hong"}
+    n = len(dms(calls))
+    actions.scan_questions(meetings.load("s2"), final=True)
+    assert len(dms(calls)) == n  # settled questions are not asked or sent again
+
+
+def test_answered_question_keeps_the_result_for_the_minutes_only():
+    tmp = tempfile.mkdtemp()
+    resolver = FakeResolver({"detect": {"kind": "external", "how": "search", "value": 3, "same_as": None, "question": "A 和 B 哪个便宜"},
+                             "same": {"same_as": None}, "answer": {"answered": True}})
+    actions, meetings, calls = make(tmp, resolver)
+    question_meeting(meetings, "s3", [utter(2, "B 便宜，上周刚比过价", "林春源", start=100_000)])
+    actions.scan_questions(meetings.load("s3"))
+    finish_job(actions)
+    assert actions.state.get("questions", "s3", "u0")["final"] == "answered" and dms(calls) == []
+    markdown = actions.minutes_markdown(meetings.load("s3"), dict(EMPTY, substantive=True))
+    assert "## 会上查到的资料" in markdown and "A 和 B 哪个便宜" in markdown
+
+
+def test_concept_question_gets_a_quick_answer_without_a_search():
+    tmp = tempfile.mkdtemp()
+    resolver = FakeResolver({"detect": {"kind": "external", "how": "quick", "value": 2, "same_as": None, "question": "AWS 是什么"},
+                             "same": {"same_as": "u0"}, "answer": {"answered": False},
+                             "quick": {"answer": "AWS 是亚马逊的云服务平台。", "confident": True}})
+    actions, meetings, calls = make(tmp, resolver)
+    meetings.sync(dict(session_id="s4", started_at=dt.datetime.now(dt.timezone.utc).isoformat(), time_zone="Asia/Shanghai", utterances=[
+        utter(0, "AWS 是什么来着？", "洪玉麟", start=0), utter(1, "我们继续", "林春源", start=100_000)]))
+    assert actions.scan_questions(meetings.load("s4"))
+    assert actions.jobs.all() == [] and actions.state.get("questions", "s4", "u0")["final"] == "quick"
+    assert any("亚马逊" in json.dumps(c, ensure_ascii=False) for c in dms(calls))
 
 
 def test_question_check_backs_off_after_an_error():
@@ -329,7 +383,7 @@ def test_question_check_backs_off_after_an_error():
         utter(0, "这个接口到底支持多少并发？", "洪玉麟", start=0), utter(1, "下一个", "林春源", start=200_000)]))
     assert not actions.scan_questions(meetings.load("s8"))
     assert not actions.scan_questions(meetings.load("s8"))
-    assert resolver.asked == 1 and actions.state.get("questions", "s8") is None
+    assert resolver.asked == 1 and actions.state.get("questions", "s8") is None  # the failed check is retried later, once
 
 
 def test_task_notice():

@@ -444,6 +444,27 @@ class FeatureTest(unittest.TestCase):
             self.assertFalse(backend.meetings.set_auto_title('done', '旧的', 6, 'm'))  # text changed meanwhile
 
 
+    def test_old_project_survives_global_listing_limit(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            m = Meetings(scratch, team=TEAM)
+            now = dt.datetime.now(dt.timezone.utc)
+            for i in range(102):
+                sid = f'm{i}'
+                m.sync(dict(session_id=sid, started_at=(now - dt.timedelta(minutes=i)).isoformat(),
+                            ended_at=now.isoformat(), utterances=[utterance('u1', '预算不超过十万元。', 'decision')]))
+            for sid in ('m0', 'm101'):
+                m.set_project(dict(session_id=sid, project='长期项目'))
+            m.set_project(dict(session_id='m100', project='较早的项目'))
+            m.review(dict(session_id='m101', utterance_id='u1', verdict='confirmed'))
+            self.assertEqual(100, len(m.listing(100)['items']))
+            self.assertEqual(102, m.listing(100)['count'])
+            self.assertEqual(['m0', 'm101'], [s['session_id'] for s in m.project('长期项目')['meetings']])
+            self.assertEqual(1, len(m.project('长期项目')['decisions']))
+            self.assertEqual({'长期项目': 2, '较早的项目': 1}, {p['name']: p['meeting_count'] for p in m.projects()['items']})
+            pool = m.historical('m0', '项目预算改成二十万', lambda a, b: 0)
+            self.assertEqual(['h:m101:u1'], [u['id'] for u in pool])
+            self.assertTrue(pool[0]['confirmed'])
+
     def test_projects_and_project_scoped_conflicts(self):
         with tempfile.TemporaryDirectory() as scratch:
             m = Meetings(scratch, team=TEAM)

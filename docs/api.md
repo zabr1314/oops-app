@@ -5,7 +5,7 @@
 
 音频坐标统一约定：ASR 返回连接内时间，App 先加该连接的 `baseMs`；App 内部及所有 HTTP 音频时间字段均为会话坐标。`clip_start_ms` 是上传 PCM 第一个样本的会话时间。后端只在模型计算中使用 `t - clip_start_ms`，响应再加回。草稿的 `reference_time` 仍是 ISO 8601 绝对时间。
 
-候选、草稿原话及上下文可增加 `tag`、`words:[{text,start_ms,end_ms}]`、`segments:[{start_ms,end_ms,text,speaker,score,source,approx,confidence,tier,overlap,candidates}]`；旧后端可忽略新增字段。原文必须完整保留，分段文本拼接须等于 ASR 定稿全文，起草和保存按原句 ID 从会话索引取最新信息。历史会议同步也保留分段；坏段降为未知，整组拼接或边界失效时整句降为未知，不能删掉原文。
+候选、草稿原话及上下文可增加 `tag`、`words:[{text,start_ms,end_ms}]`、`segments:[{start_ms,end_ms,text,speaker,score,source,approx,confidence,tier,overlap,candidates}]`；旧后端可忽略这些分段扩展字段。此兼容不包括下文保存授权/期限合同：新模式须核对 `/healthz.archive_policy_version >= 1`，不能让旧后端静默忽略保存策略。当前可用原文的分段拼接须等于 ASR 定稿全文，起草和保存按原句 ID 取最新信息；全文到期后不再冒充完整来源。
 
 ## 服务地址与鉴权
 
@@ -203,7 +203,7 @@ POST /v1/speaker/split   {"session_id":"session-example","utterance_id":"u2"}
 
 ## 本场承诺索引
 
-文字、字时间戳、标签和说话人信息在内存中保留至下次开始收音，上限 20,000 句；达到上限移出最早条目并提示。标签为承诺时及时复制原声，最多 50 段且总字节不超过 16 MiB；超过上限淘汰最早原声，文字保留并显示“原声未保留”。回听/保存仅在完整选中范围被 ring 或暂存原声覆盖时取音频，不把缺失的上下文或音频空隙伪装成完整录音。
+正式会议索引的文字、字时间戳、标签和说话人信息在内存中保留至下次开始收音，上限 20,000 句；达到上限移出最早条目并提示。日常模式的完整原声/临时全文只滚动保留5分钟，停止后清除，不建立全场索引、录音文件或会议同步队列；私人未确认候选最多50条，每条最多280字，不携带原声和全量字时间戳。会议中暂存原声最多50段/16 MiB；回听仅在实际覆盖范围可用，不拼补缺失音频。
 
 停止后显示承诺数、待分析句数和分析失败句数，结果到达实时更新。承诺列表可打开现有召回卡片、回听、保存和起草；未支持分析的后端明确显示不支持。本轮不落盘，进程退出会丢失本场索引；只有用户点“保存”才写入长期记忆。
 
@@ -272,14 +272,15 @@ pyannote 3.0 局部编号不作为身份，不跨不连续发言共用声纹判�
 
 ### 会议文字接口
 
-全部要求 App 全权限凭据，声纹邀请凭据返回 403；没有有效凭据返回 401。公网部署仍需设置 `OOPS_API_TOKEN`。文件存于 `<state-dir>/meetings/<session_id>.json`，目录 0700、文件 0600，带锁、原子写入。默认长期保留（`OOPS_MEETING_RETENTION_DAYS=0`），只在用户删除会议时删除；设为正数天数才会在读取/同步时清理过期文字。删除的编号保留无文字标记，阻止延迟请求重建该场。
+全部要求 App 全权限凭据，声纹邀请凭据返回 403；没有有效凭据返回 401。公网部署仍需设置 `OOPS_API_TOKEN`。文件存于 `<state-dir>/meetings/<session_id>.json`，目录 0700、文件 0600，带锁、原子写入。2026-10-12起，新会议须携带下文明确云保存合同，全文默认30天；已存在且没有合同的旧会议保持原策略，不追溯套新默认。旧管理员 `OOPS_MEETING_RETENTION_DAYS` 只作用于旧记录；保持0不会删除历史。删除编号保留无文字标记，阻止迟到请求重建。
 
 | 接口 | 请求/响应 |
 |---|---|
-| POST /v1/meetings/sync | {session_id,started_at,time_zone,ended_at?,agenda?,utterances:[最多500句],notices:[最多100条]} → {session_id,utterance_count,notice_count} |
+| POST /v1/meetings/sync | {session_id,started_at,time_zone,ended_at?,agenda?,utterances:[最多500句],notices:[最多100条],保存合同字段} → {session_id,utterance_count,notice_count,storage_policy,transcript_status} |
 | GET /v1/meetings?limit=30 | limit 1–100 → {count,items:[session_id,started_at,ended_at,goal,utterance_count,digest_counts]} |
 | GET /v1/meetings/{id} | 元数据、按时间排列的 utterances、notices、digest 四类原话、按 operations.request.session_id 关联的 tasks |
-| GET /v1/meetings/{id}/minutes | {session_id,status,reason?,minutes?,sources?,doc_url?}；飞书机器人写好的 AI 纪要，只读，见下 |
+| GET /v1/meetings/{id}/minutes | {session_id,status,reason?,message?,minutes?,sources?,doc_url?,historical_doc_url?}；飞书机器人写好的 AI 纪要，只读，见下 |
+| GET /v1/meetings/{id}/board | {session_id,tasks:[{id,what,owner,priority:P0–P3,status:open/done/dropped,sources,reason}],updated_at,pending}；本场实时任务清单（2026-10-12），只读，见下 |
 | POST /v1/meetings/search | {query:1–500字} → {items:[id,text,start_ms,end_ms,speaker,tag,session_id,started_at,prob],engine} |
 | POST /v1/meetings/delete | {session_id,confirm:true} → {deleted:true}；重复删除幂等，迟到同步返回 400 |
 | POST /v1/meetings/rename | {session_id,title:0–40字} → {session_id,title,title_source}；空字符串恢复自动名称 |
@@ -287,17 +288,24 @@ pyannote 3.0 局部编号不作为身份，不跨不连续发言共用声纹判�
 | GET /v1/projects | {items:[{name,meeting_count,confirmed_decisions,last_started_at}]}，最近有会的在前 |
 | GET /v1/projects/{名称，URL 编码} | {name,meetings,decisions:[已确认的决定/约束，带 session_id、started_at、meeting_title、speaker],unreviewed_decisions,tasks}；tasks 同 `/v1/tasks` 的条目，限这个项目的会议 |
 | POST /v1/meetings/review | {session_id,utterance_id,speaker?,verdict?,owner?,by?} → {session_id,utterance_id,review}；人工核对，见下 |
+| POST /v1/meetings/retain | {session_id,confirm:true,evidence:[{id,quote,expected_text_hash}],summaries:[{id,text,source_ids}]} → {session_id,retained_evidence,retained_summaries}；明确独立保留，至少1条、最多50条280字原话/20条2000字摘要。`expected_text_hash`为核对时完整原话原始UTF-8的SHA-256小写64位hex，不规范化空白/标点；锁内与当前全文核对，原话变化返回409 `ARCHIVE_POLICY,asset:"transcript"`，缺失/格式错400。短引文仍包含但整段已变也须重新核对；摘要只绑定本次已选且校验过的短依据，不自动确认模型结论。相同ID重试不追加副本，摘要的新保存动作应使用新ID以保留版本 |
 
 **AI 纪要（2026-10-11）**：`GET /v1/meetings/{id}/minutes` 返回机器人会后写的纪要，给 App 和网页原型用。只读已存结果，不会为此调用模型。`status`：
 - `ready`：`minutes` 为 `{version,substantive,overview,decisions:[{text,ids}],actions:[{owner,task,due,ids}],topics:[{topic,points}],open_questions:[{question,quote,id}],follow_ups:[{title,start,minutes,attendees,quote}]}`，每条都回指真实存在的句子；`sources` 是决定、待办、待查问题引用到的句子 `{id:{text,start_ms,end_ms,speaker}}`（说话人以人工核对为准，之后被删的句子不出现）；`doc_url` 是飞书纪要文档，没发文档时为 null。`substantive:false` 表示会议没有值得整理的内容（不足 5 句也是这样）。
 - `pending`：`reason` 为 `in_progress`（会议未结束）或 `writing`（已结束，机器人会在结束 90 秒后写，失败按 2、4、8… 分钟重试）。
 - `unavailable`：`reason` 为 `bot_off`（服务器未开 `OOPS_FEISHU_BOT=1`）、`before_bot`（会议在机器人启用前结束，不补写）、`no_end`（旧记录既没有结束时间也没有同步时间，判断不出已结束，机器人不会处理）或 `failed`（连续 6 次失败）。
 
+**核对后的来源一致性（2026-10-12）**：实际修改说话人、负责人、决定核对或来源文字后，旧纪要返回 `status:unavailable, reason:source_changed`，附 `message`；已创建的旧文档仅以 `historical_doc_url` 保留历史入口，不再返回可作为当前结果使用的旧正文。无实质变化的重复核对不使纪要失效。已有发送、日程和工作记录继续保留；不会自动重生成、重发或覆盖外部文档。使用旧纪要的日程、资料整理和 Mac 工作在开始、接收结果及交付前检查来源，变化后停止继续使用；已经完成的外部操作仍显示其历史回执。
+
 会议不存在或已删除返回 404，`id` 不合法返回 400；凭据要求同其他会议接口。
 
-**人工核对（2026-10-09）**：`speaker` ∈ 团队成员或 `other`/`multi`/`unclear`，`owner` ∈ 团队成员，`verdict` ∈ `confirmed`/`rejected`；只改请求里出现的字段，传 `null` 清除该字段，全部清空则删除这条核对。核对单独存在会议文件的 `reviews` 里，同步永远不会覆盖；`GET /v1/meetings/{id}` 把它叠加为每句的 `review` 字段，模型的 `speaker` 原样保留以便对比。会议不存在或已删除返回 404。会议进行中改说话人，服务器本场的任务草稿立即改用人工说话人（优先于句内拆分）找负责人；仍然只是"建议"，不越过负责人验收开关。核对时界面会显示模型猜测，所以这些结果不是盲标，只能进开发集，不能当验收集。
+2026-10-12：Android 已接入上述只读纪要接口，区分未完成、不可用、来源变化和读取失败；不补写或重发。详情路由按解析后的完整路径匹配，`GET /v1/meetings/{id}?refresh=1` 正常读取该场会议，额外的子路径不会误当会议 ID；`/minutes` 独立路由保持优先。
+
+**人工核对（2026-10-09）**：`speaker` ∈ 团队成员或 `other`/`multi`/`unclear`，`owner` ∈ 团队成员，`verdict` ∈ `confirmed`/`rejected`；只改请求里出现的字段，传 `null` 清除该字段，全部清空则删除这条核对。核对单独存在会议文件的 `reviews` 里，重复同步不覆盖人工说话人/负责人；原话正文发生实质变化时撤回旧 `confirmed`，防止旧确认变成新内容的证明。确认记录绑定原文哈希；全文到期时最多留下50条280字确认摘录。`GET /v1/meetings/{id}` 把核对叠加为每句的 `review`，模型 `speaker` 原样保留。会议不存在/已删除返回404。进行中改说话人后草稿优先采用人工说话人，但仍只是建议，不越过负责人验收开关；这些核对不是盲标，不能当验收集。
 
 **项目与跨会议冲突（2026-10-09）**：`POST /v1/notices` 的 conflict 判断，本场会议有项目时，取同一项目其他会议里人工确认过的决定和约束（最多 30 条，新会议在前）全部交给 Jev，不再按关键词预选，所以说法不同的矛盾也能找到；项目里还没有确认过的，退回原来的做法（最近 10 场会议、字面相近、未被驳回）。返回的 `with` 增加 `meeting_title` 和 `confirmed`，手机据此显示"可能与已确认的决定冲突""MM/dd《会议名》已确认"或"（未核对）"。
+
+2026-10-12：会议列表的公开 `limit` 仍为 1–100；项目汇总、指定项目详情及跨会议历史先读取完整存档，再按项目和历史规则筛选，不再先截全局最近100场而遗漏老项目。
 
 **会议名称（2026-10-09）**：`GET /v1/meetings/{id}` 返回 `display_title` 和 `title_source`，列表每项返回 `title`/`title_source`。优先级：手动改名（`manual`，存在会议文件 `title`，同步不覆盖）→ 议程目标（`agenda`）→ AI 概括（`generated`）→ 不足 5 句时显示"简短会议"（`short`）→ 按原话自动取（`auto`：第一条未被驳回的决定/待办/约束，人工确认过的优先，去掉"那、就是、嗯"等开头，截 18 字；都没有时取最长一句）→ 无（`none`）。AI 概括：会议有 `ended_at` 或开始超过 3 小时、至少 5 句、没有手动名称和议程目标时，打开会议列表会在后台逐场请求 DeepSeek（整场文字最多 6000 字，标出未驳回的决定/待办/约束），回答 2–16 字才采用，连同当时句数存在会议文件 `auto_title`；句数变化后重新生成，生成期间文字变了则丢弃。没有 DeepSeek 时只用按原话自动取。
 
@@ -322,14 +330,49 @@ App 每场队列绑定开始时的后端；20 秒或累积 30 句发送，同一
 
 ## 原始录音与转写存档 `/v1/recordings/{session_id}`
 
-原始录音、逐句定稿和流式识别原始返回是团队资产：手机每场默认保存（设置可关），会后由 App 自动上传，服务器长期保留，删除会议时一并删除。仅 App 全权限凭据可用，声纹邀请凭据 403，无凭据 401。存于 `<state-dir>/recordings/<session_id>/`（目录 0700、文件 0600）。
+只有明确选择云保存的正式会议才进入此链路；日常临时聆听不创建原始录音/全文归档。新会议原声和全文各默认30天，可分别选7/30/90天；沿用分块、断点续传和校验能力。已存旧资产不追溯修改，删除会议仍连同资产删除。仅 App 全权限凭据可用，声纹邀请凭据403，无凭据401；存于 `<state-dir>/recordings/<session_id>/`（0700/0600）。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/manifest` | `{"files":[{"name","size","sha256"}],"meta":{}}`；`name` ∈ `audio.pcm`（16 kHz 单声道 s16le，会话时间轴，断流补静音）、`finals.jsonl`、`asr.jsonl`、`timing.jsonl`（每句各阶段耗时，`scripts/latency_report.py` 汇总；旧版 App 没有）、`meta.json`（含 `audio_ended_at`、`bytes`、`capped`）。返回 `{"complete","received":{name:bytes}}`，用于断点续传；清单变化时超出新大小的文件从零重传 |
+| POST | `/manifest` | `{"files":[{"name","size","sha256"}],"meta":{},保存合同字段}`；`name` ∈ `audio.pcm`（16 kHz mono s16le，断流补静音）、`finals.jsonl`、`asr.jsonl`、`timing.jsonl`、`meta.json`。返回 `{"complete","received":{name:bytes},"storage_policy":{...}}`；清单变化时超出新大小的文件从零重传，合同不得延长期限 |
 | PUT | `/{name}?offset=N` | 原始字节分块（≤1.1 MB），头 `X-Content-SHA256` 为本块哈希；`offset` 必须等于已收字节，否则 409 并返回 `received` |
 | POST | `/complete` | 逐个整文件复算 SHA-256；不一致的文件删除并 409（`received:0`）；全部一致写 `complete.json` |
-| GET | （无后缀） | 存档状态 |
+| GET | （无后缀） | 存档状态，另含 `assets:{audio,transcript}`（available/pending/expired）、`storage_policy` 和 `expires_at:{audio,transcript}`；`complete`是曾完成校验，是否仍可用以分项assets为准 |
 | GET | `/clip?start_ms=A&end_ms=B` | 截取一段原声，返回 `audio/wav`（16 kHz 单声道），前后各多 300 ms；最长 30 秒。还没有录音 404，这一段还没传到 409，参数无效 400 |
 
-已删除会议的编号返回 410，延迟重试不能重建录音。手机只在 `complete` 成功后写 `<id>.uploaded`，只清理已确认上传且超过 7 天（或超出 2 GB）的本地副本；未上传成功的录音永不自动删除。Mac 每晚 03:30 由 `local.oops.archive-pull` 用 rsync 镜像服务器 `recordings/` 与 `meetings/` 到 `/Volumes/GPFS/Users/a1234/oops-archive`（镜像删除）。
+已删除会议编号返回410，迟到重试不能重建。新会议原声或全文到期后，相关上传/回放返回410，并在 `error` 附 `asset:audio|transcript`、`expires_at`；客户端终止该类别重试并清理相应本机资产，不能因“尚未上传”无限保留。另一类别尚未到期时继续保留；旧资产沿用上传核验后7天/2GB的本机清理规则。Mac现有03:30 rsync继续镜像删除，新增镜像本地期限清理要求见下。
+
+## 保存策略合同与实际清理（2026-10-12，本地验证，真实服务器待升级）
+
+`GET /healthz` 返回 `archive_policy_version:1`。新App发送新模式正文前须核对该能力；公开网站不调用真实归档，也不包含服务凭据。日常可发送经授权的短时ASR/分析上下文，`recording_mode:"daily"` 不是会议云保存授权；服务器不把分析正文写入归档，相关内存缓存5分钟失效，常规HTTP日志只写接口、数量、状态和耗时。云端即时处理仍可能发送音频，不能称完全离线。
+
+新 `sync` 和 `manifest` 顶层均携带以下同一会话快照，不读取重试时已改变的全局偏好：
+
+```json
+{"recording_mode":"meeting","cloud_save_confirmed":true,
+ "archive_started_at":"2026-10-12T12:00:00Z",
+ "audio_retention_days":30,"transcript_retention_days":30}
+```
+
+原声/全文期限分别允许7/30/90，省略分别默认30；模式、明确确认和开始时间不能省略。`archive_started_at`须与新会议`started_at`同一时刻，日常转会议使用新的session并从切换开始。服务端把时间规范化UTC、保留至微秒，返回 `storage_policy` 含两个独立 `*_expires_at`；按首次合同开始时间加天数计算。重复请求不续期，修改合同409；日常/未确认/新会话缺合同400，过期类别410。已存在且无合同的legacy会话继续原策略；本机旧记录从未到过服务器且无原授权快照时，不会用当前偏好补造授权。
+
+到期全文变为 `utterances:[],notices:[],transcript_status:"expired"`，保留会议元数据、确认摘要、关联任务和独立短依据，后者放 `retained_summaries/retained_evidence`，不混回全文。项目、历史查询可使用明确标记 `source_kind:"saved_excerpt"/source_status:"expired"` 的确认短证据；不能据此承诺全文仍存在或原音仍能播放。原声到期删 `audio.pcm`；全文到期删 `finals.jsonl/asr.jsonl/timing.jsonl/meta.json`，留无正文的策略/校验元数据防重建。待执行助手输入中的全文、上下文和摘要一并移除，任务失效停止执行/交付；已完成的独立成果及外部回执保留为历史。已发布外部文档不由此自动删除，不能承诺替用户清除第三方副本。
+
+真实后端的 `main()` 启动即清理，并每5秒执行一次；读写接口也执行到期检查。复用现有 `deploy/oops-backend.service` 启动入口，升级须同时发布 `archive_policy.py/cleanup_archives.py/meeting_features.py/recordings.py/local_backend.py/feishu_actions.py`，不能仅覆盖旧升级脚本列出的部分文件。离线清理或镜像安装使用管理员明确指定、已存在且包含`meetings/recordings`的本地目录：
+
+```sh
+python3 scripts/cleanup_archives.py --state-dir /var/lib/oops/backend
+python3 scripts/cleanup_archives.py --state-dir /Volumes/GPFS/Users/a1234/oops-archive
+```
+
+脚本不连接远程URL、不推断镜像地址、不删除legacy内容。服务器进程停机期间可由systemd oneshot调用同一脚本，timer设置 `OnBootSec=1min/OnUnitActiveSec=1min`，运行用户与目录权限沿用`oops-backend.service`；不要与正在写入同一目录的服务并发执行离线脚本。
+
+Mac沿用 `deploy/mac/oops-archive-pull.sh` 的既有03:30双向链路，默认镜像目录仍为队友Mac的`/Volumes/GPFS/Users/a1234/oops-archive`。更新脚本后，每次拉取在rsync前后执行TTL清理，即便拉取中途失败也清理已复制的过期资产。运行 `sh deploy/mac/oops-archive-pull.sh --install-cleanup` 会替换`~/.local/share/oops-archive/pull.sh`并安装每60秒的`local.oops.archive-cleanup` launchd任务，保留原夜间拉取任务；分钟任务仅本机清理、不连服务器。拉取与分钟清理共用`fcntl.flock`跨进程锁，进程退出自动释放，避免rsync和清理互相覆盖。依赖同一Mac上可用的Python3、当前仓库策略模块、GPFS卷和原SSH授权；非默认安装可显式配置`OOPS_ARCHIVE_DEST/REPO/HOST/PYTHON`，管理员须指定可信的已有本地目录。卷未挂载时跳过，不创建假镜像。夜间拉取仍会取得服务端尚未清理的文件，但本地后置清理立即删除过期类别；不能把03:30同步当全天到期清理。
+
+本轮仅验证本机临时目录中的实际删除、Mac脚本入口、跨进程锁、失败拉取后清理及HTTP合同，没有部署服务器、在队友Mac安装调度任务或删除真实数据。当前开发Mac没有上述GPFS路径/已安装pull任务；香港SSH只读检查停在主机密钥验证，尚未验证当前机器的服务器登录权限，不能沿用另一台Mac的历史部署结果宣称已上线。
+
+## 本场实时任务清单（2026-10-12）
+
+`POST /v1/actions/draft` 可带 `"board": true`（App 只在后台取负责人提示时这样做）。服务器把这句补全出的任务交给 `scripts/task_board.py`：和本场已有任务合并、排 P0–P3，或丢弃举例、当场做完的事和空话；随后续对话调整优先级或作废。更新在后台进行，响应里的 `board` 是这句之前的清单，`pending: true` 表示还在整理，App 稍后读 `GET /v1/meetings/{id}/board`。清单存在 `<state>/boards/<session>.json`，重启不丢。
+
+清单只用于展示和排序：建飞书任务仍要从原话生成草稿并由人确认（op_id 规则不变）。会上只请大家确认 P0，其余会后处理。每条任务带原话编号 `sources`；没有出处的任务、不是团队成员的负责人都会被丢掉。

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useOops } from '../store';
 import { useViewState } from '../viewState';
+import { taskArtifactEntry } from '../taskFeedbackLogic';
 import { taskArtifacts } from '../taskLogic';
 import { provenanceAvailable, taskSourceAvailable } from '../sourceAccess';
 import { artifactFingerprint, buildCommunicationDraft, buildCommunicationReview, communicationDraftSignature, communicationDraftStatus, communicationFingerprint, formatArtifactBody, formatDraftAttachments, initialCommunicationDraft, keepCommunicationDraft, latestCommunicationArtifacts, saveCommunicationDraft, submitCommunication, visibleCalendarConflicts, type CommunicationKind, type CommunicationOptions, type CommunicationReview, type CommunicationTask, type Draft } from '../communicationLogic';
@@ -19,10 +20,11 @@ function useTaskActions(task: CommunicationTask) {
 export function TaskCommunication({ task, kind }: { task: CommunicationTask; kind: CommunicationKind }) {
   const { data, route, update, navigate, toast } = useOops(), { go } = useTaskActions(task);
   const all = taskArtifacts(task), inquiryId = task.inquiries?.find(inquiry => inquiry.id === route.mode)?.id;
-  const initialIds = all.some(artifact => artifact.id === route.mode) ? [route.mode!] : undefined;
+  const entry = taskArtifactEntry(all, inquiryId ? undefined : route.mode), initialIds = entry.ids;
+  const [entryRechecked, setEntryRechecked] = useState(!entry.missing);
   const storedDraft = task.drafts?.[kind];
   const storedRevision = initialIds === undefined && storedDraft && (storedDraft.snapshotSpace || PERSONAL) === data.settings.space && (!inquiryId || storedDraft.replyToInquiryId === inquiryId) ? communicationDraftSignature(storedDraft) : 'initial';
-  const key = `task-communication-v3:${data.settings.space}:${task.id}:${kind}:${inquiryId || initialIds?.[0] || 'general'}:${storedRevision}`;
+  const key = `task-communication-v3:${data.settings.space}:${task.id}:${kind}:${inquiryId || (initialIds === undefined ? 'general' : route.mode || 'selection')}:${storedRevision}`;
   const [draft, setDraft] = useViewState<Draft>(key, () => initialDraft(task, kind, data.settings.name, initialIds, { data, space: data.settings.space, replyToInquiryId: inquiryId }));
   const [selectedIds, setSelectedIds] = useViewState<string[]>(key + ':resources', () => draft.artifactRefs?.map(ref => ref.id) || latestCommunicationArtifacts(task).map(artifact => artifact.id));
   const [checkedSignature, setCheckedSignature] = useState(''), [review, setReview] = useState<CommunicationReview | null>(null), [error, setError] = useState(''), [conflictChecked, setConflictChecked] = useState(''), [historyOpen, setHistoryOpen] = useState(false), [submission, setSubmission] = useState<{ review: CommunicationReview; id: string; date: string } | null>(null);
@@ -45,7 +47,7 @@ export function TaskCommunication({ task, kind }: { task: CommunicationTask; kin
     if (selectedIds.some(id => !all.some(artifact => artifact.id === id))) return setError('选择中有已移除的成果，请重新勾选实际版本。');
     const newer = { ...buildCommunicationDraft(task, kind, data.settings.name, selectedIds, { data, space: data.settings.space, replyToInquiryId: inquiryId || draft.replyToInquiryId }), account: draft.account, cc: draft.cc, start: draft.start, end: draft.end, calendar: draft.calendar, versionChoice: 'updated' as const };
     update(current => saveCommunicationDraft(current, task.id, newer, kind, true, draft));
-    setDraft(newer); resetCheck(); toast('已按所选成果更新正文和附件，原稿保留');
+    setDraft(newer); setEntryRechecked(true); resetCheck(); toast('已按所选成果更新正文和附件，原稿保留');
   }
   function keepDraft() {
     const result = keepCommunicationDraft(task, draft);
@@ -53,6 +55,7 @@ export function TaskCommunication({ task, kind }: { task: CommunicationTask; kin
     setDraft(result.draft); setSelectedIds(result.draft.artifactRefs?.map(ref => ref.id) || []); resetCheck(); toast('保留原稿及原附件，请重新核对本次内容');
   }
   function openReview() {
+    if (entry.missing && !entryRechecked) return setError('入口中有已移除的成果版本，请重新选择并起草后再核对。');
     if (selectionChanged) return setError('附件选择尚未应用。按所选版本重新起草，或保留原稿及原附件。');
     const result = buildCommunicationReview(data, task, draft, kind);
     if (result.error || !result.review) return setError(result.error || '本次内容需要重新核对');
@@ -78,7 +81,9 @@ export function TaskCommunication({ task, kind }: { task: CommunicationTask; kin
   }, [submission, data, task.id, kind, draft, navigate, toast]);
   const exact = review?.draft;
   return <div className="stack task-communication">
-    <div className="section-title"><Badge>待本人确认</Badge><Badge tone="gray">{connection} · 本地演示</Badge></div>
+    <Card className="communication-context"><p className="communication-eyebrow">{kind==='日程'?'安排下一次跟进':'跟进这项工作'}</p><h2>{task.title}</h2><dl><div><dt>{kind==='日程'?'参与人':'收件对象'}</dt><dd>{draft.target||'需要你明确填写'}</dd></div><div><dt>本次成果</dt><dd>{draft.artifactRefs?.length?draft.artifactRefs.map(ref=>`${ref.title||'成果'} · v${ref.version}`).join('、'):'无附件，仅跟进正文'}</dd></div></dl><p className="meta">内容草稿 → 核对{kind==='日程'?'日程':'发送'} → 记录实际工作结果</p></Card>
+    <div className="section-title"><Badge>草稿待核对</Badge><Badge tone="gray">{connection} · 本地演示</Badge></div>
+    {entry.missing&&!entryRechecked&&<Notice>原入口中的成果版本已有变化。请在下方重新选择可用版本并起草，不会自动附上其他成果。</Notice>}
     {inquiryId && <Notice>这份草稿围绕已记录的问题，回复与对外提交仍分别核对。</Notice>}
     {sourceUnavailable && <Notice>任务来源待核对。原草稿可以保存，暂时不能确认发送。<Button tone="quiet" onClick={() => go('task-edit')}>先核对任务来源</Button></Notice>}
     {status.stale && <Card className="communication-stale"><Badge tone="orange">草稿版本待核对</Badge><p>{status.reasons.join('；')}。</p><p className="meta">原正文和已绑定附件保持原样。</p><Button tone="secondary" onClick={keepDraft}>保留原稿及原附件</Button><Button onClick={updateDraft}>按所选版本重新起草</Button></Card>}
@@ -101,7 +106,7 @@ export function TaskCommunication({ task, kind }: { task: CommunicationTask; kin
     <Button onClick={openReview}>{kind === '日程' ? '核对并创建' : '核对并发送'}</Button><Button tone="secondary" onClick={save}>保存草稿</Button>
     {history.length > 0 && <Button tone="quiet" onClick={() => setHistoryOpen(true)}>查看保留的原稿 · {history.length}份</Button>}
     {kind === '消息' && <Button tone="quiet" icon="copy" onClick={() => { if (!navigator.clipboard) { toast('当前环境暂不允许复制'); return; } navigator.clipboard.writeText(draft.body).then(() => toast('正文已复制，尚未发送')).catch(() => toast('当前环境暂不允许复制')); }}>复制正文</Button>}
-    <p className="meta">仅在本机演示，不会发送到真实账号或写入真实日历。</p>
+    <p className="meta communication-boundary">生成正文不代表已发送，沟通回执也不代表任务完成。这里仅在本机演示，不会发送到真实账号或写入真实日历。</p>
     <Sheet open={!!review} onClose={() => !submission && setReview(null)} title={kind === '日程' ? '确认这条日程' : '确认这次发送'}><div className="stack">{exact && <Card><Badge>{kind}</Badge><h3>{exact.target}</h3>{kind !== '日程' && <p className="meta">发送账号：{exact.account}</p>}{kind === '邮件' && exact.cc && <p className="meta">抄送：{exact.cc}</p>}{kind !== '消息' && <strong>{exact.subject}</strong>}{kind === '日程' && <p>{exact.start} — {exact.end}<br />{exact.calendar}</p>}<p className="communication-copy">{exact.body}</p><SectionTitle>本次实际附件</SectionTitle>{exact.artifactRefs?.length ? exact.artifactRefs.map(ref => <p key={ref.id + ':' + ref.version}>{ref.title || '已绑定成果'} · v{ref.version}</p>) : <p className="meta">无附件</p>}</Card>}<Button disabled={!!submission} onClick={confirmReview}>{submission ? '正在记录本地回执' : kind === '日程' ? '确认模拟创建' : '确认模拟发送'}</Button><Button tone="quiet" disabled={!!submission} onClick={() => setReview(null)}>继续修改</Button></div></Sheet>
     <Sheet open={historyOpen} onClose={() => setHistoryOpen(false)} title="保留的通信原稿"><div className="stack">{[...history].reverse().map((item, index) => <Card key={item.date + ':' + index}><Badge tone="gray">{item.date}</Badge><h3>{item.draft.target || '对象未填写'}</h3><p className="communication-copy">{item.draft.body}</p><p className="meta">{formatDraftAttachments(task, item.draft) || item.draft.attachments || '无附件'}</p><Button tone="secondary" onClick={() => { setDraft(item.draft); setSelectedIds(item.draft.artifactRefs?.map(ref => ref.id) || []); resetCheck(); setHistoryOpen(false); toast('已打开原稿，需要重新核对这一次内容'); }}>沿用这份原稿</Button></Card>)}</div></Sheet>
   </div>;

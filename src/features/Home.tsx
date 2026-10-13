@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardTextarea } from '../mobile';
+import { KeyboardTextarea, useKeyboard } from '../mobile';
 import { useOops, type AppData, type Route, type Task, type SourceReference, type AssistantMessage } from '../store';
 import { sharedMemoryEligible } from '../memoryAccess';
 import { makeSourceReference, materialVisible, messageAvailable, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '../sourceAccess';
-import { Badge, Button, Card, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, Source, Toggle } from '../ui';
+import { Badge, Button, Card, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, Source, Toggle, isTextEntryTarget } from '../ui';
 import { taskAttentionReason, taskBelongsToMe, taskIsMyAttention, taskPrimaryAction } from '../taskWorkflow';
 import { assistantQuestion, unansweredAssistantQuestion } from '../assistantLogic';
+import { activeHomeRecording, recordingPeople, homeAssistantWork, assistantStage, homeDeviceSummary } from '../feedbackPresentation';
+import { PrivacyNoticeCard } from './PrivacyNotice';
+import { privacyNoticeAccepted, saveWelcomeChoices } from '../privacyNoticeLogic';
+import './Home.css';
 export function homeTitle(r:Route){return ({home:'首页',assistant:'问 Oops',voice:'说给 Oops 听',search:'搜索',notifications:'通知',welcome:'你好，我是 Oops'} as Record<string,string>)[r.view]||'Oops'}
 export function sessionVisible(d:AppData,id:string){return scopedSessionVisible(d,id)}
 export function memoryVisible(d:AppData,id:string,shared:boolean){if(d.settings.space==='我的空间')return true;const memory=d.memories.find(m=>m.id===id);return !!memory&&shared&&sharedMemoryEligible(d,memory)&&provenanceAvailable(d,memory.sources)&&sourceAvailable(d,memory,{publicOnly:true,requireShared:true})&&(d.settings.retention['memory-space:'+id]||'Oops 产品团队')===d.settings.space}
@@ -31,21 +35,42 @@ export function searchSavedContent(data:AppData,query:string,kind='全部') {
   return [...sessions,...scoped.tasks.map(task=>({kind:'任务',title:task.title,body:task.description,icon:'check-square',route:{view:'task-detail',id:task.id} as Route})),...data.memories.filter(m=>!m.deleted&&memoryVisible(data,m.id,m.visibility==='项目共享')).map(m=>({kind:'记忆',title:m.title,body:m.body,icon:'bookmark-simple',route:{view:'memory-detail',id:m.id} as Route})),...data.people.filter(p=>data.settings.space==='我的空间'||p.shared&&(data.settings.retention['person-space:'+p.id]||'Oops 产品团队')===data.settings.space).map(p=>({kind:'人物',title:p.name,body:p.role,icon:'user',route:{view:'memory-person',id:p.id} as Route}))].filter(result=>(kind==='全部'||result.kind===kind)&&(!q||`${result.title} ${result.body}`.toLocaleLowerCase().includes(q)));
 }
 export function Home() {
-  const {data,navigate}=useOops(); const [prompt,setPrompt]=useState('');
-  const queue=homeTaskAttentionQueue(data);
+  const {data,navigate,update,requestEnd}=useOops(); const keyboard=useKeyboard(); const [prompt,setPrompt]=useState('');
+  const queue=homeTaskAttentionQueue(data); const recording=activeHomeRecording(data);
+  const otherRecording=!recording&&data.sessions.some(session=>session.id===data.activeSessionId&&!session.archived&&['进行中','暂停'].includes(session.status));
+  const people=recording?recordingPeople(data,recording):undefined;
+  const work=homeAssistantWork(data); const pendingMemory=data.memories.filter(m=>!m.deleted&&!m.tags.includes('修订历史')&&(!m.confirmed||m.needsReview||m.tags.some(tag=>['待确认','待复核'].includes(tag))||!provenanceAvailable(data,m.sources)||!sourceAvailable(data,m))&&memoryVisible(data,m.id,m.visibility==='项目共享')).length;
+  const mascot = homeMascotPresentation(data, pendingMemory);
   const submit=()=>{if(prompt.trim()){navigate({view:'assistant',mode:prompt.trim()});setPrompt('')}};
   const nextRoute=(t:Task):Route=>{const action=taskBelongsToMe(data,t)?taskPrimaryAction(t):null;return {...(action||{view:'task-detail'}),id:t.id}};
   const nextLabel=(t:Task)=>taskBelongsToMe(data,t)?taskAttentionReason(t)||'查看下一步':'到时间跟进这项工作';
+  const toggleRecording=()=>{if(!recording)return;update(current=>{const latest=activeHomeRecording(current);return latest?.id===recording.id?{...current,sessions:current.sessions.map(session=>session.id===latest.id?{...session,status:latest.status==='暂停'?'进行中':'暂停'}:session)}:current})};
   const today=new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric',weekday:'long'}).format(new Date());
-  return <div className="home-content">
-    <div className="home-date">{today}</div><div className="home-hero"><h1>今天想<br/>一起解决什么？</h1><img src="/brand/mascot.png" alt="Oops伙伴"/></div>
-    <div className="ask-card"><KeyboardTextarea aria-label="想问 Oops 的问题" placeholder="说说你的问题，或刚才的灵感…" value={prompt} onChange={e=>setPrompt(e.target.value)} rows={2}/><div className="ask-footer"><small><Icon name="lock-key" size={13}/>仅自己可见</small><button className="input-text" onClick={()=>navigate({view:'assistant'})}>{prompt?'':'输入文字'}</button><button className="mic-button" aria-label={prompt.trim()?'发送问题':'语音提问'} onClick={prompt.trim()?submit:()=>navigate({view:'voice'})}><Icon name={prompt.trim()?'arrow-up':'microphone'} size={23}/></button></div></div>
-    <Button icon="microphone" onClick={()=>navigate({view:'session-mode'})}>开始记录</Button><div className="record-under"><span>会议 · 日常 · 灵感</span><button onClick={()=>navigate({view:'session-import'})}><Icon name="upload-simple" size={18}/>导入已有内容</button></div>
-    <Row title="智能聆听" subtitle="对话检测、语音唤醒与自动起止" icon="waveform" onClick={()=>navigate({view:'session-listening'})}/><SectionTitle action="全部" onAction={()=>navigate({view:'sessions'})}>接着聊</SectionTitle><div className="home-recent">{data.sessions.filter(s=>!s.archived&&s.status!=='待开始'&&sessionVisible(data,s.id)).slice(0,2).map(s=>{const tasks=data.tasks.filter(t=>(t.relatedSessionId||t.sourceSession)===s.id&&taskVisible(data,t)&&!['已完成','已取消','已拒绝'].includes(t.status));return <Row key={s.id} title={s.title} subtitle={`${s.date} · ${tasks.length}项行动待跟进`} icon={s.kind==='灵感'?'lightbulb':'users-three'} onClick={()=>navigate({view:'session-detail',id:s.id})}/>})}</div>
-    <SectionTitle action={`${queue.length}项待处理`} onAction={()=>navigate({view:'tasks',mode:'待我处理'})}>需要你处理</SectionTitle>{queue.length?queue.slice(0,3).map(t=><Row key={t.id} title={t.title} subtitle={nextLabel(t)} icon={t.needsReview?'warning-circle':t.status==='待验收'?'files':t.status==='待转交'?'users':'check-square'} onClick={()=>navigate(nextRoute(t))}/>):<Row title="查看我的待办" subtitle="补充资料、继续推进" icon="check-square" onClick={()=>navigate({view:'tasks',mode:'我的待办'})}/>}
-    <SectionTitle action="问已有记录" onAction={()=>navigate({view:'session-history'})}>刚才说过什么？</SectionTitle><Card className="recall-entry" onClick={()=>navigate({view:'session-recall'})}><Icon name="clock-counter-clockwise"/><div><strong>找回最近5分钟</strong><p>选择重要的片段，再决定是否留下</p></div><Icon name="caret-right" size={17}/></Card>{data.memories.some(m=>!m.confirmed&&!m.deleted&&memoryVisible(data,m.id,m.visibility==='项目共享'))&&<Row title="核对新发现的记忆" subtitle="确认后才会影响后续建议" icon="bookmark-simple" onClick={()=>navigate({view:'memory-candidate'})}/>}
-    <button className="quiet-link" onClick={()=>navigate({view:'welcome'})}>第一次用 Oops？看看如何开始</button>
+  return <div className="home-content home-feedback">
+    <div className="home-date">{today}</div><p className="home-positioning">记住对话里的重点，陪你把下一步做好。</p>
+    {recording?<Card className={`home-record-card ${recording.status==='暂停'?'is-paused':''}`}><div className="home-record-head"><Badge tone={recording.status==='暂停'?'gray':'purple'}>{recording.status==='暂停'?'记录已暂停':'示例记录中'}</Badge><time>{recording.duration||'00:00'}</time></div><div className="home-record-title"><div><h1>{recording.title}</h1><p>{recording.status==='暂停'?'随时继续，已记录内容保留':'正在留下这段对话的重要信息'}</p></div><HomeMascot presentation={mascot} /></div><div className="home-record-signal" aria-hidden="true">{[8,15,24,17,29,35,21,13,25,31,19,12,27,34,20,11,19,28,16,9].map((height,index)=><i key={index} style={{height}}/>)}</div><p className="home-record-people">{people?.count?`${people.count} 位发言者 · ${people.names.join('、')||'身份待核对'}${people.unknown?` · ${people.unknown} 位待确认`:''}`:'等待新的对话片段'}</p><Button icon="arrow-right" onClick={()=>navigate({view:'session-detail',id:recording.id,mode:'现场'})}>回到记录现场</Button><div className="home-record-actions"><Button tone="quiet" icon={recording.status==='暂停'?'play':'pause'} onClick={toggleRecording}>{recording.status==='暂停'?'继续记录':'暂停记录'}</Button><Button tone="quiet" icon="stop" onClick={()=>requestEnd(recording.id)}>结束并整理</Button></div></Card>:otherRecording?<Card className="home-record-card"><Badge tone="gray">另一空间有活动记录</Badge><h2>继续已有记录</h2><p>切回个人空间，查看当前记录与控制。</p><Button onClick={()=>{update(current=>({...current,settings:{...current.settings,space:'我的空间'}}));navigate({view:'home'})}}>查看当前记录</Button></Card>:<Card className="home-record-card home-start-card"><div className="home-record-title"><div><p className="home-eyebrow">从这一刻开始</p><h1>重要的话，<br/>交给 Oops 记住。</h1></div><HomeMascot presentation={mascot} /></div><Button icon="microphone" onClick={()=>navigate({view:'session-mode'})}>开始记录</Button><div className="home-start-secondary"><span>会议 · 日常 · 灵感</span><button onClick={()=>navigate({view:'session-import'})}><Icon name="upload-simple" size={16}/>导入内容</button></div></Card>}
+    <button className="home-device-summary" onClick={()=>navigate({view:'settings-devices'})}><Icon name="bluetooth" size={14}/><span>{homeDeviceSummary(data)}</span><Icon name="caret-right" size={13}/></button>
+    <div className="home-ask-heading"><strong>问 Oops</strong><span>从已有记录中找答案</span></div><div className="ask-card home-ask-card"><KeyboardTextarea aria-label="想问 Oops 的问题" placeholder="刚才决定了什么？我接下来要做什么？" value={prompt} onChange={e=>setPrompt(e.target.value)} onBlur={event=>{if(!isTextEntryTarget(event.relatedTarget))keyboard.hide()}} rows={2}/><div className="ask-footer"><small><Icon name="lock-key" size={13}/>私人提问</small><button className="input-text" onClick={()=>navigate({view:'assistant'})}>打开问答</button><button className="mic-button" aria-label={prompt.trim()?'发送问题':'语音提问'} onClick={prompt.trim()?submit:()=>navigate({view:'voice'})}><Icon name={prompt.trim()?'arrow-up':'microphone'} size={23}/></button></div></div>
+    <SectionTitle action={queue.length ? `${queue.length}项任务` : pendingMemory ? `${pendingMemory}条记忆` : undefined} onAction={()=>navigate(queue.length ? {view:'tasks',mode:'待我处理'} : {view:'memory-candidate'})}>需要你确认与推进</SectionTitle><Card className="home-attention-card">{queue.slice(0,2).map(t=><Row key={t.id} title={t.title} subtitle={nextLabel(t)} icon={t.needsReview?'warning-circle':t.status==='待验收'?'files':'check-square'} onClick={()=>navigate(nextRoute(t))}/>)}{pendingMemory>0&&<Row title={`${pendingMemory}条新信息待核对`} subtitle="确认后才用于之后的建议" icon="bookmark-simple" onClick={()=>navigate({view:'memory-candidate'})}/>} {!queue.length&&!pendingMemory&&<Row title="暂时没有需要确认的事项" subtitle="查看已承接的工作，继续下一步" icon="check-circle" onClick={()=>navigate({view:'tasks',mode:'我的待办'})}/>}</Card>
+    <SectionTitle action="全部" onAction={()=>navigate({view:'tasks',mode:'助手工作'})}>Oops 正在帮你做</SectionTitle>{work.length?<Card className="home-work-card">{work.slice(0,2).map(task=><Row key={task.id} title={task.title} subtitle={assistantStage(task)} icon={task.aiStatus==='准备中'?'sparkle':task.aiStatus==='草稿完成'?'files':'clock'} badge={task.aiStatus==='草稿完成'?'查看草稿':task.aiStatus} onClick={()=>navigate({view:task.aiStatus==='准备中'?'task-progress':task.sourceNeedsReview?'task-edit':task.aiStatus==='草稿完成'?'task-result':'task-detail',id:task.id})}/>)}</Card>:<p className="home-empty-work">任务确认后，可以让 Oops 整理资料或准备初稿。</p>}
+    <SectionTitle action="全部记录" onAction={()=>navigate({view:'sessions'})}>接着上次的话题</SectionTitle><Card className="home-recent">{data.sessions.filter(s=>!s.archived&&s.id!==recording?.id&&s.status!=='待开始'&&sessionVisible(data,s.id)).slice(0,2).map(s=><Row key={s.id} title={s.title} subtitle={`${s.date} · ${s.kind}`} icon={s.kind==='灵感'?'lightbulb':'chat-circle'} onClick={()=>navigate({view:'session-detail',id:s.id})}/>)}</Card>
+    <Card className="home-recall-card"><Row title="找回最近 5 分钟" subtitle="已取得的片段，选中后再保存" icon="clock-counter-clockwise" onClick={()=>navigate({view:'session-recall'})}/><Row title="智能聆听与设备" subtitle="设置对话检测、唤醒和自动起止" icon="waveform" onClick={()=>navigate({view:'session-listening'})}/></Card><div className="home-footer-links"><button onClick={()=>navigate({view:'welcome'})}>第一次使用</button><button onClick={()=>navigate({view:'settings-privacy'})}><Icon name="shield-check" size={14}/>隐私与记录范围</button></div>
   </div>;
+}
+
+export function homeMascotPresentation(data: AppData, pendingMemory = 0) {
+  const recording = activeHomeRecording(data);
+  if (recording) return recording.status === '进行中' ? { state: 'listening', label: '示例记录中' } : { state: 'idle', label: '记录已暂停' };
+  const work = homeAssistantWork(data);
+  const current = work.filter(task => !task.sourceNeedsReview && taskSourceAvailable(data, task));
+  if (current.some(task => task.aiStatus === '准备中')) return { state: 'thinking', label: '草稿准备中' };
+  if (current.some(task => task.aiStatus === '失败')) return { state: 'failed', label: '有准备任务待重试' };
+  if (pendingMemory > 0 || work.some(task => task.needsReview || task.sourceNeedsReview || task.status === '待验收') || data.tasks.some(task => taskVisible(data, task) && taskBelongsToMe(data, task) && !['已完成', '已拒绝', '已取消'].includes(task.status) && (task.needsReview || task.sourceNeedsReview || task.status === '待验收'))) return { state: 'review', label: '有内容等你核对' };
+  return { state: 'idle', label: '随时开始' };
+}
+
+function HomeMascot({ presentation }: { presentation: ReturnType<typeof homeMascotPresentation> }) {
+  return <div className="home-mascot" data-state={presentation.state}><img src="/brand/mascot.png" alt="Oops 伙伴" draggable={false} /><span className="home-mascot-caption" role="status">{presentation.label}</span></div>;
 }
 
 type LocalAnswer = { text: string; sources: SourceReference[] };
@@ -108,13 +133,16 @@ export function buildLocalAnswer(q:string,all:AppData,context:boolean):LocalAnsw
   // Personal preferences must not be copied into a team answer or a shared derivation.
   if(all.settings.space!=='我的空间')return result;
   const length=all.settings.retention.answerLength||'适中',tone=all.settings.tone,focus=all.settings.retention.focus?.trim();
+  const customLength=length.startsWith('自定义：')?length.slice(4):'',customTone=tone.startsWith('自定义：')?tone.slice(4):'';
+  const requestedLimit=customLength.match(/(\d{2,4})\s*字/);const limit=requestedLimit?Math.max(40,Math.min(2000,Number(requestedLimit[1]))):220;
   let text=result.text;
-  if(length==='简短')text=text.length>220?text.slice(0,220)+'…（具体依据可打开下方来源查看）':text;
-  if(tone==='先一起探索，再给建议')text='先核对已有信息：\n'+text;
-  else if(tone==='逐步说明操作')text='1. 查看已有内容\n'+text+'\n2. 打开来源核对\n3. 决定是否整理待办或候选记忆';
-  if(length==='详细')text+='\n核对时分别确认：哪些已有依据、哪些仍缺资料、下一步由谁负责。这里只整理本地记录，不自动确认事实或执行。';
+
+  if(tone==='先一起探索，再给建议'||/探索|一起讨论/.test(customTone))text='先核对已有信息：\n'+text;
+  else if(tone==='逐步说明操作'||/步骤|分步/.test(customTone))text='1. 查看已有内容\n'+text+'\n2. 打开来源核对\n3. 决定是否整理待办或候选记忆';
+  if(length==='详细'||/详细|充分展开/.test(customLength))text+='\n核对时分别确认：哪些已有依据、哪些仍缺资料、下一步由谁负责。这里只整理本地记录，不自动确认事实或执行。';
   if(focus)text+='\n你当前希望关注：'+focus;
-  const usesPreferences=!!focus||length!=='适中'||tone==='先一起探索，再给建议'||tone==='逐步说明操作';
+  if(length==='简短'||!!requestedLimit||/简短|精简/.test(customLength)){const suffix='…（完整依据见来源）';if(text.length>limit)text=text.slice(0,limit-suffix.length)+suffix;}
+  const usesPreferences=!!focus||length!=='适中'||tone==='先一起探索，再给建议'||tone==='逐步说明操作'||!!customTone;
   const sources=usesPreferences&&!result.sources.some(ref=>ref.kind==='profile'&&ref.profileScope==='preferences')?[...result.sources,makeSourceReference(all,{kind:'profile',id:'my-profile',profileScope:'preferences'})]:result.sources;
   return {...result,text,sources};
 }
@@ -156,8 +184,44 @@ export function Assistant() {
   }
   return <div className="stack"><div className="private-caption"><Icon name="lock-key" size={14}/>私人提问<Badge>本地资料整理</Badge></div>{messages.length===0?<><div className="assistant-welcome"><img src="/brand/mascot.png" alt="Oops"/><h2>从一个问题开始</h2><p>一起回想、整理，再找到下一步。</p></div><div className="suggestion-grid">{['今天有哪些待办？','帮我整理桌面伙伴的灵感','项目预算是多少？'].map(q=><button key={q} onClick={()=>send(q)}>{q}<Icon name="arrow-up-left" size={16}/></button>)}</div></>:messages.map(m=>{const available=messageAvailable(data,m);return <div key={m.id} className={`chat-bubble ${m.role}`}><small>{m.role==='user'?'我':'Oops'}</small><p>{available?m.text:'这条回答的来源已变化或撤回，请重新提问。'}</p>{available&&m.role==='assistant'&&(m.sources?.map((ref,i)=><Source key={`${ref.kind}:${ref.id}:${i}`} title={referenceTitle(data,ref)} time={ref.sourceTime} onClick={()=>navigate(referenceRoute(ref))}/>)||m.sourceSession&&<Source title={data.sessions.find(s=>s.id===m.sourceSession)?.title||'相关会话'} onClick={()=>navigate({view:'session-detail',id:m.sourceSession})}/>)}</div>})}{pending&&<div className="chat-bubble assistant" role="status">正在整理可引用的本地资料…</div>}{unanswered&&!pending&&<Card><Notice>刚才的问题还没有整理完成，可以从这里继续。</Notice><Button tone="secondary" onClick={()=>send(unanswered.text,unanswered.id)}>继续整理这个问题</Button></Card>}{last&&!pending&&<div className="action-grid"><Button tone="secondary" icon="check-square" onClick={draft}>形成待办</Button><Button tone="secondary" icon="bookmark-simple" onClick={remember}>留下候选</Button></div>}<Toggle label="使用我的已保存背景" value={context} onChange={setContext} hint="仅引用当前可查看、来源仍有效的内容"/><Field label="继续问 Oops" value={input} onChange={setInput} placeholder="输入问题…" multiline/><Button onClick={()=>send(input)} disabled={!input.trim()||pending} icon="arrow-up">发送</Button><Button tone="quiet" icon="microphone" onClick={()=>navigate({view:'voice'})}>改用语音</Button></div>;
 }
-export function Voice(){const {navigate}=useOops();const [stage,setStage]=useState<'idle'|'listening'|'review'>('idle');const [text,setText]=useState('');useEffect(()=>{if(stage!=='listening')return;const steps=['帮我整理…','帮我整理桌面伙伴…','帮我整理桌面伙伴的想法，形成一个待验证的产品故事。'];let i=0;const timer=setInterval(()=>{setText(steps[i++]);if(i===steps.length){clearInterval(timer);setStage('review')}},1000);return()=>clearInterval(timer)},[stage]);return <div className="stack"><div className="voice-stage"><img src="/brand/mascot.png" alt="Oops正在听"/><h2>{stage==='listening'?'正在听你的想法':stage==='review'?'核对刚才说的话':'把想法说给 Oops'}</h2><p>用一段示例语音体验流程</p><button className={`voice-record ${stage==='listening'?'listening':''}`} aria-label={stage==='listening'?'停止语音输入':'体验语音输入'} onClick={()=>{if(stage==='listening')setStage('review');else{setText('');setStage('listening')}}}><Icon name={stage==='listening'?'stop':'microphone'} size={32}/></button></div>{text&&<Field label={stage==='listening'?'正在识别':'确认后的文字'} value={text} onChange={setText} multiline/>}{stage==='review'&&<><Notice>可以修改文字后再提交。</Notice><Button disabled={!text.trim()} onClick={()=>navigate({view:'assistant',mode:text})}>确认并提问</Button></>}<Button tone="secondary" onClick={()=>navigate({view:'assistant'})}>改用文字输入</Button></div>}
+export function Voice(){const {navigate}=useOops();const [stage,setStage]=useState<'idle'|'listening'|'review'>('idle');const [text,setText]=useState('');useEffect(()=>{if(stage!=='listening')return;const steps=['帮我整理…','帮我整理桌面伙伴…','帮我整理桌面伙伴的想法，形成一个待验证的产品故事。'];let i=0;const timer=setInterval(()=>{setText(steps[i++]);if(i===steps.length){clearInterval(timer);setStage('review')}},1000);return()=>clearInterval(timer)},[stage]);return <div className="stack"><div className="voice-stage"><img src="/brand/mascot.png" className={stage==='listening'?'home-mascot-listening':stage==='review'?'home-mascot-ready':''} alt="Oops正在听"/><h2>{stage==='listening'?'正在听你的想法':stage==='review'?'核对刚才说的话':'把想法说给 Oops'}</h2><p>用一段示例语音体验流程</p><button className={`voice-record ${stage==='listening'?'listening':''}`} aria-label={stage==='listening'?'停止语音输入':'体验语音输入'} onClick={()=>{if(stage==='listening')setStage('review');else{setText('');setStage('listening')}}}><Icon name={stage==='listening'?'stop':'microphone'} size={32}/></button></div>{text&&<Field label={stage==='listening'?'正在识别':'确认后的文字'} value={text} onChange={setText} multiline/>}{stage==='review'&&<><Notice>可以修改文字后再提交。</Notice><Button disabled={!text.trim()} onClick={()=>navigate({view:'assistant',mode:text})}>确认并提问</Button></>}<Button tone="secondary" onClick={()=>navigate({view:'assistant'})}>改用文字输入</Button></div>}
 export function SearchScreen(){const {data,navigate}=useOops();const [q,setQ]=useState('');const [kind,setKind]=useState('全部');const results=searchSavedContent(data,q,kind);return <div className="stack"><Search value={q} onChange={setQ} placeholder="搜索原话、会话、任务、记忆…"/><Chips items={['全部','会话','任务','记忆','人物']} value={kind} onChange={setKind}/>{!q&&<div className="search-hints">{['KPI','资料卡','预算','王宁'].map(x=><button className="chip" onClick={()=>setQ(x)} key={x}>{x}</button>)}</div>}<p className="meta">{data.settings.space} · {results.length}项结果</p>{results.length?results.map((r,i)=><Row key={`${r.title}${i}`} title={r.title} subtitle={`${r.kind} · ${r.body.slice(0,65)}`} icon={r.icon} onClick={()=>navigate(r.route)}/>):<Empty title="没有找到相关内容" body="换一个原话关键词，或清除当前筛选。" action="清除筛选" onAction={()=>{setQ('');setKind('全部')}}/>}</div>}
 export function notificationVisible(d:AppData,r:Route){if(r.view.startsWith('task')&&!d.tasks.some(t=>t.id===r.id&&!['已完成','已取消','已拒绝'].includes(t.status)))return false;if(r.view.startsWith('session')&&!d.sessions.some(s=>s.id===r.id&&!s.archived))return false;if(r.view.startsWith('memory')&&!d.memories.some(m=>m.id===r.id&&!m.deleted&&(!['memory-candidate','memory-conflict'].includes(r.view)||!m.confirmed)))return false;if(d.settings.space==='我的空间')return true;if(r.view.startsWith('task'))return d.tasks.some(t=>t.id===r.id&&taskVisible(d,t));if(r.view.startsWith('session'))return !!r.id&&sessionVisible(d,r.id);if(r.view.startsWith('memory'))return d.memories.some(m=>m.id===r.id&&memoryVisible(d,m.id,m.visibility==='项目共享'));return true}
 export function Notifications(){const {data,update,navigate}=useOops();const [filter,setFilter]=useState('全部');const items=data.notifications.filter(n=>notificationVisible(data,n.route)&&(filter==='全部'||!n.read));return <div className="stack"><div className="section-title"><Chips items={['全部','未读']} value={filter} onChange={setFilter}/><button className="text-action" onClick={()=>update(d=>({...d,notifications:d.notifications.map(n=>notificationVisible(d,n.route)?{...n,read:true}:n)}))}>全部已读</button></div>{items.length?items.map(n=><Card key={n.id} className={`notification-card ${!n.read?'unread':''}`} onClick={()=>{update(d=>({...d,notifications:d.notifications.map(x=>x.id===n.id?{...x,read:true}:x)}));navigate(n.route)}}><div><Icon name="bell"/><Badge tone={n.read?'muted':'purple'}>{n.read?'已读':'未读'}</Badge></div><h3>{n.title}</h3><p>{n.body}</p></Card>):<Empty title="都看过了" body="有新的结果和需要确认的内容时会出现在这里。" icon="bell"/>}<Row title="提醒与打扰方式" subtitle="决定哪些提醒需要即时出现" icon="sliders-horizontal" onClick={()=>navigate({view:'settings-notifications'})}/></div>}
-export function Welcome(){const {data,update,navigate}=useOops();const [step,setStep]=useState(0);const [name,setName]=useState(data.settings.name);const [role,setRole]=useState(data.settings.role);const [memory,setMemory]=useState(data.settings.toggles.memory);const [cloud,setCloud]=useState(data.settings.toggles.cloud);return <div className="stack"><div className="onboarding-head"><img src="/brand/mascot.png" alt="Oops"/><Badge>第{step+1}步 / 共3步</Badge><h2>{['先认识一下你','由你决定怎样记住','准备好了'][step]}</h2><p>{['称呼和角色会帮助 Oops 更懂你。','短期暂存和长期保存分别选择。','从一个真实场景开始。'][step]}</p></div>{step===0?<><Field label="怎么称呼你" value={name} onChange={setName}/><Field label="我的角色" value={role} onChange={setRole}/><Button disabled={!name.trim()} onClick={()=>{update(d=>({...d,settings:{...d.settings,name:name.trim(),role}}));setStep(1)}}>继续</Button></>:step===1?<><Toggle label="允许云端处理" value={cloud} onChange={setCloud}/><Toggle label="保存确认后的长期记忆" value={memory} onChange={setMemory}/><Notice>Recall未保存内容仅保留最近5分钟。完整会议需另行开启。</Notice><Button onClick={()=>{update(d=>({...d,settings:{...d.settings,toggles:{...d.settings.toggles,cloud,memory}}}));setStep(2)}}>保存选择</Button></>:<><Row title="记录一段会议" subtitle="从目标、议程与参会人开始" icon="microphone" onClick={()=>navigate({view:'session-mode'})}/><Row title="导入已有记录" subtitle="粘贴转写，或查看本地录音" icon="upload-simple" onClick={()=>navigate({view:'session-import'})}/><Row title="先问 Oops 一个问题" subtitle="仅自己可见" icon="chat-circle" onClick={()=>navigate({view:'assistant'})}/><Button onClick={()=>navigate({view:'home'})}>去首页看看</Button></>}<Button tone="quiet" onClick={()=>navigate({view:'home'})}>稍后再设置</Button></div>}
+export function Welcome() {
+  const {data,update,navigate}=useOops();
+  const [step,setStep]=useState(0);
+  const heading=useRef<HTMLDivElement>(null);
+  useEffect(()=>{heading.current?.closest('[data-testid="mobile-scroll"]')?.scrollTo({top:0});},[step]);
+  const [name,setName]=useState(data.settings.name);
+  const [role,setRole]=useState(data.settings.role);
+  const [memory,setMemory]=useState(() => privacyNoticeAccepted(data) && data.settings.toggles.memory);
+  const [cloud,setCloud]=useState(() => privacyNoticeAccepted(data) && data.settings.toggles.cloud);
+  const save=()=>{
+    if(!privacyNoticeAccepted(data)||!name.trim())return;
+    update(current=>saveWelcomeChoices(current,{name,role,cloud,memory}));
+    setStep(2);
+  };
+  return <div className="stack welcome-onboarding">
+    <div className="onboarding-head" ref={heading}>{step!==1&&<img src="/brand/mascot.png" alt="Oops"/>}<Badge>第{step+1}步 / 共3步</Badge>
+      <h2>{['先了解信息怎么用','认识你，按你的选择记住','准备好了'][step]}</h2>
+      <p>{['读完说明后，由你确认是否继续设置。','称呼、角色和可选能力分别由你决定。','选一个场景体验 Oops。'][step]}</p>
+    </div>
+    {step===0?<PrivacyNoticeCard onConfirmed={()=>setStep(1)}/>:step===1?<>
+      <Field label="怎么称呼你" value={name} onChange={setName}/>
+      <Field label="我的角色" value={role} onChange={setRole}/>
+      <Toggle label="允许云端处理" value={cloud} onChange={setCloud} hint="原型设置；接入真实服务时另行说明与授权"/>
+      <Toggle label="保存确认后的长期记忆" value={memory} onChange={setMemory}/>
+      <Notice>这些选项不会开启声音身份或团队共享。记录、私人便签和外部操作仍需分别确认。</Notice>
+      <Button disabled={!name.trim()||!privacyNoticeAccepted(data)} onClick={save}>保存选择</Button>
+      <Button tone="quiet" onClick={()=>setStep(0)}>返回阅读说明</Button>
+    </>:<>
+      <Row title="开始一段记录" subtitle="先记下来，名称和项目之后再补" icon="microphone" onClick={()=>navigate({view:'session-mode'})}/>
+      <Row title="导入已有记录" subtitle="粘贴转写，或查看本地录音" icon="upload-simple" onClick={()=>navigate({view:'session-import'})}/>
+      <Row title="先问 Oops 一个问题" subtitle="仅自己可见" icon="chat-circle" onClick={()=>navigate({view:'assistant'})}/>
+      <Row title="快速设置助理偏好" subtitle="可跳过，用两句话描述你的习惯" icon="sliders-horizontal" onClick={()=>navigate({view:'settings-preferences'})}/>
+      <Button onClick={()=>navigate({view:'home'})}>去首页看看</Button>
+    </>}
+    <Button tone="quiet" onClick={()=>navigate({view:'home'})}>{step===0?'仅浏览示例，稍后设置':'稍后再设置'}</Button>
+  </div>;
+}

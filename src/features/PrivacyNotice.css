@@ -1,0 +1,8 @@
+.privacy-notice-card { display: grid; gap: 12px; }
+.privacy-notice-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.privacy-notice-heading h3 { margin: 0; }
+.privacy-notice-card p { margin: 0; line-height: 1.65; }
+.privacy-notice-card > small { color: var(--muted); overflow-wrap: anywhere; }
+.privacy-notice-card .check-row { align-items: flex-start; line-height: 1.6; }
+.privacy-notice-body { line-height: 1.75; }
+.privacy-notice-body h3 { margin-top: 20px; }
