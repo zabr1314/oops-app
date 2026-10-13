@@ -16,7 +16,6 @@ import argparse
 import base64
 import hashlib
 import hmac
-import hashlib
 import json
 import os
 import re
@@ -672,129 +671,8 @@ def main(argv=None):
     {"bundle": bundle, "serve": serve, "links": links, "merge": merge_cmd}[args.cmd](args)
 
 
-PAGE = r"""<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer"><title>Oops 讨论标注</title>
-<style>
-:root{color-scheme:light;--bg:#f7f6fb;--fg:#1d1b26;--mut:#6f6b80;--line:#e4e1ee;--card:#fff;--brand:#6d5be8;--brand-soft:#ece9ff;--ok:#16a34a;--dec:#d97706;--cur:#fff8d6}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#16151c;--fg:#f2f1f7;--mut:#a29fb3;--line:#34313f;--card:#211f2a;--brand:#8f80ff;--brand-soft:#2d2850;--cur:#3a3420}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"PingFang SC",sans-serif}
-header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 16px}
-.hrow{display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;max-width:1000px;margin:0 auto}
-h1{font-size:16px;margin:0}.mut{color:var(--mut);font-size:13px}
-.tabs{display:flex;gap:6px;flex-wrap:wrap}.tabs button,.tool{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:999px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
-.tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff}.tool.on{background:var(--brand-soft);border-color:var(--brand)}
-select.tool{padding:4px 8px}
-main{max-width:1000px;margin:0 auto;padding:8px 16px 120px}
-details.help{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 14px;margin:10px 0;font-size:14px}
-details.help summary{cursor:pointer;font-weight:600}details.help li{margin:3px 0}kbd{border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:12px;background:var(--bg)}
-.row{background:var(--card);border:1px solid var(--line);border-left:4px solid transparent;border-radius:12px;padding:8px 12px;margin:6px 0;scroll-margin:120px 0 160px}
-.row.mini{padding:2px 12px;margin:2px 0;background:none;border-color:transparent}.row.mini .txt{font-size:14px;color:var(--mut)}.row.mini .c{min-height:24px;padding:0 8px;font-size:12px;color:var(--mut)}.row.mini.cur{box-shadow:0 0 0 1px var(--line)}
-.row.done{border-left-color:var(--ok)}.row.k-task{border-left-color:var(--brand)}.row.k-decision{border-left-color:var(--dec)}.row.k-info{border-left-color:#0e9f8e}
-.row.cur{box-shadow:0 0 0 2px var(--brand)}.row.playing{background:var(--cur)}
-.top{display:flex;gap:10px;align-items:flex-start}.t{color:var(--mut);font-variant-numeric:tabular-nums;min-width:42px;font-size:12px;padding-top:4px}
-.txt{flex:1;font-size:16px;cursor:pointer}.play{border:1px solid var(--line);background:none;color:var(--fg);border-radius:8px;padding:3px 10px;cursor:pointer;font:inherit;font-size:13px;flex:none}
-.ctl{display:flex;gap:6px 12px;flex-wrap:wrap;margin-top:6px;align-items:center}
-.grp{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}.grp>span{color:var(--mut);font-size:12px;margin-right:2px}
-.c{border:1px solid var(--line);background:none;color:var(--fg);border-radius:8px;padding:3px 9px;font:inherit;font-size:13px;cursor:pointer;min-height:30px}
-.role{display:grid;gap:6px;padding:10px 0;border-top:1px solid var(--line)}.role:first-child{border-top:0}.role .clip{display:flex;gap:8px;align-items:baseline;font-size:14px}.role .clip span{color:var(--mut)}
-.c.on{background:var(--brand);border-color:var(--brand);color:#fff}.c.on.dec{background:var(--dec);border-color:var(--dec)}.c.on.vp{background:var(--brand-soft);color:var(--fg);border-style:dashed;border-color:var(--brand)}.vpnote{font-style:normal;font-size:12px;color:var(--mut);margin-left:4px}
-.c.on.neg{background:var(--mut);border-color:var(--mut)}.c.on.inf{background:#0e9f8e;border-color:#0e9f8e}
-.sep{width:1px;height:20px;background:var(--line)}
-#state.err{color:#dc2626;font-weight:600}
-.empty{padding:40px 0;text-align:center;color:var(--mut)}
-#gate{max-width:420px;margin:15vh auto;padding:0 16px;text-align:center}
-@media(max-width:640px){header{padding:6px 12px}main{padding:4px 10px 120px}h1{display:none}.t{display:none}.txt{font-size:15px}
-.row{padding:8px 10px}.ctl{gap:6px}.grp>span{display:none}.c{padding:2px 7px;min-height:32px}.hide-s{display:none}.tool{padding:3px 9px}
-.grp+.grp{padding-left:8px;border-left:1px solid var(--line)}}
-.child{padding:12px 0;border-top:1px solid var(--line)}.corrections{margin-top:10px}.corrections summary,.members{font-size:13px}.members{max-height:360px;overflow:auto}.members>div{padding:8px 0;border-top:1px solid var(--line)}button:disabled,select:disabled{opacity:.5;cursor:wait}.role{padding:16px 0}.role .clip{align-items:flex-start}.role details summary{cursor:pointer}.child .txt{font-size:14px}
-</style>
-<div id="gate" hidden><h1>请用个人链接打开</h1><p class="mut">这个页面只对团队成员开放。请使用发给你的完整链接（包含 #k= 的那一段）。</p></div>
-<div id="pick" hidden style="max-width:420px;margin:15vh auto;padding:0 16px;text-align:center"><h1>你是谁？</h1>
-<p class="mut">选一次就记住，每个人的标注分开保存。</p><div class="tabs" id="pickers" style="justify-content:center;margin-top:16px"></div></div>
-<div id="app" hidden>
-<header><div class="hrow"><h1>Oops 讨论标注</h1><div class="tabs" id="tabs"></div><span class="mut" id="me"></span><span class="mut" id="state">已保存</span></div>
-<div class="hrow" style="margin-top:6px"><span class="mut" id="prog"></span>
-<button class="tool" id="cont" title="从当前表达开始连续播放，边听边标">▶ 连续播放</button>
-<select class="tool" id="rate" title="播放速度"><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option></select>
-<select class="tool" id="filter"><option value="all">全部表达</option><option value="todo">内容待核对</option><option value="who">身份待核对</option><option value="marked">任务 / 决定</option></select><button class="tool" id="undo-content">撤销本场上一步标注</button><button class="tool" id="undo-identity">撤销上一步音色组操作</button><button class="tool" id="reload">重新读取</button><button class="tool" id="retry" hidden>重试保存</button></div></header>
-<main><details class="help" id="roles" hidden><summary id="roles-sum">认领声音</summary><p class="mut" style="margin:6px 0 0">同音色的片段放在一组。先听代表录音，查看关联范围，再确认是谁；单句纠错优先，整组可撤销。身份确认只作用于“谁说的”。</p><div id="roles-list"></div></details>
-<details class="help" id="help"><summary>怎么标</summary><ul>
-<li>先在音色组里核对身份，一次关联多句；代表录音不能保证整组都正确，可以展开范围逐句移出或纠正。</li>
-<li>连续表达合起来听、合起来标。整段按钮只改内容，不改说话人。已有单句内容纠错会保留；不同内容请展开逐句标。</li>
-<li>短句上下文可以跳过，不会自动记成无效。若“你来”“就这么定”本身有任务或决定，请展开标注。</li>
-<li>任务要核对负责人；有效包括观点、问题、方案、事实与限制；无效包括口头禅、闲聊和无意义重复。</li>
-<li>内容和身份分别统计。每次操作收到服务器回执才显示已保存；失败可重试。本场标注和音色组确认分别恢复上一操作，刷新后仍可撤销。</li>
-<li>你看不到模型内容分类，也看不到别人的逐句答案。快捷键：↑↓换表达，空格听整段，T任务、D决定、I有效、N无效。</li>
-</ul></details><div id="list"></div></main></div>
-<script>
-const PEOPLE=__PEOPLE__, DUPS="__DUPS__";
-const SHORTN={"林春源":"春源","洪玉麟":"玉麟","江古月":"古月","黄丽萍":"丽萍",other:'其他人',multi:'多人',unclear:'听不清',collective:'大家',unknown:'不确定'};
-const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const clock=ms=>{const s=Math.floor(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
-const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}},remove(k){try{localStorage.removeItem(k)}catch(e){}}};
-let KEY='', WHO=store.get('oops-label-who')||'', ME=null, M=null, U=[], L={}, E=[], DOC=null, IDENTITY=null, cur=0, audio=new Audio(), cont=false, busy=false, pending=null;
-const OPEN=new Set(), hash=new URLSearchParams(location.hash.slice(1));
-if(hash.get('k')){KEY=hash.get('k');store.set('oops-label-key',KEY);history.replaceState(null,'',location.pathname+location.search)}else KEY=store.get('oops-label-key')||'';
-const api=(p,o={})=>fetch(p.replace(/^\//,''),{...o,headers:{...(o.headers||{}),Authorization:'Bearer '+KEY,...(WHO?{'X-Labeler':encodeURIComponent(WHO)}:{})}});
-const pendingKey=()=>`oops-label-pending:${ME.name}`;
-const status=(message,error=false)=>{$('#state').textContent=message;$('#state').className=error?'err':'mut'};
-function lock(){document.querySelectorAll('#app button,#app select').forEach(b=>b.disabled=busy||!!pending);$('#retry').hidden=!pending;$('#retry').disabled=busy;$('#undo-content').disabled=busy||!!pending||!DOC?.can_undo;$('#undo-identity').disabled=busy||!!pending||!IDENTITY?.can_undo}
-async function get(path){const r=await api(path);if(!r.ok)throw new Error(r.status);return r.json()}
-function adopt(doc){DOC=doc;U=doc.rows;L=doc.labels;E=doc.expressions;cur=Math.min(cur,Math.max(0,E.length-1));renderList();lock()}
-async function mutate(url,body){if(busy||pending)return;pending={url,body:{...body,request_id:crypto.randomUUID()}};store.set(pendingKey(),JSON.stringify(pending));await submit()}
-async function submit(){if(busy||!pending)return;busy=true;lock();status('保存中…');const request=pending;
- try{const r=await api(request.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request.body)});
-  if(r.status===409){pending=null;store.remove(pendingKey());IDENTITY=await get('/api/identity');renderGroups();if(M)adopt(await get('/api/meeting/'+M));status('另一页面或来源已更新，请核对后重新操作',true);return}
-  if(!r.ok)throw new Error(r.status);const doc=await r.json();pending=null;store.remove(pendingKey());
-  if(request.url==='/api/identity'){IDENTITY=doc;renderGroups();if(M)adopt(await get('/api/meeting/'+M))}else if(request.url===`/api/meeting/${M}/review`)adopt(doc);
-  status('已保存');
- }catch(e){status(pending?'保存未确认，请重试；本次操作已留在这台设备':'操作已保存，页面刷新失败，请点重新读取',true)}finally{busy=false;lock()}}
-function expressionAction(i,field,value){cur=i;const e=E[i];mutate(`/api/meeting/${M}/review`,{action:'set',scope:'expression',expression:e.id,fingerprint:e.fingerprint,field,value,revision:DOC.revision})}
-function rowAction(id,field,value){cur=E.findIndex(e=>e.ids.includes(id));const row=U.find(u=>u.id===id);mutate(`/api/meeting/${M}/review`,{action:'set',scope:'row',id,field,value,fingerprint:row.fingerprint,revision:DOC.revision})}
-function chips(field,values,label,active,attrs){return `<span class="grp"><span>${label}</span>${values.map(v=>`<button class="c ${active===v?'on':''}" aria-pressed="${active===v}" ${attrs} data-field="${field}" data-value="${esc(v)}">${esc(SHORTN[v]||({task:'任务',decision:'决定',info:'有效',noise:'无效'}[v])||v)}</button>`).join('')}</span>`}
-function childHTML(u){const l=L[u.id]||{},batch=l.speaker_source?.mode==='voice_group';
- const note=l.speaker?`${SHORTN[l.speaker]||l.speaker} · ${batch?'音色组关联':'单句核对'}`:l.speaker_excluded?'已移出整组，待核对':u.voice?`候选：${u.voice}，未确认`:'身份待核对';
- return `<div class="child" data-row="${esc(u.id)}"><div class="top"><span class="t">${clock(u.start_ms)}</span><div class="txt">${esc(u.text)}</div><button class="play" data-row-play="${esc(u.id)}">▶</button></div><div class="mut">${esc(note)}${DOC.stale_ids?.includes(u.id)?' · 原话来源已变，旧标签待重核':''}${l.kind&&l.kind_source?.mode!=='expression'?' · 已单句纠错，整段标注会保留':''}</div>
- <div class="ctl">${chips('speaker',[...PEOPLE,'other','multi','unclear'],'谁说的',l.speaker,`data-row-id="${esc(u.id)}"`)}<button class="c" data-row-id="${esc(u.id)}" data-field="speaker" data-clear="1">移出关联 / 清空</button></div>
- <div class="ctl">${chips('kind',['task','decision','info','noise'],'内容',l.kind,`data-row-id="${esc(u.id)}"`)}<button class="c" data-row-id="${esc(u.id)}" data-field="kind" data-clear="1">清空内容</button></div>
- ${l.kind==='task'?`<div class="ctl">${chips('owner',[...PEOPLE,'collective','unknown'],'负责人',l.owner,`data-row-id="${esc(u.id)}"`)}</div>`:''}</div>`}
-function exprState(e){const labels=e.ids.map(id=>L[id]||{}),kinds=[...new Set(labels.map(l=>l.kind||''))];return {done:labels.every(l=>l.kind&&(l.kind!=='task'||l.owner)),kind:kinds.length===1?kinds[0]:'mixed',needsOwner:labels.some(l=>l.kind==='task'&&!l.owner)}}
-function visible(e){const s=exprState(e),f=$('#filter').value;return f==='all'||f==='todo'&&(!s.done&&(e.required_for_content||e.required||e.ids.some(id=>L[id]?.kind)||e.ids.some(id=>DOC.stale_ids?.includes(id))))||f==='who'&&e.ids.some(id=>!L[id]?.speaker)||f==='marked'&&e.ids.some(id=>['task','decision'].includes(L[id]?.kind))}
-function renderList(){if(!DOC)return;$('#list').innerHTML=E.map((e,i)=>{if(!visible(e))return '';const s=exprState(e),rows=e.ids.map(id=>U.find(u=>u.id===id));
- return `<section class="row ${s.done?'done':''} ${i===cur?'cur':''}" data-i="${i}" id="expr-${i}"><div class="top"><span class="t">${clock(e.start_ms)}</span><div class="txt">${esc(e.text)}</div><button class="play" data-expr-play="${i}">▶ 整段</button></div>
- <div class="mut">${e.ids.length} 个原话片段 · ${e.required?'连续表达':'短句上下文，可跳过'}${s.kind==='mixed'?' · 含不同内容标签':''}${s.needsOwner?' · 任务负责人待核对':''}</div>
- <div class="ctl">${chips('kind',['task','decision','info','noise'],'整段标注',s.kind,`data-expr="${i}"`)}</div>
- ${e.ids.some(id=>L[id]?.kind==='task')?`<div class="ctl">${chips('owner',[...PEOPLE,'collective','unknown'],'整段任务负责人','',`data-expr="${i}"`)}</div>`:''}
- ${e.ids.some(id=>['task','decision'].includes(L[id]?.kind))?`<div class="ctl"><label class="mut">同一件事 <select class="tool" data-expr="${i}" data-field="dup"><option value="">选择分组</option>${DUPS.split('').map(x=>`<option>${x}</option>`).join('')}</select></label></div>`:''}
- <details class="corrections" data-expression="${esc(e.id)}" ${OPEN.has(e.id)?'open':''}><summary>展开 ${e.ids.length} 句纠错 / 不同内容分开标</summary>${rows.map(childHTML).join('')}</details></section>`}).join('')||'<div class="empty">没有符合条件的表达</div>';
- const p=DOC.content_progress;$('#prog').textContent=`内容已核对 ${p.complete_required_expressions}/${p.required_expression_count} 段 · 短句上下文 ${p.context_expression_count} 段可跳过 · 身份另行核对`;
- const tab=document.querySelector(`#tabs button[data-m="${M}"] small`);if(tab)tab.textContent=` ${p.complete_required_expressions}/${p.required_expression_count}`;lock()}
-function setCur(i,scroll=true){if(i<0||i>=E.length)return;cur=i;renderList();if(scroll)document.getElementById('expr-'+i)?.scrollIntoView({block:'nearest'})}
-function renderGroups(){if(!IDENTITY)return;$('#roles').hidden=!IDENTITY.groups.length;const open=IDENTITY.groups.filter(g=>!g.current).length;$('#roles-sum').textContent=`按音色确认身份 · ${open} 组待核对`;
- $('#roles-list').innerHTML=IDENTITY.groups.map((g,i)=>`<div class="role" data-group-index="${i}"><b>${esc(g.title)} · ${g.count} 句 / ${new Set(g.members.map(m=>m.meeting)).size} 场</b>
- <div class="mut">${g.current?`已由你批量关联为 ${esc(SHORTN[g.approval.speaker]||g.approval.speaker)}；单句纠错优先`:g.approval?'音色组已变化，请重新核对':g.suggested_person?`已有建议：${esc(g.suggested_person)}，请听录音后确认`:'听代表录音后选择身份'}。批量关联不代表逐句听过。</div>
- ${g.clips.map(c=>`<div class="clip"><button class="play" data-group-clip="${esc(c.meeting)}/${esc(c.id)}">▶</button><span>${esc(c.meeting)}</span>${esc(c.text)}</div>`).join('')}
- <div class="ctl"><select class="tool" data-group-speaker="${i}"><option value="">选择这组是谁</option>${[...PEOPLE,'other','multi','unclear'].map(p=>`<option value="${esc(p)}">${esc(SHORTN[p]||p)}</option>`).join('')}</select><button class="c" data-confirm-group="${i}">确认关联 ${g.count} 句</button>${g.approval?`<button class="c" data-revoke-group="${i}">撤销本组确认</button>`:''}</div>
- <details><summary>查看关联范围 / 单句纠错</summary><div class="members">${g.members.map(m=>`<div><span class="mut">${esc(m.meeting)} ${clock(m.start_ms)}</span> ${esc(m.text)} <button class="c" data-jump-meeting="${esc(m.meeting)}" data-jump-row="${esc(m.id)}">纠错</button></div>`).join('')}</div></details></div>`).join('');lock()}
-async function openMeeting(mid,jump){if(busy||pending)return;busy=true;lock();stopCont();audio.pause();status('读取中…');try{const doc=await get('/api/meeting/'+mid);M=mid;store.set('oops-label-meeting',mid);document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.m===mid));adopt(doc);if(jump){$('#filter').value='all';const i=E.findIndex(e=>e.ids.includes(jump));if(i>=0){OPEN.add(E[i].id);cur=i;renderList();document.getElementById('expr-'+i)?.scrollIntoView({block:'center'})}}status('已保存')}catch(e){status('读取失败，请重试',true)}finally{busy=false;lock()}}
-function stopCont(){cont=false;$('#cont').textContent='▶ 连续播放'}
-function playClip(mid,first,last,ended){audio.pause();audio=new Audio(`clip/${mid}/${first}.wav?pad=0${last?'&through='+encodeURIComponent(last):''}&k=${encodeURIComponent(KEY)}`);audio.playbackRate=+$('#rate').value;audio.onended=ended||null;audio.play().catch(()=>{stopCont();status('音频读取失败，请重试',true)})}
-function playExpression(i){const e=E[i];playClip(M,e.ids[0],e.ids[e.ids.length-1],()=>{if(cont&&i+1<E.length){setCur(i+1);playExpression(i+1)}else stopCont()})}
-$('#list').addEventListener('toggle',e=>{if(e.target.matches('details.corrections')){const id=e.target.dataset.expression;if(e.target.open)OPEN.add(id);else OPEN.delete(id)}},true);
-$('#list').addEventListener('click',e=>{const section=e.target.closest('section.row');if(section){cur=+section.dataset.i;document.querySelectorAll('#list .row').forEach(row=>row.classList.toggle('cur',row===section))}const b=e.target.closest('button');if(!b)return;if(b.dataset.exprPlay!==undefined){cur=+b.dataset.exprPlay;stopCont();playExpression(cur);return}if(b.dataset.rowPlay){stopCont();playClip(M,b.dataset.rowPlay);return}if(b.dataset.field){if(b.dataset.rowId)rowAction(b.dataset.rowId,b.dataset.field,b.dataset.clear?null:b.dataset.value);else if(b.dataset.expr!==undefined)expressionAction(+b.dataset.expr,b.dataset.field,b.dataset.value)}});
-$('#list').addEventListener('change',e=>{if(e.target.dataset.field==='dup'&&e.target.value)expressionAction(+e.target.dataset.expr,'dup',e.target.value)});
-$('#roles-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.groupClip){stopCont();const [mid,id]=b.dataset.groupClip.split('/');playClip(mid,id);return}if(b.dataset.jumpMeeting){await openMeeting(b.dataset.jumpMeeting,b.dataset.jumpRow);return}const i=b.dataset.confirmGroup??b.dataset.revokeGroup;if(i===undefined)return;const g=IDENTITY.groups[+i],speaker=$(`[data-group-speaker="${i}"]`).value;if(b.dataset.confirmGroup!==undefined&&!speaker){status('先听代表片段，再选择这组是谁',true);return}await mutate('/api/identity',{action:b.dataset.confirmGroup!==undefined?'confirm':'revoke',group:g.id,fingerprint:g.fingerprint,speaker,revision:IDENTITY.revision})});
-$('#reload').onclick=async()=>{try{IDENTITY=await get('/api/identity');renderGroups();if(M)await openMeeting(M)}catch(e){status('读取失败，请重试',true)}};$('#undo-content').onclick=()=>mutate(`/api/meeting/${M}/review`,{action:'undo',revision:DOC.revision});$('#undo-identity').onclick=()=>mutate('/api/identity',{action:'undo',revision:IDENTITY.revision});$('#retry').onclick=submit;
-$('#filter').onchange=renderList;$('#cont').onclick=()=>{if(cont){audio.pause();stopCont()}else if(E.length){cont=true;$('#cont').textContent='❚❚ 暂停';playExpression(cur)}};$('#rate').onchange=()=>{audio.playbackRate=+$('#rate').value;store.set('oops-label-rate',$('#rate').value)};
-document.addEventListener('keydown',e=>{if(/SELECT|INPUT|TEXTAREA/.test(e.target.tagName)||e.metaKey||e.ctrlKey||e.altKey||busy||pending||!E.length)return;const k=e.key.toLowerCase();if(k==='arrowdown'||k==='arrowup'){e.preventDefault();setCur(cur+(k==='arrowdown'?1:-1))}else if(k===' '){e.preventDefault();stopCont();playExpression(cur)}else if({t:1,d:1,i:1,n:1}[k])expressionAction(cur,'kind',{t:'task',d:'decision',i:'info',n:'noise'}[k])});
-(async()=>{if(!KEY){$('#gate').hidden=false;return}try{ME=await get('/api/me');if(!ME.name){if(WHO){WHO='';store.set('oops-label-who','')}$('#pick').hidden=false;$('#pickers').innerHTML=ME.people.map(p=>`<button data-p="${esc(p)}">${esc(p)}</button>`).join('');$('#pickers').onclick=e=>{const b=e.target.closest('button');if(b){store.set('oops-label-who',b.dataset.p);location.reload()}};return}
- $('#app').hidden=false;$('#me').innerHTML=esc(ME.name)+(WHO?' <button class="tool" id="switch">换人</button>':'');$('#switch')?.addEventListener('click',()=>{if(busy||pending)return;store.remove('oops-label-who');location.reload()});$('#rate').value=store.get('oops-label-rate')||'1';
- $('#tabs').innerHTML=ME.meetings.map(m=>`<button data-m="${esc(m.id)}">${esc(m.id)}<small></small></button>`).join('');$('#tabs').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.m!==M)openMeeting(b.dataset.m)};
- IDENTITY=await get('/api/identity');renderGroups();$('#roles').open=IDENTITY.groups.some(g=>!g.current);const last=store.get('oops-label-meeting');await openMeeting(ME.meetings.some(m=>m.id===last)?last:ME.meetings[0].id);
- const saved=store.get(pendingKey());if(saved){pending=JSON.parse(saved);status('有一次保存尚未确认，请重试',true);lock()}
- }catch(e){$('#gate').hidden=false;$('#gate p').textContent='读取失败或链接已失效，请重新打开原来的完整链接。'}})();
-window.addEventListener('hashchange',()=>{if(new URLSearchParams(location.hash.slice(1)).get('k'))location.reload()});
-</script></html>"""
+with open(os.path.join(os.path.dirname(__file__), 'team_label_ui.html'), encoding='utf-8') as _ui_source:
+    PAGE = _ui_source.read()
 
 
 if __name__ == "__main__":
