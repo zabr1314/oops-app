@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
   <title>Oops</title>
-  <!-- proto.css is the design prototype's own stylesheet, used unchanged; app.css only adds what the prototype lacks. -->
+  <!-- proto.css is the design prototype's own stylesheet, used unchanged; app.css only adds what the prototype lacks.
+       oops-design.css is the Oops design language layer (tokens, components, motion); it restyles, never changes behaviour. -->
+  <meta name="theme-color" content="#f2efff">
+  <link rel="preload" href="fonts/nunito-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="proto.css">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="oops-design.css">
 </head>
 <body>
   <div class="oops-root" id="root" data-route="home">
@@ -32,6 +36,7 @@
   <script src="bridge-mock.js"></script>
   <script src="draft-state.js"></script>
   <script src="device-listening-demo.js"></script>
+  <script src="pupu.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -10,6 +10,9 @@
   const params = new URLSearchParams(location.search);
   const deviceDemo = window.OopsDeviceListeningDemo;
   let deviceState = deviceDemo?.create();
+  // The live transcript nodes live in index.html and move between pages. Keep handles to them: a page re-render
+  // detaches them from the document, after which getElementById can no longer find them.
+  const LINES = $('lines'), PARTIAL = $('partial'), HOLDER = $('holder');
 
   const ASR_TEXT = {
     off: ['识别未连接', ''],
@@ -72,6 +75,16 @@
   };
   const manualLabel = (v) => MANUAL_OTHER[v] || speakerLabel(v);
   const initial = (name) => (name ? [...String(name)][0] : '?');
+  // Avatars: "说话人 B" shows B rather than 说; the user is always colour 1, everyone else keeps a stable colour 2–6.
+  const avatarText = (name) => /^说话人 ([A-Z])$/.exec(name || '')?.[1] || initial(name);
+  function speakerTone(key) {
+    if (key == null || key === '' || MANUAL_OTHER[key]) return '';
+    if (S.state.selfName && key === S.state.selfName) return 'spk-1';
+    let h = 0;
+    for (const c of String(key)) h = (h * 31 + c.codePointAt(0)) >>> 0;
+    return `spk-${(/^\d+$/.test(String(key)) ? Number(key) : h) % 5 + 2}`;
+  }
+  const levelMeter = (id) => `<span class="level-meter is-idle" id="${id}" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>`;
   const formatDate = (iso) => {
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -80,7 +93,11 @@
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
-  const icon = (name, size = 22) => `<img class="icon" alt="" width="${size}" height="${size}" draggable="false" src="icons/${name}.svg">`;
+  // Icons are drawn as a mask over the text colour (oops-design.css), so they follow selected, disabled and danger states.
+  const icon = (name, size = 22) => `<span class="icon" aria-hidden="true" style="--icon:url(icons/${name}.svg);--icon-size:${size}px"></span>`;
+  // Pupu (pupu.js) appears only at emotional moments: empty, not found, done, waiting. Plain icon if the script is missing.
+  const pupu = (mood, fallback, opts) => window.OopsPupu ? window.OopsPupu.svg(mood, opts) : icon(fallback, 28);
+  const emptyArt = (mood, fallback, opts) => `<span class="empty-art">${pupu(mood, fallback, opts)}</span>`;
   const meetingName = (m) => m.title || m.display_title || m.goal || '会议';
   const reviewPending = (i) => Object.values(i.review_pending || {}).reduce((a, b) => a + b, 0);
   // Meetings over an hour read 1:23:04, shorter ones 18:24, as in the prototype.
@@ -95,6 +112,8 @@
     const t = $('toast');
     t.textContent = message;
     t.classList.toggle('bad', bad);
+    t.hidden = true;
+    void t.offsetWidth; // a new message pops in again even if the last one is still showing
     t.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
@@ -187,12 +206,12 @@
       case 'voiceprint.open': openSheet({ kind: 'voiceprint' }); break;
       case 'insets': if (params.get('frame') !== 'ios') applyInsets(p); break;
       case 'asr.partial':
-        $('partial').textContent = p.text ? `… ${p.text}` : '';
+        PARTIAL.textContent = p.text ? `… ${p.text}` : '';
         scrollToEnd();
         break;
       case 'asr.final':
-        $('partial').textContent = '';
-        addLine(p);
+        PARTIAL.textContent = '';
+        if (!S.lines.has(p.id)) { addLine(p); markNew(S.lines.get(p.id)); }
         renderLiveRecent();
         break;
       case 'asr.speaker': setLineSpeaker(p.id, p.speaker, p.segments, p.score, p.speakerState, p.speakerPreview, p.candidates, p.trialSegments); break;
@@ -294,12 +313,12 @@
 
   function resetTranscript() {
     S.liveProject = null;
-    $('lines').innerHTML = '';
+    LINES.innerHTML = '';
     S.lines.clear();
     S.records.clear();
-    S.commitments = []; S.summary = {}; S.board = null; S.notices.clear(); S.activeNotices = []; renderNoticeBanners();
+    S.commitments = []; S.summary = {}; S.board = null; S.notices.clear(); S.activeNotices = []; S.noticesShown = new Set(); renderNoticeBanners();
     S.ownerEdits.clear();
-    $('partial').textContent = '';
+    PARTIAL.textContent = '';
     S.pruned = false;
     S.autoScroll = true;
   }
@@ -326,6 +345,13 @@
     set('home-record-time', mmss(s.sessionMs));
     set('home-record-status', s.sourceReady ? '正在记录' : '等待收音');
     set('home-record-people', homePeopleSummary());
+    // Input level from native (0–1, twice a second) drives the meters; flat while nothing is coming in.
+    const level = Math.max(0, Math.min(1, Number(s.level) || 0)).toFixed(2), idle = !s.capturing || !s.sourceReady;
+    for (const id of ['home-level', 'rc-level']) {
+      const el = $(id);
+      if (el) { el.style.setProperty('--level', level); el.classList.toggle('is-idle', idle); }
+    }
+    document.querySelectorAll('.pupu-listening').forEach((el) => el.style.setProperty('--level', idle ? '0' : level));
     const warn = $('live-warn');
     if (warn) { const w = warnings(); warn.hidden = !w.length; warn.textContent = w.join('；'); }
     if (S.route.name === 'settings') set('diag', diagText());
@@ -378,7 +404,7 @@
     card.className = 'card clickable session-transcript live-line';
     card.dataset.id = u.id;
     card.dataset.start = u.startMs;
-    const list = $('lines');
+    const list = LINES;
     // Keep time order: finals may interleave after an ASR reconnect.
     const next = [...list.children].find((el) => Number(el.dataset.start) > u.startMs) || null;
     list.insertBefore(card, next);
@@ -436,7 +462,7 @@
       }).join('');
     } else body = esc(u.display || u.text);
     const tag = TAG_LABELS[u.tag] && !['chitchat', 'uncertain'].includes(u.tag) ? ` <span class="badge ${u.tag === 'decision' ? 'green' : u.tag === 'commitment' ? 'purple' : 'gray'}">${TAG_LABELS[u.tag]}</span>` : '';
-    return `<div class="session-speaker"><span class="avatar">${esc(name ? initial(name) : '?')}</span><strong class="${u.manualSpeaker ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(who)}</strong><span>${hms(u.startMs)}</span></div>
+    return `<div class="session-speaker"><span class="avatar ${name ? speakerTone(u.manualSpeaker || u.speaker) : ''}">${esc(name ? avatarText(name) : '?')}</span><strong class="${u.manualSpeaker ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(who)}</strong><span>${hms(u.startMs)}</span></div>
       <p>${body}${tag}</p>`;
   }
   function renderLine(id) {
@@ -473,12 +499,22 @@
     const b = $('rc-recall');
     if (b) b.classList.toggle('busy', busy);
   }
+  /** A sentence that was just heard slides up once (oops-design.css .is-new). The class is taken off again so that
+      moving the transcript between pages does not replay it. */
+  function markNew(el) {
+    if (!el) return;
+    el.classList.add('is-new');
+    setTimeout(() => el.classList.remove('is-new'), 600);
+  }
   /** The live overview shows the last few sentences; it is redrawn as they arrive. */
   function renderLiveRecent() {
     const box = $('live-recent');
     if (!box || S.route.name !== 'live' || S.liveTab !== 'live') return;
     const recent = [...S.records.values()].filter((u) => !u.filler).sort((a, b) => a.startMs - b.startMs).slice(-3);
-    box.innerHTML = recent.map((u) => `<div><button class="card clickable session-transcript" data-act="line-speaker" data-id="${esc(u.id)}">${lineHtml(u)}</button></div>`).join('') ||
+    const lastId = recent.length ? recent[recent.length - 1].id : null;
+    const fresh = lastId !== null && S.recentLast !== undefined && lastId !== S.recentLast;
+    S.recentLast = lastId;
+    box.innerHTML = recent.map((u) => `<div><button class="card clickable session-transcript${fresh && u.id === lastId ? ' is-new' : ''}" data-act="line-speaker" data-id="${esc(u.id)}">${lineHtml(u)}</button></div>`).join('') ||
       `<p class="meta">${S.state.capturing ? '开始说话后，原话会出现在这里。' : '开始收音后，最近 5 分钟的对话会出现在这里；事后点「找回刚才」就能找回原话。'}</p>`;
   }
 
@@ -489,10 +525,23 @@
 
   function go(name, extra = {}) {
     if (S.sheet && S.sheet.kind !== 'pending') closeSheet();
+    const from = S.route.name;
     S.route = { name, ...extra };
     enter();
     render();
     $('scroll').scrollTop = 0;
+    if (from !== name || Object.keys(extra).length) playEnter(NAV_OF[from] !== NAV_OF[name]);
+  }
+  /** A page or tab change rises in once; a new main tab also pops (oops-design.css). render() keeps the classes while they play. */
+  let enterTimer = null;
+  function playEnter(navChanged) {
+    const root = $('root');
+    clearTimeout(enterTimer);
+    root.classList.remove('route-enter', 'nav-enter');
+    void root.offsetWidth; // restart the animation when pages change quickly
+    S.enterClasses = navChanged ? 'route-enter nav-enter' : 'route-enter';
+    root.classList.add(...S.enterClasses.split(' '));
+    enterTimer = setTimeout(() => { S.enterClasses = ''; root.classList.remove('route-enter', 'nav-enter'); }, 420);
   }
   /** What a page needs from native or the server each time it is opened. */
   function enter() {
@@ -509,7 +558,7 @@
     const root = $('root');
     const tabs = ['live', 'meeting'].includes(r);
     root.dataset.route = r;
-    root.className = `oops-root ${r === 'home' ? 'is-home' : ''} ${tabs ? 'has-session-tabs' : ''} ${S.state.capturing ? 'has-recording-controls' : ''}`;
+    root.className = `oops-root ${r === 'home' ? 'is-home' : ''} ${tabs ? 'has-session-tabs' : ''} ${S.state.capturing ? 'has-recording-controls' : ''} ${S.enterClasses || ''}`;
     $('hdr').className = `app-header ${r === 'home' ? 'home-header' : ''}`;
     $('hdr').innerHTML = headerHtml(r);
     $('tabs').hidden = !tabs;
@@ -528,9 +577,9 @@
 
   function mountTranscript() {
     const slot = $('slot-lines');
-    if (!slot) { $('holder').appendChild($('lines')); $('holder').appendChild($('partial')); return; }
-    slot.appendChild($('lines'));
-    slot.appendChild($('partial'));
+    if (!slot) { HOLDER.appendChild(LINES); HOLDER.appendChild(PARTIAL); return; }
+    slot.appendChild(LINES);
+    slot.appendChild(PARTIAL);
     S.records.forEach((_, id) => renderLine(id));
     scrollToEnd();
   }
@@ -559,16 +608,36 @@
 
   function renderNav() {
     const current = NAV_OF[S.route.name];
-    $('nav').innerHTML = NAV.map(([k, label, ic]) => `<button aria-label="${label}" class="${k === current ? 'selected' : ''}" ${k === current ? 'aria-current="page"' : ''} data-act="go" data-route="${k}">${icon(ic, 25)}<span>${label}</span>${k === 'tasks' && S.openTaskCount ? `<b>${S.openTaskCount}</b>` : ''}</button>`).join('');
+    const html = NAV.map(([k, label, ic]) => `<button aria-label="${label}" class="${k === current ? 'selected' : ''}" ${k === current ? 'aria-current="page"' : ''} data-act="go" data-route="${k}">${icon(ic, 25)}<span>${label}</span>${k === 'tasks' && S.openTaskCount ? `<b>${S.openTaskCount}</b>` : ''}</button>`).join('');
+    // Only redraw when something changed, so the selected tab's pop (oops-design.css) is not restarted by data arriving.
+    if (S.navHtml !== html) { $('nav').innerHTML = html; S.navHtml = html; }
   }
 
+  // The live scene keeps the full controls. Every other page gets a compact bar where "找回刚才" and "结束" stay one tap
+  // away and the rest can be expanded. The expanded state belongs to one page and tab, so it never carries over.
+  const rcContext = () => JSON.stringify([S.state.sessionId, S.route.name, S.route.id ?? S.route.name_ ?? '', S.route.name === 'live' ? S.liveTab : S.route.name === 'meeting' ? S.meetingTab : '']);
   function renderRecordingControls() {
     const rc = $('rc');
     rc.hidden = !S.state.capturing;
-    if (!S.state.capturing) { rc.innerHTML = ''; return; }
+    if (!S.state.capturing) { rc.innerHTML = ''; S.rcExpanded = null; $('root').classList.remove('rc-compact'); return; }
+    const onsite = S.route.name === 'live' && S.liveTab === 'live', key = rcContext();
+    if (S.rcExpanded !== key) S.rcExpanded = null;
+    const expanded = onsite || !!S.rcExpanded;
+    rc.classList.toggle('is-compact', !expanded);
+    $('root').classList.toggle('rc-compact', !expanded);
+    const status = `<span><span id="rc-status">${S.state.sourceReady ? '收音中' : '等待收音'}</span> · <time id="rc-time">${mmss(S.state.sessionMs)}</time>${levelMeter('rc-level')}</span>`;
+    const toggle = onsite ? '' : `<button class="rc-expand" data-act="rc-expand" aria-expanded="${expanded}" aria-label="${expanded ? '收起记录控制' : '展开记录控制'}">${icon(expanded ? 'caret-down' : 'caret-up', 16)}</button>`;
+    if (!expanded) {
+      rc.innerHTML = `<div class="rc-heading"><span class="rc-dot ${S.state.sourceReady ? '' : 'paused'}"></span>
+          <button class="rc-session" data-act="go" data-route="live" aria-label="回到记录现场"><strong>${esc(liveTitle())}</strong>${status}</button>
+          <div class="rc-compact-actions">
+            <button id="rc-recall" data-act="recall" aria-label="找回刚才">${icon('clock-counter-clockwise', 19)}</button>
+            <button class="rc-end" data-act="capture-stop" aria-label="结束当前记录">${icon('stop', 18)}</button></div>${toggle}</div>`;
+      return;
+    }
     rc.innerHTML = `<div class="rc-heading"><span class="rc-dot ${S.state.sourceReady ? '' : 'paused'}"></span>
-        <div class="rc-session"><strong>${esc(liveTitle())}</strong><span><span id="rc-status">${S.state.sourceReady ? '收音中' : '等待收音'}</span> · <time id="rc-time">${mmss(S.state.sessionMs)}</time></span></div>
-        ${S.route.name === 'live' && S.liveTab === 'live' ? '' : `<button class="rc-scene" data-act="go" data-route="live">现场${icon('caret-right', 13)}</button>`}</div>
+        <div class="rc-session"><strong>${esc(liveTitle())}</strong>${status}</div>
+        ${onsite ? '' : `<button class="rc-scene" data-act="go" data-route="live">现场${icon('caret-right', 13)}</button>`}${toggle}</div>
       <div class="rc-actions">
         <button id="rc-recall" data-act="recall">${icon('clock-counter-clockwise', 19)}<span>找回刚才</span></button>
         <button data-act="saved-list">${icon('bookmark-simple', 19)}<span id="rc-saved">已保存 ${S.state.savedCount ?? 0}</span></button>
@@ -577,13 +646,17 @@
 
   const recordingModeLabel = () => S.state.recordingMode === 'meeting' ? '正式会议' : '日常临时聆听';
 
+  function liveStartedAt() {
+    if (!S.state.sessionId) return null;
+    // Native reports elapsed session time, not the clock time it began; good to the minute.
+    S.liveStartedAt = S.liveStartedAt?.id === S.state.sessionId ? S.liveStartedAt : { id: S.state.sessionId, at: new Date(Date.now() - (S.state.sessionMs || 0)) };
+    return S.liveStartedAt.at;
+  }
   function liveTitle() {
     const a = S.state.agenda || {};
     if (a.goal) return a.goal;
-    if (!S.state.sessionId) return recordingModeLabel();
-    // Native reports elapsed session time, not the clock time it began; good to the minute.
-    S.liveStartedAt = S.liveStartedAt?.id === S.state.sessionId ? S.liveStartedAt : { id: S.state.sessionId, at: new Date(Date.now() - (S.state.sessionMs || 0)) };
-    return `${recordingModeLabel()} · ${shortDate(S.liveStartedAt.at.toISOString())}`;
+    const at = liveStartedAt();
+    return at ? `${recordingModeLabel()} · ${shortDate(at.toISOString())}` : recordingModeLabel();
   }
 
   // ---- 首页 ---------------------------------------------------------------------------------
@@ -592,6 +665,13 @@
     `<button class="list-row ${cls}" data-act="${act}" ${data}><span class="row-icon">${icon(ic)}</span><span class="row-copy"><strong>${esc(title)}</strong>${sub ? `<small>${esc(sub)}</small>` : ''}</span>${badge}${chevron ? icon('caret-right', 18) : ''}</button>`;
   const sectionTitle = (title, action = '', act = '', data = '') =>
     `<div class="section-title"><h2>${title}</h2>${action ? `<button class="text-action" data-act="${act}" ${data}>${esc(action)}${icon('caret-right', 14)}</button>` : ''}</div>`;
+
+  /** The hero's Pupu shows only what is visibly true: it listens (sound waves moving) while this capture is taking in
+      sound, holds still while waiting for the source, and is the official artwork otherwise. Never proof that a model ran. */
+  function heroMascot() {
+    if (S.state.capturing && window.OopsPupu) return window.OopsPupu.svg('listening', { still: !S.state.sourceReady, label: 'Oops伙伴' });
+    return '<img class="hero-mascot" alt="Oops伙伴" src="brand/mascot.png" draggable="false">';
+  }
 
   function homeHtml() {
     const now = new Date();
@@ -605,9 +685,9 @@
       <div class="home-date">${now.getMonth() + 1}/${now.getDate()}星期${week}</div>
       <p class="home-positioning">记住对话里的重点，陪你把下一步做好。</p>
       <section class="native-record-hero ${S.state.capturing ? 'is-active' : ''}" aria-label="记录状态">
-        <div class="native-record-heading"><div><small>${S.state.capturing ? '本场记录' : '从这一刻开始'}</small>
-          <h1>${S.state.capturing ? esc(liveTitle()) : '重要的话，<br>交给 Oops 记住。'}</h1></div><img alt="Oops伙伴" src="brand/mascot.png"></div>
-        ${S.state.capturing ? `<div class="native-record-status"><span class="recording-dot ${S.state.sourceReady ? '' : 'idle'}"></span><strong id="home-record-status">${S.state.sourceReady ? '正在记录' : '等待收音'}</strong><time id="home-record-time">${mmss(S.state.sessionMs)}</time></div>
+        <div class="native-record-heading"><div><small>${S.state.capturing ? `本场记录${liveStartedAt() ? ` · ${shortDate(liveStartedAt().toISOString())} 开始` : ''}` : '从这一刻开始'}</small>
+          <h1>${S.state.capturing ? esc(S.state.agenda?.goal || recordingModeLabel()) : '重要的话，<br>交给 Oops 记住。'}</h1></div>${heroMascot()}</div>
+        ${S.state.capturing ? `<div class="native-record-status"><span class="recording-dot ${S.state.sourceReady ? '' : 'idle'}"></span><strong id="home-record-status">${S.state.sourceReady ? '正在记录' : '等待收音'}</strong>${levelMeter('home-level')}<time id="home-record-time">${mmss(S.state.sessionMs)}</time></div>
           <p class="meta" id="home-record-people">${homePeopleSummary()}</p>
           <button class="button primary" type="button" data-act="go" data-route="live">${icon('waveform')}<span>回到记录现场</span></button>`
           : `<button class="button primary" type="button" data-act="capture-start">${icon('microphone')}<span>开始记录</span></button>`}
@@ -677,7 +757,7 @@
       ${all == null ? S.requests.history.error ? '' : spinnerHtml('正在读取会议…', '团队服务器') : `
         ${pending.length ? `<section class="session-list-group">${sectionTitle('待核对')}${pending.map(sessionCard).join('')}</section>` : ''}
         ${done.length ? `<section class="session-list-group">${sectionTitle('已完成')}${done.map(sessionCard).join('')}</section>` : ''}
-        ${!items.length ? `<div class="empty-state"><span>${icon('chat-circle-text', 28)}</span><strong>${q ? '没有找到' : '还没有会议'}</strong><p>${q ? '换个名称或项目再试试。' : '明确选择云端保存的正式会议会出现在这里；日常临时聆听不归档整场。'}</p></div>` : ''}`}
+        ${!items.length ? `<div class="empty-state">${emptyArt(q ? 'thinking' : 'sleepy', 'chat-circle-text')}<strong>${q ? '没有找到' : '还没有会议'}</strong><p>${q ? '换个名称或项目再试试。' : '明确选择云端保存的正式会议会出现在这里；日常临时聆听不归档整场。'}</p></div>` : ''}`}
       <p class="meta">新正式会议经本次确认后云端保存，原音与全文分别保留所选7、30或90天；已确认摘要、任务和短依据单独保留。历史会议沿用原保存规则。</p>
     </div>`;
   }
@@ -744,7 +824,7 @@
       ${names.length ? speakerChips(names, S.transcriptFilter.speaker) : ''}
       <p class="meta">点一句可以改说话人。${S.pruned ? (S.state.recordingMode === 'meeting' ? '更早的字幕已移出列表，已存会议按选择期限保留。' : '超过5分钟的原音和临时全文已清除；私人候选仅保留必要短依据。') : '最近 5 分钟的原声可以在「找回刚才」里回听。'}</p>
       <div class="stack" id="slot-lines"></div>
-      ${!S.records.size ? `<div class="empty-state"><span>${icon('waveform', 28)}</span><strong>还没有原话</strong><p>${S.state.capturing ? '开始说话后，转写会一句句出现在这里。' : '开始收音后，最近 5 分钟的对话会出现在这里。'}</p></div>` : ''}
+      ${!S.records.size ? `<div class="empty-state">${S.state.capturing ? emptyArt('listening', 'waveform', { still: !S.state.sourceReady }) : emptyArt('sleepy', 'waveform')}<strong>还没有原话</strong><p>${S.state.capturing ? '开始说话后，转写会一句句出现在这里。' : '开始收音后，最近 5 分钟的对话会出现在这里。'}</p></div>` : ''}
       ${S.state.capturing ? '<button class="button quiet" type="button" data-act="capture-stop"><span>结束当前记录</span></button>' : ''}
     </div>`;
   }
@@ -827,7 +907,7 @@
       ${open.length ? (board ? `<details class="session-list-group"><summary class="meta">逐句识别的原始建议 ${open.length} 条</summary>${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</details>`
         : `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>`) : ''}
       ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
-      ${!rows.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>还没有识别到待办</strong><p>有人说"我来做""你周五前给我"这类话时，会出现在这里。</p></div>` : ''}
+      ${!rows.length ? `<div class="empty-state">${emptyArt('sleepy', 'check-square')}<strong>还没有识别到待办</strong><p>有人说"我来做""你周五前给我"这类话时，会出现在这里。</p></div>` : ''}
       <button class="button primary" type="button" data-act="recall">${icon('clock-counter-clockwise')}<span>从刚才的话整理行动</span></button>
       <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button>
     </div>`;
@@ -896,7 +976,7 @@
         const manual = u.review?.speaker;
         const name = manual ? manualLabel(manual) : speakerLabel(u.speaker);
         return `<div><div class="card clickable session-transcript" data-act="history-speaker" data-id="${esc(u.id)}">
-          <div class="session-speaker"><span class="avatar">${esc(name ? initial(name) : '?')}</span><strong class="${manual ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(name ? (manual ? `${name} · 已改` : name) : '未识别')}</strong>
+          <div class="session-speaker"><span class="avatar ${name ? speakerTone(manual || u.speaker) : ''}">${esc(name ? avatarText(name) : '?')}</span><strong class="${manual ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(name ? (manual ? `${name} · 已改` : name) : '未识别')}</strong>
             <span>${hms(u.start_ms)}</span><button class="play-mini" data-act="history-play" data-id="${esc(u.id)}" data-key="h-${esc(u.id)}" aria-label="回听原声">${icon('play', 16)}</button></div>
           <p>${esc(u.text)}${TAG_LABELS[u.tag] && !['chitchat', 'uncertain'].includes(u.tag) ? ` <span class="badge ${u.tag === 'decision' ? 'green' : u.tag === 'commitment' ? 'purple' : 'gray'}">${TAG_LABELS[u.tag]}</span>` : ''}</p></div></div>`;
       }).join('') || `<div class="empty-state"><strong>${q || S.transcriptFilter.speaker ? '没有符合条件的原话' : '这场会议没有文字'}</strong></div>`}
@@ -911,7 +991,7 @@
       ${listRow({ act: 'review-start', data: `data-id="${esc(h.session_id)}"`, ic: 'sparkle', title: '识别到的任务建议', sub: '会后核对：是否是待办、谁负责' })}
       ${open.length ? `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'history-quote')).join('')}</section>` : ''}
       ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'history-quote')).join('')}</section>` : ''}
-      ${!todos.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>这场会议没有识别到待办</strong></div>` : ''}
+      ${!todos.length ? `<div class="empty-state">${emptyArt('sleepy', 'check-square')}<strong>这场会议没有识别到待办</strong></div>` : ''}
       <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button>
     </div>`;
   }
@@ -996,7 +1076,7 @@
       ${needSelf ? `<section class="card"><h3>先选你是谁</h3><p class="meta">选好后，这里只列你负责的任务。</p><div class="inline-actions">${S.team.map((n) => `<button class="chip" data-act="tasks-self" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div></section>`
         : `${requestNotice(S.requests.tasks, 'tasks-retry', !!t.items)}${t.items == null ? S.requests.tasks.error ? '' : spinnerHtml('正在读取飞书任务…', '状态最多缓存 5 分钟')
         : `${group('需要跟进', overdue)}${group('进行中', open)}${group('已完成', done)}${group('飞书里已删除', gone)}
-          ${!items.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>没有符合条件的任务</strong><p>会议里确认的待办建成飞书任务后会出现在这里。</p></div>` : ''}`}
+          ${!items.length ? `<div class="empty-state">${emptyArt('sleepy', 'check-square')}<strong>没有符合条件的任务</strong><p>会议里确认的待办建成飞书任务后会出现在这里。</p></div>` : ''}`}
         `}
     </div>`;
   }
@@ -1026,7 +1106,7 @@
       ${items == null ? S.requests.projects.error ? '' : spinnerHtml('正在读取项目…', '团队服务器') : items.map((p) => `<button class="card clickable" data-act="project-open" data-name="${esc(p.name)}">
         <div class="ms-card-heading"><span class="badge purple">项目</span>${icon('folder-simple', 18)}</div><h3>${esc(p.name)}</h3>
         <p class="ms-preview">${p.meeting_count} 场会议 · 已确认决定 ${p.confirmed_decisions}</p><p class="meta">最近 ${formatDate(p.last_started_at)}</p></button>`).join('')
-        || `<div class="empty-state"><span>${icon('folder-simple', 28)}</span><strong>还没有项目</strong><p>打开一场会议，点「所属项目」新建或选择项目。</p></div>`}
+        || `<div class="empty-state">${emptyArt('sleepy', 'folder-simple')}<strong>还没有项目</strong><p>打开一场会议，点「所属项目」新建或选择项目。</p></div>`}
     </div>`;
   }
 
@@ -1040,7 +1120,7 @@
       ? `${p.unreviewed_decisions ? `<p class="meta">另有 ${p.unreviewed_decisions} 条决定还没会后核对。核对确认后会出现在这里，并用于开会时的冲突提醒。</p>` : ''}
         ${p.decisions.map((d) => `<button class="card clickable" data-act="meeting-open" data-id="${esc(d.session_id)}"><div class="ms-card-heading"><span class="badge ${d.tag === 'constraint' ? 'gray' : 'green'}">${d.tag === 'constraint' ? '约束' : '决定'}</span></div>
           <h3>${esc(d.text)}</h3><p class="meta">${formatDate(d.started_at)} ·《${esc(d.meeting_title || '会议')}》${d.speaker ? ` · ${esc(manualLabel(d.speaker))}` : ''}</p></button>`).join('')
-          || `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>还没有确认过的决定</strong><p>在会后核对里点「是决定」。</p></div>`}`
+          || `<div class="empty-state">${emptyArt('sleepy', 'check-circle')}<strong>还没有确认过的决定</strong><p>在会后核对里点「是决定」。</p></div>`}`
       : sec === 'tasks' ? (p.tasks.map(taskCard).join('') || `<div class="empty-state"><strong>这个项目的会议还没有建过飞书任务</strong></div>`)
       : p.meetings.map(sessionCard).join('');
     return `<div class="stack memory-settings"><div class="section-title"><div><h1 class="title">${esc(p.name)}</h1><p class="meta">${p.meetings.length} 场会议 · 已确认决定 ${p.decisions.length}</p></div></div>${requestNotice(S.requests.project, 'project-retry', true)}${seg}${body}</div>`;
@@ -1226,7 +1306,7 @@
   const frame = (title, body, desc = '') => `<div class="sheet-handle-zone" data-act="close"><div class="sheet-handle"></div></div>
     <div class="sheet-header"><h2 class="sheet-title">${title}</h2>${desc ? `<p class="sheet-description">${desc}</p>` : ''}</div>
     <div class="sheet-content"><div class="sheet-content">${body}</div></div>`;
-  const spinnerHtml = (title, sub) => `<div class="empty-state oops-loading"><div class="oops-spinner"></div><strong>${esc(title)}</strong><p>${esc(sub)}</p></div>`;
+  const spinnerHtml = (title, sub) => `<div class="empty-state oops-loading" role="status">${window.OopsPupu ? emptyArt('thinking') : '<div class="oops-spinner"></div>'}<strong>${esc(title)}</strong><p>${esc(sub)}</p></div>`;
   function requestNotice(request, act, hasData) {
     if (request?.error) return `<section class="card service-error" role="status"><h3>${hasData ? '刷新未成功' : '暂时无法读取'}</h3><p>${esc(request.error)}</p>${hasData ? '<p class="meta">下方保留上次读取的内容，可能不是最新。</p>' : ''}<button class="button secondary" type="button" data-act="${act}"><span>重新读取</span></button></section>`;
     return request?.loading && hasData ? '<p class="meta" role="status">正在刷新，先显示上次读取的内容…</p>' : '';
@@ -1295,7 +1375,7 @@
   }
 
   function notFoundHtml() {
-    return frame('没找到', `<div class="empty-state"><span>${icon('magnifying-glass', 28)}</span><strong>没找到</strong><p>${esc(S.sheet.reason)}</p></div>
+    return frame('没找到', `<div class="empty-state">${emptyArt('oops', 'magnifying-glass')}<strong>没找到</strong><p>${esc(S.sheet.reason)}</p></div>
       <div class="action-grid"><button class="button secondary" type="button" data-act="close"><span>知道了</span></button>
         <button class="button primary" type="button" data-act="retry-recall"><span>再试一次</span></button></div>`);
   }
@@ -1502,7 +1582,7 @@
   function resultHtml() {
     const d = S.draft.data;
     const r = S.draft.result;
-    return frame(r.mock ? 'Mock 任务已生成' : '已创建飞书任务', `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>${esc(d.what)}</strong>
+    return frame(r.mock ? 'Mock 任务已生成' : '已创建飞书任务', `<div class="empty-state">${emptyArt('happy', 'check-circle')}<strong>${esc(d.what)}</strong>
         <p>${esc(d.who)} · ${esc(d.whenIso || '未设截止时间')}</p>${r.message ? `<p>${esc(r.message)}</p>` : ''}</div>
       <button class="button primary" type="button" data-act="open-task" ${r.taskUrl && !r.mock ? '' : 'disabled'}><span>在飞书中打开</span></button>
       <button class="button quiet" type="button" data-act="close"><span>完成</span></button>
@@ -1569,7 +1649,7 @@
     return frame('已保存 · 长期记忆', items.length
       ? items.map((it) => `<section class="card"><p class="recall-quote">${esc((it.utterances || []).map((u) => u.text).join(' '))}</p>
           <p class="meta">${esc(formatDate(it.saved_at))} · ${it.audio_expired ? '原声已过期' : '含原声'}</p></section>`).join('')
-      : `<div class="empty-state"><span>${icon('bookmark-simple', 28)}</span><strong>还没有保存的片段</strong><p>找回原话后点「保存」才会留在这里。</p></div>`);
+      : `<div class="empty-state">${emptyArt('sleepy', 'bookmark-simple')}<strong>还没有保存的片段</strong><p>找回原话后点「保存」才会留在这里。</p></div>`);
   }
   function askHtml() {
     return frame('问已有记录', `<label class="form-field"><span>范围</span><select id="ask-scope"><option value="session">本场</option><option value="history" ${S.sheet.history ? 'selected' : ''}>往期会议</option></select></label>
@@ -1611,13 +1691,17 @@
       <button class="chip" data-act="notice-dismiss" data-id="${esc(n.id)}" aria-label="关闭提醒">收起</button></div>`;
   }
   function renderNoticeBanners() {
-    $('notices').innerHTML = S.activeNotices.map((id) => S.notices.get(id)).filter((n) => n && !n.dismissed).map((n) =>
-      `<section class="card notice-banner"><span class="badge amber">${esc(n.kind === 'conflict' ? '可能冲突' : '会议提醒')}</span><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p>${noticeButtons(n)}</section>`).join('');
+    // Banners are redrawn whenever state arrives; only a notice shown for the first time drops in (oops-design.css).
+    const shown = S.noticesShown || (S.noticesShown = new Set());
+    const banners = S.activeNotices.map((id) => S.notices.get(id)).filter((n) => n && !n.dismissed);
+    $('notices').innerHTML = banners.map((n) =>
+      `<section class="card notice-banner${shown.has(n.id) ? '' : ' is-new'}"><span class="badge amber">${esc(n.kind === 'conflict' ? '可能冲突' : '会议提醒')}</span><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p>${noticeButtons(n)}</section>`).join('');
+    banners.forEach((n) => shown.add(n.id));
   }
   function noticeRecordsHtml(rows, readonly = false) {
     return rows.length ? rows.map((n) => `<section class="card"><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p>
       <p class="meta">${clock(n.atMs ?? n.at_ms)}${n.useful === false ? ' · 已反馈不准' : n.useful === true ? ' · 已反馈有用' : ''}${n.dismissed ? ' · 已收起' : ''}</p>${readonly ? '' : noticeButtons(n)}</section>`).join('')
-      : `<div class="empty-state"><span>${icon('bell', 28)}</span><strong>暂无提醒</strong><p>议程超时、跑题、和之前的决定冲突时会提醒。</p></div>`;
+      : `<div class="empty-state">${emptyArt('sleepy', 'bell')}<strong>暂无提醒</strong><p>议程超时、跑题、和之前的决定冲突时会提醒。</p></div>`;
   }
 
   // ---- past meetings ------------------------------------------------------------------------
@@ -1794,7 +1878,7 @@
   function reviewHtml() {
     const r = S.review, row = S.history;
     if (r.i >= r.items.length) {
-      return frame('会后核对', `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>${r.items.length ? '核对完了' : '没有需要核对的内容'}</strong>
+      return frame('会后核对', `<div class="empty-state">${emptyArt(r.items.length ? 'cheer' : 'happy', 'check-circle')}<strong>${r.items.length ? '核对完了' : '没有需要核对的内容'}</strong>
         <p>已核对 ${r.done.size} 条${r.items.length - r.done.size ? `，跳过 ${r.items.length - r.done.size} 条（下次打开还会出现）` : ''}。</p></div>
         <button class="button primary" type="button" data-act="review-finish"><span>回到会议</span></button>`);
     }
@@ -1989,10 +2073,13 @@
   const ACTIONS = {
     go: (el) => go(el.dataset.route),
     back,
+    'rc-expand': () => { const key = rcContext(); S.rcExpanded = S.rcExpanded === key ? null : key; renderRecordingControls(); renderStatus(); },
     tab: (el) => {
+      const before = S.route.name === 'live' ? S.liveTab : S.meetingTab;
       if (S.route.name === 'live') S.liveTab = el.dataset.tab; else S.meetingTab = el.dataset.tab;
       S.transcriptFilter = { speaker: null, query: '' };
       render(); $('scroll').scrollTop = 0;
+      if (before !== el.dataset.tab) playEnter(false);
       if (S.route.name === 'live' && S.liveTab === 'transcript') { S.autoScroll = true; scrollToEnd(); }
     },
     close: closeSheet,
@@ -2248,7 +2335,7 @@
     if (act) { e.stopPropagation(); act(el); }
   });
   // A live transcript card opens "who said it"; it is built outside the page templates.
-  $('lines').addEventListener('click', (e) => {
+  LINES.addEventListener('click', (e) => {
     const card = e.target.closest('[data-id]');
     if (card) ACTIONS['line-speaker'](card);
   });

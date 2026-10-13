@@ -73,6 +73,8 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
         webView = WebView(this).apply {
+            // Paint the Oops canvas until the page draws, so launching never flashes white.
+            setBackgroundColor(this@MainActivity.getColor(R.color.oops_bg))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = false
