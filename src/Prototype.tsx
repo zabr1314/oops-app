@@ -13,10 +13,11 @@ import { boardPreviewData } from './boardPreview';
 import { ListeningScreen } from './features/Listening';
 import { archiveSafeData, applyStorageDeadlines, isTemporaryDaily, pinExplicitDerivations, reconcileSavedEvidence } from './storagePolicy';
 import { setVolatileObjects, clearObjectViewState } from './viewState';
+import { reconcileDeviceStartupHolds } from './deviceStartupLogic';
 
 
 const roots=['home','sessions','tasks','memory','settings'];
-const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'我的',icon:'user'}];
+const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'设置',icon:'gear'}];
 function initialRoute():Route{const p=window.location.hash.slice(1).split('/').map(x=>{try{return decodeURIComponent(x)}catch{return x}});return {view:p[0]||'home',id:p[1]||undefined,mode:p[2]||undefined}}
 function routeHash(r:Route){return '#'+[r.view,r.id||'',r.mode||''].map(encodeURIComponent).join('/').replace(/\/+$/,'')}
 const previewScene=new URLSearchParams(window.location.search).get('board-preview');
@@ -38,7 +39,7 @@ export default function Prototype() {
   const temporaryTurnIds = useRef(new Map<string, string[]>());
   const update = useCallback((change: Partial<AppData> | ((current: AppData) => AppData)) => setData(d => {
     const next = typeof change === 'function' ? change(d) : { ...d, ...change };
-    return next === d ? d : pinExplicitDerivations(d, reconcileSavedEvidence(d, next));
+    return next === d ? d : reconcileDeviceStartupHolds(d, pinExplicitDerivations(d, reconcileSavedEvidence(d, next)));
   }), []);
   const navigate = (next: Route) => {
     keyboard.hide();

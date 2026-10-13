@@ -28,7 +28,7 @@ export function pinSessionEvidence(data: AppData, sessionId: string, turn: Trans
 function clearSessionMirrors(data: AppData, id: string): AppData {
   const retention = { ...data.settings.retention };
   // These derived caches can contain full turns, old revisions or query context.
-  const independent = ['session-space:', 'record-end:', 'session-review-items:', 'session-conclusions:', 'session-questions:', 'session-reviewed:', 'sample-index:'];
+  const independent = ['session-space:', 'record-end:', 'session-review-items:', 'session-conclusions:', 'session-questions:', 'session-reviewed:', 'sample-index:', 'device-startup-owner:'];
   const exactId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const owns = new RegExp(`(?:^|:|-)${exactId}(?=:|$)`);
   for (const key of Object.keys(retention)) if (owns.test(key) && !independent.some(prefix => key.startsWith(prefix))) delete retention[key];

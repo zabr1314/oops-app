@@ -8,6 +8,8 @@
   const native = window.OopsNative;
   const send = (type, payload = {}) => native.postMessage(JSON.stringify({ type, payload }));
   const params = new URLSearchParams(location.search);
+  const deviceDemo = window.OopsDeviceListeningDemo;
+  let deviceState = deviceDemo?.create();
 
   const ASR_TEXT = {
     off: ['识别未连接', ''],
@@ -251,6 +253,8 @@
     if (serverChanged) { clearRemoteState(); S.remoteEpoch = null; }
     if ('selfName' in s && s.selfName !== S.state.selfName) clearTaskIdentity();
     S.state = { ...S.state, ...s };
+    if (deviceState && S.state.capturing) deviceState = deviceDemo.reduce(deviceState, { type: 'occupied' },
+      { activeSessionId: S.state.sessionId || 'native-pending' });
     if (serverChanged) enter();
     if (before.selfName !== S.state.selfName) {
       if (S.route.name === 'home' && S.state.selfName) loadHomeTasks();
@@ -459,8 +463,8 @@
 
   // ---- routing ----------------------------------------------------------------------------
 
-  const NAV = [['home', '首页', 'house'], ['sessions', '会话', 'chat-circle'], ['tasks', '任务', 'check-square'], ['memory', '记忆', 'bookmark-simple'], ['me', '我的', 'user']];
-  const NAV_OF = { home: 'home', sessions: 'sessions', live: 'sessions', meeting: 'sessions', tasks: 'tasks', memory: 'memory', project: 'memory', me: 'me', settings: 'me' };
+  const NAV = [['home', '首页', 'house'], ['sessions', '会话', 'chat-circle'], ['tasks', '任务', 'check-square'], ['memory', '记忆', 'bookmark-simple'], ['me', '设置', 'gear-six']];
+  const NAV_OF = { home: 'home', sessions: 'sessions', live: 'sessions', meeting: 'sessions', tasks: 'tasks', memory: 'memory', project: 'memory', me: 'me', settings: 'me', device: 'me' };
 
   function go(name, extra = {}) {
     if (S.sheet && S.sheet.kind !== 'pending') closeSheet();
@@ -490,7 +494,7 @@
     $('tabs').hidden = !tabs;
     if (tabs) $('tabs').innerHTML = tabsHtml(r);
     const html = ({ home: homeHtml, sessions: sessionsHtml, live: liveHtml, meeting: meetingHtml, tasks: tasksHtml,
-      memory: memoryHtml, project: projectHtml, me: meHtml, settings: settingsHtml })[r];
+      memory: memoryHtml, project: projectHtml, me: meHtml, settings: settingsHtml, device: deviceHtml })[r];
     $('screen').setAttribute('aria-label', NAV.find((n) => n[0] === NAV_OF[r])?.[1] || '');
     $('screen').className = `screen-content ${r === 'home' ? 'home-main' : ''}`;
     $('screen').innerHTML = html ? html() : '';
@@ -518,11 +522,11 @@
       return `<img class="wordmark" alt="Oops" src="brand/wordmark.png"><div class="header-tools">
         <button class="icon-button notification-button" data-act="notices-open" aria-label="提醒">${icon('bell', 25)}${unread ? '<i></i>' : ''}</button></div>`;
     }
-    const title = { sessions: '会话', live: '会话', meeting: '会话', tasks: '任务', memory: '记忆', project: '项目', me: '我的', settings: '收音与服务' }[r];
-    const left = ['live', 'meeting', 'project', 'settings'].includes(r) ? button('back', '返回上一页', 'caret-left', 23)
+    const title = { sessions: '会话', live: '会话', meeting: '会话', tasks: '任务', memory: '记忆', project: '项目', me: '设置', settings: '收音与服务', device: '设备与自动聆听' }[r];
+    const left = ['live', 'meeting', 'project', 'settings', 'device'].includes(r) ? button('back', '返回上一页', 'caret-left', 23)
       : button('ask-open', '搜索全部内容', 'magnifying-glass', 23);
     const right = r === 'sessions' || r === 'live' || r === 'meeting' ? (S.state.capturing ? spacer : button('capture-start', '新建记录', 'plus'))
-      : ['memory', 'me', 'project', 'settings'].includes(r) ? button('go', '回到首页', 'house').replace('data-act="go"', 'data-act="go" data-route="home"') : spacer;
+      : ['memory', 'me', 'project', 'settings', 'device'].includes(r) ? button('go', '回到首页', 'house').replace('data-act="go"', 'data-act="go" data-route="home"') : spacer;
     return `${left}<h1>${title}</h1>${right}`;
   }
 
@@ -609,7 +613,7 @@
         sub: t.overdue ? '期限已到，核对进度' : t.feishu?.due_ms ? `截止 ${shortDate(new Date(t.feishu.due_ms).toISOString()).split(' ')[0]}` : '在飞书里推进' })).join('')}
       ${pendingMeeting ? listRow({ act: 'review-start', data: `data-id="${esc(pendingMeeting.session_id)}"`, ic: 'check-circle', title: `会后核对 · ${meetingName(pendingMeeting)}`,
         sub: `${reviewPending(pendingMeeting)}项待核对（待办、决定、说话人）` }) : ''}
-      ${!tasks.length && !pendingMeeting ? `<p class="meta">${S.state.selfName ? S.homeTasks == null ? S.homeTasksState.error ? '暂时无法确认你的待处理事项。' : '正在读取你的任务…' : '没有待处理的事。' : '在「我的」里选择本人后，这里会列出你负责的飞书任务。'}</p>` : ''}
+      ${!tasks.length && !pendingMeeting ? `<p class="meta">${S.state.selfName ? S.homeTasks == null ? S.homeTasksState.error ? '暂时无法确认你的待处理事项。' : '正在读取你的任务…' : '没有待处理的事。' : '在「设置」里选择本人后，这里会列出你负责的飞书任务。'}</p>` : ''}
       ${sectionTitle('刚才说过什么？', '问已有记录', 'ask-open')}
       <button class="card clickable recall-entry" data-act="recall">${icon('clock-counter-clockwise')}<div><strong>找回最近5分钟</strong><p>选择重要的片段，再决定是否留下</p></div>${icon('caret-right', 17)}</button>
       ${pendingTotal ? listRow({ act: 'go', data: 'data-route="sessions"', ic: 'bookmark-simple', title: '核对会后结果', sub: `${pendingTotal}项待核对 · 确认后才会用于冲突提醒` }) : ''}
@@ -959,26 +963,91 @@
     return `<div class="stack memory-settings"><div class="section-title"><div><h1 class="title">${esc(p.name)}</h1><p class="meta">${p.meetings.length} 场会议 · 已确认决定 ${p.decisions.length}</p></div></div>${requestNotice(S.requests.project, 'project-retry', true)}${seg}${body}</div>`;
   }
 
-  // ---- 我的 ---------------------------------------------------------------------------------
+  // ---- 设置（保留旧 me 路由） ----------------------------------------------------------------
 
   function meHtml() {
     const s = S.state;
     const group = (title, rows) => `<div>${sectionTitle(title)}<section class="card">${rows.join('')}</section></div>`;
     return `<div class="stack">
       <section class="card ms-profile"><div class="ms-person-head"><span class="avatar">${esc(s.selfName ? initial(s.selfName) : '?')}</span>
-        <div><h2>${esc(s.selfName || '还没选择本人')}</h2><p class="meta">${s.selfName ? '团队成员 · 用于"我的任务"' : '选择后，任务和待处理只列你负责的'}</p></div></div>
+        <div><h2>${esc(s.selfName || '还没选择本人')}</h2><p class="meta">${s.selfName ? '当前任务身份 · 不授予声音或共享权限' : '选择任务身份，分别管理声音与共享许可'}</p></div></div>
         <button class="ms-space" data-act="self-pick">${esc(s.selfName ? '切换本人' : '选择本人')}${icon('caret-down', 13)}</button></section>
-      ${group('我与助理', [
-        listRow({ act: 'self-pick', ic: 'user-circle', title: '身份与角色', sub: s.selfName || '未选择' }),
-        listRow({ act: 'vp-open', ic: 'waveform', title: '我的声音身份', sub: '声纹录入与匹配测试' })])}
-      ${group('连接', [
-        listRow({ act: 'go', data: 'data-route="settings"', ic: 'microphone', title: '收音与唤醒', sub: `${SOURCE_TEXT[s.source] || s.source || ''} · ${s.voiceTrigger !== false ? '语音唤醒开' : '语音唤醒关'}` }),
-        listRow({ act: 'go', data: 'data-route="settings"', ic: 'plugs-connected', title: '团队服务器', sub: s.backend === 'mock' ? 'Mock 后端（不连服务器）' : s.backendUrl || '未配置' })])}
-      ${group('数据与运行', [
-        listRow({ act: 'go', data: 'data-route="settings"', ic: 'shield-check', title: '会议文字与录音', sub: '日常临时5分钟；正式会议每次明确选择保存期限' }),
+      ${group('账户与身份', [
+        listRow({ act: 'self-pick', ic: 'user-circle', title: '当前身份', sub: s.selfName || '未选择' }),
+        listRow({ act: 'vp-open', ic: 'waveform', title: '声音身份与许可', sub: '单独同意录入，姓名核对不代表声纹授权' })])}
+      ${group('聆听与设备', [
+        listRow({ act: 'go', data: 'data-route="device"', ic: 'bluetooth', title: '设备与开机自动聆听', sub: '首配独立选择 · 暂停与停止优先 · 设备示例' }),
+        listRow({ act: 'go', data: 'data-route="settings"', ic: 'microphone', title: '收音、唤醒与提醒偏好', sub: `${SOURCE_TEXT[s.source] || s.source || '未设置音源'} · ${s.voiceTrigger !== false ? '语音唤醒开' : '语音唤醒关'}` })])}
+      ${group('连接与数据', [
+        listRow({ act: 'go', data: 'data-route="settings"', ic: 'plugs-connected', title: '服务连接', sub: s.backend === 'mock' ? 'Mock 后端（不连服务器）' : s.backendUrl || '未配置' }),
+        listRow({ act: 'privacy-open', ic: 'shield-check', title: '隐私、保存与共享', sub: '日常临时5分钟；正式会议每次单独确认' })])}
+      ${group('运行信息', [
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'chart-bar', title: '诊断与召回耗时', sub: S.latency?.recentMs?.length ? `召回中位数 ${(S.latency.medianMs / 1000).toFixed(1)} 秒` : '还没有召回记录' })])}
-      <p class="meta ms-center">Oops · 会议文字保存在团队服务器</p>
+      <p class="meta ms-center">内容、人物与项目在「记忆」中查看</p>
     </div>`;
+  }
+
+  const DEVICE_CONDITIONS = {
+    ready: ['服务就绪', '权限、连接与后台条件就绪。恢复仍需要你明确操作。', 'plugs-connected'],
+    permission: ['权限缺失', '示例缺少收音权限。补齐权限后仍需点恢复。', 'shield-check'],
+    background: ['后台受限', '示例后台服务不可运行。解除限制后仍需点恢复。', 'moon'],
+    disconnected: ['设备断连', '示例设备未连接。重新连接不会越过你的暂停或停止。', 'bluetooth'],
+    quiet: ['安静时段', '示例正在安静时段内。结束后不自动恢复被中断的聆听。', 'moon'],
+    service: ['服务未就绪', '示例聆听服务尚不可用。恢复服务后仍需点恢复。', 'plugs-connected'],
+  };
+  const realSessionActive = () => S.state.capturing ? S.state.sessionId || 'native-pending' : null;
+  function deviceStatusText() {
+    if (realSessionActive()) return `现有${S.state.recordingMode === 'meeting' ? '正式会议' : '日常记录'}继续`;
+    if (!deviceState?.paired) return '还未进行示例配对';
+    if (deviceState.condition !== 'ready') return DEVICE_CONDITIONS[deviceState.condition][0];
+    return { listening: '日常临时聆听中 · 示例', paused: '你已暂停 · 示例', stopped: '你已停止 · 示例',
+      interrupted: '条件已恢复，等待你恢复', idle: deviceState.autoListen ? '等待示例设备开机' : '开机自动聆听未开启' }[deviceState.status];
+  }
+  function deviceHtml() {
+    if (!deviceState) return '<div class="empty-state"><strong>设备示例暂不可用</strong><p>请重新打开页面；真实录音不受影响。</p></div>';
+    const d = deviceState, external = realSessionActive(), info = DEVICE_CONDITIONS[d.condition];
+    const active = d.status === 'listening', ready = d.paired && d.condition === 'ready' && !external;
+    return `<div class="stack native-device-page">
+      <div class="native-device-boundary"><span class="badge purple">独立设备示例</span><p>尚未连接真实录音豆；以下状态和选择只保留在本页体验内，不控制真实录音。</p></div>
+      <section class="card native-device-hero"><span class="row-icon">${icon('bluetooth', 28)}</span><h2>Oops 录音豆</h2><p class="meta">${d.paired ? '已完成示例配对' : '首次配对时，单独选择是否开机聆听'}</p>
+        <strong role="status">${esc(deviceStatusText())}</strong>
+        ${external ? '<p class="meta">已有记录优先。示例不会新建重复会话、改变保存方式或控制现有会议。</p>' : ''}
+        ${d.paired ? `<div class="native-device-preferences"><p>开机自动聆听：<strong>${d.autoListen ? '已选择（仅示例）' : '未开启'}</strong></p><p>安静时段：${d.quietEnabled ? `${d.quietStart}–${d.quietEnd}（仅示例）` : '未设置'}</p><button class="button secondary" data-act="device-preferences">编辑聆听偏好</button></div>` : '<button class="button primary" data-act="device-pair">开始示例配对</button>'}
+      </section>
+      ${d.paired ? `<section class="card"><h3>设备状态演示</h3><p class="meta">选择一种示例条件；不会读取或修改系统权限。</p><div class="native-device-conditions" role="group" aria-label="示例设备条件">${Object.entries(DEVICE_CONDITIONS).map(([key,[title,,ic]]) => `<button class="chip ${d.condition === key ? 'selected' : ''}" data-act="device-condition" data-value="${key}" aria-pressed="${d.condition === key}">${icon(ic, 16)}${title}</button>`).join('')}</div><p class="meta" role="status">${esc(info[1])}</p>
+        <button class="button secondary" data-act="device-power" ${external ? 'disabled' : ''}>模拟设备开机 / 重连</button>
+      </section>
+      <section class="card native-device-controls"><h3>本次示例聆听</h3><p class="meta">${d.sessionId ? `示例会话 ${esc(d.sessionId)} · 临时5分钟 · 不云端归档` : '每次新的示例聆听只进入日常模式，不继承正式会议保存许可。'}</p>
+        ${active && !external ? '<button class="button secondary" data-act="device-pause">暂停示例聆听</button>' : `<button class="button primary" data-act="device-resume" ${ready ? '' : 'disabled'}>${d.needsResume || d.hold ? '明确恢复示例聆听' : '手动开始示例日常聆听'}</button>`}
+        <button class="button quiet" data-act="device-stop" ${external ? 'disabled' : ''}>停止示例聆听</button>
+        <p class="meta">暂停、停止与安静时段优先；恢复条件、修改偏好或重连不会解除你的暂停／停止。</p>
+      </section>` : ''}
+      <button class="button quiet" data-act="device-reset">重新体验首次配对</button>
+    </div>`;
+  }
+  function devicePairHtml() {
+    return frame('首次配对 · 设备示例', `<p>Oops 录音豆（示例）</p><p class="meta">配对与开机聆听是两个独立选择，取消不保存。</p>
+      <label class="toggle-row"><span><strong>设备开机后自动日常聆听</strong><small>仅在权限、连接与后台服务就绪且非安静时段时进入临时聆听</small></span><input id="device-pair-auto" type="checkbox"></label>
+      <p class="meta">默认未开启。日常原音与临时全文最多5分钟，停止清除；不自动开始正式会议、注册声纹或共享。实时识别可能使用云端ASR。</p>
+      <button class="button primary" data-act="device-pair-confirm">完成示例配对</button><button class="button quiet" data-act="close">取消</button>`);
+  }
+  function devicePreferencesHtml() {
+    const d = deviceState;
+    return frame('聆听偏好 · 设备示例', `<label class="toggle-row"><span><strong>开机后自动日常聆听</strong><small>更改只影响后续示例开机，不开始或结束当前记录</small></span><input id="device-auto" type="checkbox" ${d.autoListen ? 'checked' : ''}></label>
+      <label class="toggle-row"><span><strong>安静时段</strong><small>当前页手动模拟时段内状态，不按系统时钟自动切换</small></span><input id="device-quiet" type="checkbox" ${d.quietEnabled ? 'checked' : ''}></label>
+      <div class="native-device-times"><label class="form-field"><span>开始</span><input id="device-quiet-start" type="time" value="${d.quietStart}"></label><label class="form-field"><span>结束</span><input id="device-quiet-end" type="time" value="${d.quietEnd}"></label></div>
+      <p class="meta">偏好仅在当前独立示例中保留，安静状态由你在设备页选择；不会写入真实设备或扩大录音、声纹、共享权限。</p><button class="button primary" data-act="device-preferences-save">保存示例偏好</button><button class="button quiet" data-act="close">取消</button>`);
+  }
+  function privacyHtml() {
+    return frame('隐私、保存与共享', `<section class="card"><h3>日常临时聆听</h3><p>最近5分钟原音与临时全文滚动覆盖，停止清除，不归档整场或同步团队。私人候选需核对后单独保存。</p><button class="button secondary" data-act="daily-candidates">核对私人候选</button></section>
+      <section class="card"><h3>正式会议</h3><p>每次明确选择云保存，原音与全文分别选择7/30/90天。已确认摘要、任务和短依据独立保留；历史按原规则处理。</p></section>
+      <section class="card"><h3>声音与共享分别确认</h3><p>姓名核对不等于声音身份许可；设备配对、开机聆听也不代表团队共享。已有团队会议内容仍按原范围读取，删除与核对从具体会议进入。</p><button class="button quiet" data-act="vp-open">管理声音身份许可</button><button class="button quiet" data-act="go" data-route="sessions">查看具体会议</button></section>
+      <p class="meta">即时语音识别可能使用云端ASR；不归档不代表音频完全不上云。</p>`);
+  }
+  function applyDeviceEvent(event) {
+    if (!deviceState) return;
+    deviceState = deviceDemo.reduce(deviceState, event, { activeSessionId: realSessionActive() || null });
+    render();
   }
 
   function settingsHtml() {
@@ -1103,6 +1172,9 @@
       rename: renameHtml,
       tools: toolsHtml,
       retain: retentionHtml,
+      devicePair: devicePairHtml,
+      devicePreferences: devicePreferencesHtml,
+      privacy: privacyHtml,
       captureMode: captureModeHtml,
       dailyCandidates: () => frame('私人待核对候选', S.dailyCandidates.length ? S.dailyCandidates.map(x => `<section class="card"><span class="badge">私有 · 未确认</span><p>${esc(x.quote)}</p><p class="meta">${formatDate(x.updated_at)} · 独立短依据，完整原音/全文已不保留</p><button class="button secondary" data-act="daily-confirm-open" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">核对这条内容</button><button class="button quiet" data-act="daily-discard" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">舍弃候选</button></section>`).join('') : '<p>还没有私人候选；不会保存整场全文来填充这里。</p>'),
       dailyConfirm: () => frame('核对并保存私人记忆', `<label class="form-field"><span>要留下的内容</span><textarea id="daily-quote">${esc(S.sheet.item.quote)}</textarea></label><label class="toggle-row"><span>我已核对这条短依据，单独保存为私人记忆</span><input id="daily-confirmed" type="checkbox"></label><p class="meta">不自动创建任务、关联身份或共享。完整原音和全文不会恢复。</p><button class="button primary" data-act="daily-confirm-save">保存私人记忆</button>`),
@@ -1781,7 +1853,7 @@
   function back() {
     const r = S.route.name;
     if (r === 'project') return go('memory');
-    if (r === 'settings') return go('me');
+    if (['settings', 'device'].includes(r)) return go('me');
     go('sessions');
   }
   function noticeFeedback(id, useful) {
@@ -1845,6 +1917,22 @@
       S.pendingRetention={sessionId,requestId,status:'saving',payload};renderSheet();send('meeting.retain',payload);
     },
     'retain-retry': () => { const pending=S.pendingRetention;if(!pending || pending.status!=='failed')return;pending.status='saving';pending.error=null;renderSheet();send('meeting.retain',pending.payload); },
+    'privacy-open': () => openSheet({kind:'privacy'}),
+    'device-pair': () => openSheet({kind:'devicePair'}),
+    'device-pair-confirm': () => { const autoListen=$('device-pair-auto').checked;closeSheet();applyDeviceEvent({type:'pair',autoListen}); },
+    'device-preferences': () => openSheet({kind:'devicePreferences'}),
+    'device-preferences-save': () => {
+      const quietStart=$('device-quiet-start').value,quietEnd=$('device-quiet-end').value;
+      if(!deviceDemo.timeValid(quietStart)||!deviceDemo.timeValid(quietEnd)||quietStart===quietEnd)return toast('请填写有效且不同的安静时段起止时间',true);
+      const event={type:'preferences',autoListen:$('device-auto').checked,quietEnabled:$('device-quiet').checked,quietStart,quietEnd};
+      closeSheet();applyDeviceEvent(event);toast('仅保存了当前设备示例偏好');
+    },
+    'device-condition': el => applyDeviceEvent({type:'condition',condition:el.dataset.value}),
+    'device-power': () => applyDeviceEvent({type:'power'}),
+    'device-pause': () => applyDeviceEvent({type:'pause'}),
+    'device-stop': () => applyDeviceEvent({type:'stop'}),
+    'device-resume': () => applyDeviceEvent({type:'resume'}),
+    'device-reset': () => applyDeviceEvent({type:'reset'}),
     'capture-start': () => openSheet({kind:'captureMode',mode:'daily'}),
     'capture-meeting': () => openSheet({kind:'captureMode',mode:'meeting',switching:true}),
     'capture-mode': el => { S.sheet.mode = el.dataset.mode; renderSheet(); },
@@ -2029,7 +2117,7 @@
     if (S.sheet) { closeSheet(); return true; }
     if (!$('sheet').hidden) { closeSheet(); return true; }
     const r = S.route.name;
-    if (['live', 'meeting', 'project', 'settings'].includes(r)) { back(); return true; }
+    if (['live', 'meeting', 'project', 'settings', 'device'].includes(r)) { back(); return true; }
     if (r !== 'home') { go('home'); return true; }
     return false;
   };

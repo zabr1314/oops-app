@@ -5,7 +5,7 @@ const prefix = 'oops-view-v3:';
 const values = new Map<string, unknown>();
 const subscribers = new Map<string, Set<() => void>>();
 let volatileObjects = new Set<string>();
-const volatileKey = (key: string) => key.split(':').some(part => volatileObjects.has(part));
+const volatileKey = (key: string) => key.startsWith('device-startup-runtime:') || key.split(':').some(part => volatileObjects.has(part));
 
 /** Temporary daily source drafts stay in memory, including across page navigation. */
 export function setVolatileObjects(ids: string[]) {
