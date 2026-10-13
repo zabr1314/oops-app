@@ -77,6 +77,10 @@ class RegistryTest(unittest.TestCase):
             with self.assertRaises(ApiError):
                 backend.voiceprint_manage(req | change, 'enroll')
         self.assertEqual([], called)
+        backend.invalidate_attribution = lambda: None
+        for source in ('mic', 'remote', 'bean'):  # the 录音豆 gets its own profile like the other devices
+            backend.voiceprint_manage(req | {'consent': True, 'single_speaker': True, 'source': source}, 'enroll')
+        self.assertEqual(['mic', 'remote', 'bean'], [args[0]['source'] for args in called])
 
     def test_model_is_not_invoked_for_silent_or_clipped_enrollment(self):
         from local_backend import Speakers

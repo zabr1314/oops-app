@@ -20,7 +20,7 @@
     reconnecting: ['识别重连中…', 'warn'],
     error: ['识别出错', 'bad'],
   };
-  const SOURCE_TEXT = { mic: '手机麦克风', wav: '测试音频', remote: 'Mac 收音' };
+  const SOURCE_TEXT = { mic: '手机麦克风', wav: '测试音频', remote: 'Mac 收音', bean: '录音豆', bean_sim: '录音豆模拟' };
   const TAG_LABELS = { commitment: '待办', decision: '决定', idea: '想法', constraint: '约束', chitchat: '寒暄', uncertain: '待判断' };
   const MANUAL_OTHER = { other: '其他人', multi: '多人同时说', unclear: '听不清' };
 
@@ -30,7 +30,7 @@
     records: new Map(),
     commitments: [],
     ownerEdits: new Map(), // manual selections remain visible when model hints refresh
-    summary: {}, notices: new Map(), activeNotices: [],
+    summary: {}, notices: new Map(), activeNotices: [], board: null, expiredBoardSession: null,
     sheet: null, card: null, draft: null,
     playingKey: null, loadingKey: null, latency: null, autoScroll: true, dailyCandidates: [],
     voiceprintName: '', voiceprintDelete: null,
@@ -119,7 +119,7 @@
   };
 
   function handle(type, p) {
-    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'tasks.list'].includes(type)
+    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'tasks.list', 'tasks.board'].includes(type)
       || type === 'error' && ['history', 'minutes', 'projects', 'review', 'tasks', 'retention'].includes(p.scope);
     if (remote) {
       if ('backendUrl' in p && S.state.backendUrl !== undefined && p.backendUrl !== S.state.backendUrl) return;
@@ -135,6 +135,7 @@
         (p.transcript || []).forEach(addLine);
         setState(p.state);
         if (p.summary) setSummary(p.summary);
+        S.board = acceptedTaskBoard(p.board);
         if (p.pendingActions?.length) {
           openDraft(p.pendingActions[0].draft);
           onActionResult(p.pendingActions[0].result);
@@ -143,7 +144,7 @@
         render();
         break;
       case 'state': setState(p); break;
-      case 'capture.assetsExpired': closeSheet(); resetTranscript(); S.card=null; if(S.draft && !S.draft.submitted) S.draft=null; toast('完整文字已按期限清理，独立确认的任务与短依据保留'); render(); break;
+      case 'capture.assetsExpired': S.expiredBoardSession = S.state.sessionId; closeSheet(); resetTranscript(); S.card=null; if(S.draft && !S.draft.submitted) S.draft=null; toast('完整文字已按期限清理，独立确认的任务与短依据保留'); render(); break;
       case 'capture.cleared': closeSheet(); resetTranscript(); S.card = null; S.draft = null; render(); break;
       case 'daily.candidates': S.dailyCandidates = p.items || []; openSheet({kind:'dailyCandidates'}); break;
       case 'backend.changed': {
@@ -197,10 +198,16 @@
         }
         break;
       case 'session.summary': setSummary(p); break;
+      case 'tasks.board':
+        if (!taskBoardAllowed(p.session_id)) break;
+        S.board = acceptedTaskBoard(p);
+        if (S.route.name === 'live' && S.liveTab !== 'transcript') render();
+        break;
       case 'transcript.pruned':
         const removed = new Set(p.ids || []);
         (p.ids || []).forEach(removeLine);
-        if (S.state.recordingMode === 'daily') {
+        if (S.state.recordingMode !== 'meeting') {
+          S.board = null;
           let close = false;
           if (S.card?.data.pool?.some(u => removed.has(u.id))) { S.card = null; close = S.sheet?.kind === 'card'; }
           if (S.draft && !S.draft.submitted && S.draft.data.evidence?.utteranceIds?.some(id => removed.has(id))) { S.draft = null; close ||= S.sheet?.kind === 'draft'; }
@@ -246,13 +253,15 @@
   function setState(s) {
     // A new capture session starts an empty timeline; old lines and cards no longer apply.
     if (s.sessionId && s.sessionId !== S.state.sessionId) resetTranscript();
-    const before = { capturing: S.state.capturing, sessionId: S.state.sessionId, selfName: S.state.selfName, voiceprint: JSON.stringify(S.state.voiceprint),
+    const before = { capturing: S.state.capturing, sessionId: S.state.sessionId, selfName: S.state.selfName, recordingMode: S.state.recordingMode, transcriptExpired: S.state.transcriptExpired, voiceprint: JSON.stringify(S.state.voiceprint),
       preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady };
     const serverChanged = ('backend' in s && S.state.backend !== undefined && s.backend !== S.state.backend)
       || ('backendUrl' in s && S.state.backendUrl !== undefined && s.backendUrl !== S.state.backendUrl);
     if (serverChanged) { clearRemoteState(); S.remoteEpoch = null; }
     if ('selfName' in s && s.selfName !== S.state.selfName) clearTaskIdentity();
     S.state = { ...S.state, ...s };
+    if (S.state.transcriptExpired) S.expiredBoardSession = S.state.sessionId;
+    if (!taskBoardAllowed(S.state.sessionId)) S.board = null;
     if (deviceState && S.state.capturing) deviceState = deviceDemo.reduce(deviceState, { type: 'occupied' },
       { activeSessionId: S.state.sessionId || 'native-pending' });
     if (serverChanged) enter();
@@ -265,7 +274,7 @@
     if (S.sheet?.kind === 'voiceprint' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) renderSheet();
     if (S.route.name === 'memory' && S.memoryTab === 'people' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) render();
     // Starting or stopping changes which controls a page shows; level and time only update text in place.
-    if (serverChanged || before.capturing !== S.state.capturing || before.sessionId !== S.state.sessionId || before.ready !== S.state.sourceReady || before.selfName !== S.state.selfName) {
+    if (serverChanged || before.recordingMode !== S.state.recordingMode || before.transcriptExpired !== S.state.transcriptExpired || before.capturing !== S.state.capturing || before.sessionId !== S.state.sessionId || before.ready !== S.state.sourceReady || before.selfName !== S.state.selfName) {
       if (S.state.capturing && !before.capturing && S.route.name !== 'live') go('live');
       else render();
     } else renderStatus();
@@ -276,7 +285,7 @@
     $('lines').innerHTML = '';
     S.lines.clear();
     S.records.clear();
-    S.commitments = []; S.summary = {}; S.notices.clear(); S.activeNotices = []; renderNoticeBanners();
+    S.commitments = []; S.summary = {}; S.board = null; S.notices.clear(); S.activeNotices = []; renderNoticeBanners();
     S.ownerEdits.clear();
     $('partial').textContent = '';
     S.pruned = false;
@@ -690,7 +699,7 @@
         ${s.capturing ? '' : `<button class="button secondary" type="button" data-act="capture-start">${icon('microphone', 18)}<span>开始</span></button>`}</div>
       <div class="session-live-summary">
         <button data-act="tab" data-tab="transcript">${icon('user-circle')}<strong>${speakers.size ? `${speakers.size}位发言人` : '发言人待识别'}</strong></button>
-        <button data-act="tab" data-tab="actions">${icon('check-square')}<strong>本次行动 ${counts.commitment || 0}</strong></button></div>
+        <button data-act="tab" data-tab="actions">${icon('check-square')}<strong>${boardOpen().length ? `本次任务 ${boardOpen().length} · P0 ${boardOpen().filter((t) => t.priority === 'P0').length}` : `本次行动 ${counts.commitment || 0}`}</strong></button></div>
       ${listRow({ act: 'agenda-open', ic: 'list-checks', title: '本次议程', sub: a.goal || a.items?.length
         ? `${covered}/${a.items?.length || 0} 项已讨论 · ${current?.title || a.goal || '等待讨论'}${a.plannedMs ? ` · 计划 ${clock(a.plannedMs)}` : ''}` : '没有预设议题，也可以继续记录' })}
       ${current ? `<div class="native-current-topic"><small>当前议题</small><strong>${esc(current.title)}</strong><span>已讨论不代表结论已确认</span></div>` : ''}
@@ -738,12 +747,51 @@
       <p class="meta">${hms(u.startMs ?? u.start_ms)} · ${esc(speakerLabel(u.speaker) || '说话人待确认')}${created ? '' : ' · 点开可建飞书任务'}</p></button>`;
   }
 
+  // The server's running task list (task_board): drafts merged and ranked P0–P3 as the meeting goes.
+  // Only P0 asks for confirmation now; confirming still opens the sentence and goes through the usual draft.
+  function taskBoardAllowed(sessionId) {
+    return !!sessionId && sessionId === S.state.sessionId && S.state.recordingMode === 'meeting'
+      && !S.state.transcriptExpired && S.expiredBoardSession !== sessionId;
+  }
+  function acceptedTaskBoard(board) {
+    if (!board || !taskBoardAllowed(board.session_id) || !Array.isArray(board.tasks)) return null;
+    const tasks = board.tasks.filter(t => t && typeof t.what === 'string' && t.what.trim()
+      && Array.isArray(t.sources) && t.sources.length && t.sources.every(id => typeof id === 'string' && id)
+      && ['P0', 'P1', 'P2', 'P3'].includes(t.priority) && ['open', 'done', 'dropped'].includes(t.status));
+    return { ...board, tasks };
+  }
+  const PRIORITY_TEXT = { P0: '会上确认', P1: '会后几天内', P2: '可以排期', P3: '琐事或待定' };
+  const boardOpen = () => (S.board?.tasks || []).filter((t) => t.status === 'open');
+
+  function boardTaskCard(t) {
+    const source = t.sources?.[t.sources.length - 1];
+    const done = S.commitments.some((u) => (t.sources || []).includes(u.id) && u.taskStatus === 'created');
+    const badge = done ? '<span class="badge green">已建飞书任务</span>' : `<span class="badge ${t.priority === 'P0' ? 'purple' : 'gray'}">${esc(t.priority)}</span>`;
+    return `<button class="card clickable board-task" data-act="commitment-open" data-id="${esc(source || '')}"><div class="session-task-top"><h3>${esc(t.what)}</h3>${badge}</div>
+      <p class="meta">${esc(t.owner || '负责人待定')}${t.reason ? ` · ${esc(t.reason)}` : ''}</p>
+      ${t.priority === 'P0' && !done ? '<p class="meta">点开核对原话，确认后建飞书任务</p>' : ''}</button>`;
+  }
+
+  function boardHtml() {
+    const tasks = S.board?.tasks || [];
+    const open = boardOpen(), closed = tasks.filter((t) => t.status !== 'open');
+    const groups = ['P0', 'P1', 'P2', 'P3'].map((p) => [p, open.filter((t) => t.priority === p)]).filter(([, xs]) => xs.length);
+    return `<section class="session-list-group">${sectionTitle(`本场任务清单 ${open.length}`)}
+      <p class="meta">Oops 边听边合并重复的说法，按影响排出优先级；会上只请大家确认 P0，其余会后统一处理。${S.board.pending ? '正在整理刚才的话…' : ''}</p>
+      ${groups.map(([p, xs]) => `<div class="stack"><p class="meta"><strong>${p}</strong> · ${PRIORITY_TEXT[p]}</p>${xs.map(boardTaskCard).join('')}</div>`).join('')
+        || '<p class="meta">还没有需要跟进的任务。</p>'}
+      ${closed.length ? `<details><summary class="meta">已合并、作废或完成 ${closed.length} 条</summary>${closed.map((t) =>
+        `<p class="meta">${esc(t.what)}${t.reason ? ` · ${esc(t.reason)}` : ''}</p>`).join('')}</details>` : ''}</section>`;
+  }
+
   function liveActionsHtml(heading, stage) {
     const rows = S.commitments;
     const created = rows.filter((u) => u.taskStatus === 'created'), open = rows.filter((u) => u.taskStatus !== 'created');
+    const board = S.board?.tasks?.length;
     return `<div class="stack sessions-feature">${heading}${stage}
-      ${listRow({ act: 'commitments-open', ic: 'sparkle', title: '识别到的任务建议', sub: '按原话核对负责人、期限，确认后才建飞书任务' })}
-      ${open.length ? `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
+      ${board ? boardHtml() : listRow({ act: 'commitments-open', ic: 'sparkle', title: '识别到的任务建议', sub: '按原话核对负责人、期限，确认后才建飞书任务' })}
+      ${open.length ? (board ? `<details class="session-list-group"><summary class="meta">逐句识别的原始建议 ${open.length} 条</summary>${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</details>`
+        : `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>`) : ''}
       ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
       ${!rows.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>还没有识别到待办</strong><p>有人说"我来做""你周五前给我"这类话时，会出现在这里。</p></div>` : ''}
       <button class="button primary" type="button" data-act="recall">${icon('clock-counter-clockwise')}<span>从刚才的话整理行动</span></button>
@@ -769,6 +817,11 @@
     const confirmed = [...decisions, ...constraints].filter((u) => u.review?.verdict === 'confirmed');
     const unconfirmed = [...decisions, ...constraints].filter((u) => u.review?.verdict !== 'confirmed');
     const todos = (h.digest?.commitment || []).filter(u => u.review?.verdict !== 'rejected');
+    // The meeting's minutes lead; per-sentence tags are only candidates for review, kept folded away.
+    const created = todos.filter((u) => u.task_status === 'created'), open = todos.filter((u) => u.task_status !== 'created');
+    const ideas = h.digest?.idea || [];
+    const rawCount = unconfirmed.length + open.length + ideas.length;
+    const minutesReady = S.minutes.get(h.session_id)?.data?.status === 'ready';
     const retained = [...(h.retained_summaries || []), ...(h.retained_evidence || [])].filter(x=>x.confirmed && x.source_status !== 'changed');
     return `<div class="stack sessions-feature">${heading}${stage}
       ${h.transcript_status === 'expired' ? `<section class="card"><h3>完整原文已按期限清理</h3><p class="meta">下方仅保留另行确认的摘要、任务和短依据；不会恢复完整原文。</p>${retained.map(x=>`<p>${esc(x.text)}</p>`).join('') || '<p class="meta">没有独立确认保留的内容。</p>'}</section>` : ''}
@@ -777,18 +830,14 @@
       <div class="stack session-overview">
         ${minutesHtml(h.session_id)}
         ${h.transcript_status !== 'expired' ? `<section class="card"><h3>独立保留的确认结果</h3><p class="meta">原音和全文到期后，仅保留你在这里明确核对的摘要和短依据。</p>${retained.map(x=>`<p>${esc(x.text)}</p>`).join('') || '<p class="meta">还没有独立确认的内容。</p>'}<button class="button secondary" data-act="retain-open">选择短依据 / 编辑摘要</button></section>` : ''}
-        <section class="card session-result-card">
-          <div class="session-task-top"><span class="badge gray">${pending ? `仍有${pending}项待核对` : '已全部核对'}</span><button class="text-action" data-act="review-start" data-id="${esc(h.session_id)}">核对</button></div>
-          ${unconfirmed.length ? `<h3>Oops 整理出的候选</h3><p class="meta">逐条核对后，才成为本次确认的结论。</p>${unconfirmed.slice(0, 5).map(u => listRow({act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'constraint' ? 'flag' : 'check-circle', title: u.text, sub: `${hms(u.start_ms)} · ${u.review?.speaker || speakerLabel(u.speaker) || '说话人待确认'} · 待核对`})).join('')}${unconfirmed.length > 5 ? `<button class="text-action" data-act="review-start" data-id="${esc(h.session_id)}">查看全部 ${unconfirmed.length} 项候选</button>` : ''}` : ''}
-          <h3>本次确认的结论</h3>
-          ${confirmed.length ? confirmed.map((u) => `<p class="confirmed-line"><span class="badge ${u.tag === 'constraint' ? 'gray' : 'green'}">${u.tag === 'constraint' ? '约束' : '决定'}</span> ${esc(u.text)}</p>`).join('')
-            : '<p class="meta">还没有人工确认的结论。会后核对里点「是决定」后会出现在这里，并用于之后开会时的冲突提醒。</p>'}
-        </section>
-        ${sectionTitle('下一步行动')}
-        ${todos.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
-          sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'} · ${u.task_status === 'created' ? '已建飞书任务' : u.review?.verdict === 'confirmed' ? '人工已确认' : '待核对'}`,
-          badge: `<span class="badge ${u.task_status === 'created' ? 'green' : 'purple'}">${u.task_status === 'created' ? '已建任务' : '待承接'}</span>` })).join('') || '<p class="meta">没有识别到待办。</p>'}
-        ${(h.digest?.idea || []).length ? `${sectionTitle('想法')}${(h.digest.idea || []).slice(0, 5).map((u) => `<p class="meta">· ${esc(u.text)}</p>`).join('')}` : ''}
+        ${rawCount ? `<details class="card raw-tags"><summary><strong>Oops 整理出的候选 ${rawCount} 条</strong><span class="meta">逐句识别，逐条核对后才成为确认的结论。${minutesReady ? '纪要已从中挑出有用的内容。' : '还没有会议纪要。'}</span></summary>
+          ${unconfirmed.length ? `<h3>决定与约束候选</h3>${unconfirmed.map(u => listRow({act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'constraint' ? 'flag' : 'check-circle', title: u.text, sub: `${hms(u.start_ms)} · ${u.review?.speaker || speakerLabel(u.speaker) || '说话人待确认'} · 待核对`})).join('')}` : ''}
+          ${open.length ? `<h3>待办候选</h3>${open.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
+            sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'} · ${u.review?.verdict === 'confirmed' ? '人工已确认' : '待核对'}` })).join('')}` : ''}
+          ${ideas.length ? `<h3>想法</h3>${ideas.map((u) => `<p class="meta">· ${esc(u.text)}</p>`).join('')}` : ''}</details>` : ''}
+        ${confirmed.length ? `<section class="card session-result-card"><h3>本次确认的结论</h3>${confirmed.map((u) => `<p class="confirmed-line"><span class="badge ${u.tag === 'constraint' ? 'gray' : 'green'}">${u.tag === 'constraint' ? '约束' : '决定'}</span> ${esc(u.text)}</p>`).join('')}</section>` : ''}
+        ${created.length ? `${sectionTitle('已建飞书任务')}${created.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
+          sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'}`, badge: '<span class="badge green">已建任务</span>' })).join('')}` : ''}
         ${pending ? `<section class="card session-review-entry"><div><h3>${pending}项可以逐项核对</h3><p class="meta">待办、决定与不知道谁说的话分别处理，也可以稍后再说。</p></div>
           <button class="button primary" type="button" data-act="review-start" data-id="${esc(h.session_id)}"><span>开始 / 继续核对</span></button></section>` : ''}
         <div class="action-grid">
@@ -846,7 +895,7 @@
     if (S.playingKey || S.loadingKey) send('clip.stop');
     S.playingKey = null; S.loadingKey = null;
     S.history = null; S.historyItems = null; S.projects.items = null; S.projects.open = null; S.liveProject = null;
-    S.minutes.clear(); clearTaskIdentity();
+    S.minutes.clear(); S.board = null; clearTaskIdentity();
     S.requests = { history: {}, projects: {}, project: {}, tasks: {} };
     S.pendingMeetingId = null; S.pendingReview = null; S.pendingTools = null; S.review = null; S.pendingRetention=null;
     // A cancelled intent prevents an old response from opening the same session on the new server.
@@ -1061,7 +1110,9 @@
         <label class="form-field"><span>音源（保存后立即切换，保留本场记录）</span><select id="set-source">
           <option value="mic" ${s.source === 'mic' ? 'selected' : ''}>手机麦克风</option>
           <option value="wav" ${s.source === 'wav' ? 'selected' : ''}>测试 WAV（预录音频）</option>
-          <option value="remote" ${s.source === 'remote' ? 'selected' : ''}>Mac 收音（经 USB 接收电脑上的麦克风）</option></select></label>
+          <option value="remote" ${s.source === 'remote' ? 'selected' : ''}>Mac 收音（经 USB 接收电脑上的麦克风）</option>
+          ${s.beanSdk ? `<option value="bean" ${s.source === 'bean' ? 'selected' : ''}>录音豆（先按录音豆的录音键）</option>` : ''}
+          <option value="bean_sim" ${s.source === 'bean_sim' ? 'selected' : ''}>录音豆模拟（内置对话，测试解码链路）</option></select></label>
         <label class="form-field"><span>Mac 收音地址</span><input id="set-remote" inputmode="url" placeholder="127.0.0.1:7790" value="${esc(s.remoteAddress || '127.0.0.1:7790')}"><small>配合 adb reverse 用 127.0.0.1</small></label>
         <p class="meta">测试音频：${esc(s.testWavName || '内置合成对话')} · 需要 PCM 16kHz / 单声道 / 16bit WAV</p>
         <div class="inline-actions"><button class="chip" data-act="pick-audio">选择测试 WAV</button><button class="chip" data-act="reset-audio">恢复内置音频</button></div>
@@ -1564,9 +1615,16 @@
       const m = p.minutes;
       const source = (ids) => (Array.isArray(ids) ? ids : []).filter(id => p.sources?.[id]).map(id => `<button class="chip" type="button" data-act="minutes-source" data-id="${esc(id)}">查看原话 ${hms(p.sources[id].start_ms)}</button>`).join('');
       const rows = (title, items, content, ids) => Array.isArray(items) && items.length ? `<h3>${title}</h3>${items.map(item => `<div class="minutes-item"><p>${esc(content(item))}</p>${source(ids(item))}</div>`).join('')}` : '';
-      body = `${m.overview ? `<p class="minutes-overview">${esc(m.overview)}</p>` : ''}
+      // Like real minutes: the topic, the main-line work, decisions, then everything else. Older minutes have no
+      // priority; their tasks all count as main line.
+      const actions = Array.isArray(m.actions) ? m.actions : [];
+      const main = actions.filter((x) => (x.priority || 'main') === 'main'), other = actions.filter((x) => x.priority === 'other');
+      const task = (x) => `${x.owner ? `${x.owner}：` : ''}${x.task || ''}${x.due ? `（${x.due}）` : ''}${x.owner ? '' : '（负责人待定）'}`;
+      body = `${m.theme ? `<p class="minutes-theme"><small>会议主题</small><strong>${esc(m.theme)}</strong></p>` : ''}
+        ${m.overview ? `<p class="minutes-overview">${esc(m.overview)}</p>` : ''}
+        ${rows('主线任务', main, task, x => x.ids)}
         ${rows('决定', m.decisions, x => x.text, x => x.ids)}
-        ${rows('行动建议', m.actions, x => `${x.owner || '负责人待定'} · ${x.task || ''}${x.due ? ' · ' + x.due : ''}`, x => x.ids)}
+        ${rows('其他事项', other, task, x => x.ids)}
         ${rows('讨论要点', m.topics, x => `${x.topic || ''}：${Array.isArray(x.points) ? x.points.join('；') : x.points || ''}`, () => [])}
         ${rows('待确认问题', m.open_questions, x => x.question, x => [x.id])}
         ${rows('后续跟进建议', m.follow_ups, x => `${x.title || ''}${x.start ? ' · ' + x.start : ''}`, () => [])}
@@ -1579,7 +1637,7 @@
       body = `<p>${esc(p.message || messages[p.reason] || '当前没有可用的 AI 纪要。')}</p>${p.reason === 'source_changed' ? '<p class="meta">请以最新原文和人工核对结果为准；旧文档仅供查看历史。</p>' : ''}
         ${p.reason === 'source_changed' && p.historical_doc_url ? `<button class="button quiet" type="button" data-act="minutes-history-doc"><span>查看旧版历史文档</span></button>` : ''}`;
     }
-    return `<section class="card native-minutes"><div class="section-title"><h2>AI 会后纪要</h2>${entry?.loading ? '<span class="meta">读取中</span>' : refresh}</div>${body}</section>`;
+    return `<section class="card native-minutes"><div class="section-title"><h2>会议纪要</h2>${entry?.loading ? '<span class="meta">读取中</span>' : refresh}</div>${body}</section>`;
   }
   function minutesSourceHtml() {
     const p = S.minutes.get(S.sheet.sessionId)?.data;
@@ -1595,7 +1653,7 @@
     toast(p.title_source === 'manual' ? '已改名' : '已恢复自动名称');
   }
   function renameHtml() {
-    const h = S.history, source = { manual: '手动命名', agenda: '议程目标', generated: 'AI 概括', auto: '按原话自动取', short: '内容较少', none: '' }[h.title_source] || '';
+    const h = S.history, source = { manual: '手动命名', agenda: '议程目标', minutes: '纪要主题', generated: 'AI 概括', auto: '按原话自动取', short: '内容较少', none: '' }[h.title_source] || '';
     return frame('会议名称', `<label class="form-field"><span>会议名称（留空恢复自动名称）</span><input id="rename-input" maxlength="40" value="${esc(h.title_source === 'manual' ? h.display_title : '')}" placeholder="${esc(h.display_title || '例如：安卓版本排期')}"><small>现在的名称：${esc(meetingName(h))}${source ? ` · ${source}` : ''}</small></label>
       <button class="button primary" type="button" data-act="rename-save"><span>保存名称</span></button>`);
   }

@@ -35,7 +35,7 @@
     "boardTestsPassed": 7,
     "hostingTestsPassed": 4,
     "protectedRuntimeFiles": 28,
-    "nativeUITestEntriesPassed": 48,
+    "nativeUITestEntriesPassed": 53,
     "backendMeetingTestsPassed": 15,
     "screenshotsCaptured": 194,
     "interactiveEntries": 217,
@@ -45,12 +45,14 @@
     "backendReadRouteTestsPassed": 6,
     "screenshotsRefreshedThisRound": 182,
     "screenshotsAddedThisRound": 12,
-    "logicTestEvidence": "work/p1-device-settings-20261012/web-logic.txt",
+    "logicTestEvidence": "work/p1-device-settings-20261012/merged-web-logic.txt",
     "screenshotEvidence": "screenshots/capture-results.json",
     "kotlinLogicTestsPassed": 43,
     "backendStorageRegressionTestsPassed": 60,
     "newBackendStorageTests": 21,
-    "inheritedBackendEvidence": "后端与JVM数字沿用P0已验证证据；本轮未改动或重跑后端/JVM。"
+    "inheritedBackendEvidence": "后端与JVM数字沿用P0已验证证据；本轮未改动或重跑后端/JVM。",
+    "mergedBackendTestsPassed": 98,
+    "integrationBase": "024df7a"
   },
   "nativeFlow": {
     "entry": "native-flow.html",
@@ -80,6 +82,7 @@
     "settings": "第五导航改为设置；保留全部原设置入口、链接与内容范围",
     "devicePreviewBoundary": "网页设备事件及Android H5为隔离模拟，未连接真实设备SDK",
     "screenshotsRefreshed": 182,
-    "newStates": 12
+    "newStates": 12,
+    "mergedNativeProtection": "保留同伴录音豆、纪要、任务板；日常不接收会议任务板，全文到期/模式变化撤回并阻止迟到恢复。"
   }
 }

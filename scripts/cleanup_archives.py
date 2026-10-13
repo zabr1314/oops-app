@@ -43,6 +43,17 @@ def cleanup(directory, now=None):
     meetings = Meetings(os.path.join(directory, 'meetings'), retention_days=0)
     recordings = Recordings(os.path.join(directory, 'recordings'))
     result = dict(transcripts=meetings.cleanup(now), recording_files=recordings.cleanup(now))
+    board_dir = os.path.join(directory, 'boards')
+    if os.path.isdir(board_dir):
+        for name in os.listdir(board_dir):
+            if name.endswith('.json'):
+                meeting_path = os.path.join(meetings.dir, name)
+                row = None
+                if os.path.isfile(meeting_path):
+                    with open(meeting_path, encoding='utf-8') as source:
+                        row = json.load(source)
+                if row is None or row.get('transcript_status') == 'expired':
+                    os.unlink(os.path.join(board_dir, name))
     # The mirror normally contains only meetings/ and recordings/. A full backend also has helper inputs.
     if os.path.isfile(os.path.join(directory, 'feishu', 'state.json')):
         from feishu_actions import FeishuActions, State, Jobs

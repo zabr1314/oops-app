@@ -44,6 +44,7 @@ from voiceprint_invites import invite_person
 from recordings import RecordingError, Recordings
 from archive_policy import ArchivePolicies, ArchivePolicyError
 from task_resolver import load_deepseek, owner_for, resolve_all
+import task_board
 from feishu_actions import FeishuActions
 from speaker_attribution import (attribute, calibrated_probability, owner_features, OWNER_EVENT,
                                  SEGMENT_EVENT, consolidate_trial, leading_guess, merge_for_display,
@@ -1200,8 +1201,11 @@ class Backend:
         self.recordings = Recordings(os.path.join(state, "recordings"), deleted=self.meeting_deleted,
                                      policies=self.archive_policies, require_storage_policy=True)
         # The Oops bot: private meeting summaries, task notices, follow-up events, the ledger and Mac helper jobs.
+        self.boards = task_board.Boards(os.path.join(state, "boards"), self.resolver, log, source_rows=self.board_sources)
         self.feishu = (FeishuActions(self, state, self.lark, run_lark, log, dry_run=args.feishu == "dry-run")
                        if os.environ.get("OOPS_FEISHU_BOT") == "1" else None)
+        # With minutes, post-meeting review covers the sentences they rest on, not every line the live tagging flagged.
+        self.meetings.cited = self.feishu.cited_sentences if self.feishu else None
         self.speakers = Speakers(args.speaker_accept, args.speaker_margin, os.path.join(state, "voiceprints.json"))
         self.speaker_preview, self.preview_error = None, None
         if getattr(args, 'speaker_preview', False) and self.speakers.ready:
@@ -1331,6 +1335,8 @@ class Backend:
     def cleanup_storage(self):
         """Also callable by an offline scheduler; content is not placed in logs."""
         result = dict(transcripts=self.meetings.cleanup(), recording_files=self.recordings.cleanup())
+        boards = getattr(self, 'boards', None)
+        if boards: boards.cleanup()
         feishu = getattr(self, 'feishu', None)
         if feishu:
             for name in os.listdir(self.meetings.dir):
@@ -1343,6 +1349,19 @@ class Backend:
                         log('辅助输入清理跳过无效存档：' + type(error).__name__)
         self.prune_transient_caches()
         return result
+
+    def board_sources(self, sid):
+        """Only a saved meeting supplies persistent board evidence; daily processing has no meeting archive."""
+        try:
+            with open(self.meetings.path(sid), encoding='utf-8') as source:
+                row = json.load(source)
+            from archive_policy import expired
+            if row.get('transcript_status') == 'expired' or expired(row.get('storage_policy'), 'transcript'):
+                return None
+            reviews = row.get('reviews', {})
+            return [dict(u, review=reviews.get(u['id'], {})) for u in row['utterances']]
+        except FileNotFoundError:
+            return None
 
     def start_storage_cleanup(self):
         stop = threading.Event()
@@ -1740,8 +1759,9 @@ class Backend:
                     return self.speakers.diagnose(pcm)
                 if req.get("consent") is not True or req.get("single_speaker") is not True:
                     raise ValueError("请由本人同意并确认录音仅包含本人声音")
-                if req.get("name") not in TEAM or req.get("source") not in ("mic", "remote"):
-                    raise ValueError("请选择团队成员，使用手机或外接麦克风现场录入")
+                # One profile per capture device: "bean" is the Anker 录音豆, which hears a room differently from a phone.
+                if req.get("name") not in TEAM or req.get("source") not in ("mic", "remote", "bean"):
+                    raise ValueError("请选择团队成员，使用手机、外接麦克风或录音豆现场录入")
                 if not isinstance(req.get("sample_id"), str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,100}", req["sample_id"]):
                     raise ValueError("录音编号无效")
                 result = self.speakers.enroll(req, pcm)
@@ -1814,7 +1834,21 @@ class Backend:
                             "clause_speaker": speaker, "due_raw": primary["due_raw"],
                             "other_tasks": [t["what"] for t in tasks[1:]]}
         iso = resolve_date(when.group(0), reference_date(req)) if when else None
-        return {"who": ownership["owner"], **ownership, "what": what, "task_context": task_context,
+        board = None
+        if req.get("board") is True and isinstance(req.get("session_id"), str):
+            # The meeting's running task list (task_board): drafts are folded in on a background thread, so the
+            # list returned here is the one before this sentence; the phone reads GET .../board for the update.
+            boards = getattr(self, "boards", None)
+            if boards:
+                if tasks:
+                    lines = [dict(id=str(u.get("id", "")), text=u.get("text", ""), speaker=u.get("speaker"))
+                             for u in context + utterances if isinstance(u, dict) and u.get("text")]
+                    source = str(tasks[0]["utterance"].get("id", ""))
+                    boards.submit(req["session_id"], [dict(what=t["what"], source=source,
+                                                           owner=(mapped if i == 0 else owner_for(t, None, [])) or "")
+                                                      for i, t in enumerate(tasks)], lines)
+                board = boards.view(req["session_id"])
+        return {"who": ownership["owner"], **ownership, "what": what, "task_context": task_context, **({"board": board} if board else {}),
                 "when": {"iso": iso.isoformat() if iso else None, "raw": when.group(0)} if when else None,
                 "constraint": constraint, "assignee_candidates": TEAM, "timing_ms": {"deepseek_ms": deepseek_ms}}
 
@@ -2088,6 +2122,12 @@ class Handler(BaseHTTPRequestHandler):
                 value = self.backend.recording_call("chunk", m.group(1), name=m.group(2), offset=offset,
                                                     data=self.rfile.read(size), sha=self.headers.get("X-Content-SHA256", ""))
                 summary = f"{m.group(2)} received={value['received']}"
+            elif method == "GET" and re.fullmatch(r"/v1/meetings/[^/]+/board", urlsplit(self.path).path):
+                try:
+                    value = self.backend.boards.view(urlsplit(self.path).path.split("/")[3])
+                except ValueError as error:
+                    raise ApiError(400, 'BAD_REQUEST', str(error)) from None
+                summary = f"board {len(value['tasks'])} tasks"
             elif method == "GET" and re.fullmatch(r"/v1/meetings/[^/]+/minutes", urlsplit(self.path).path):
                 sid = urlsplit(self.path).path.split("/")[3]
                 try:

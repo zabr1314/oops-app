@@ -4,6 +4,7 @@ import datetime as dt
 import tempfile
 
 from local_backend import Backend
+from minutes_vote import RUNS  # the minutes are written RUNS times and voted on
 from test_feishu_actions import EMPTY, FakeResolver, click, make, sent_to, texts, utter, wait_for
 
 
@@ -63,7 +64,7 @@ def test_each_review_withdraws_cached_minutes_without_erasing_history_or_current
         calls.clear()
         actions.after_meeting(row)
         actions.ledger_safe("s")
-        assert calls == [] and resolver.asked == 1  # no automatic rewrite, resend or stale ledger retry
+        assert calls == [] and resolver.asked == RUNS  # no automatic rewrite, resend or stale ledger retry
 
 
 def test_same_review_and_clearing_absent_fields_leave_current_cache_ready():
@@ -78,7 +79,18 @@ def test_same_review_and_clearing_absent_fields_leave_current_cache_ready():
     assert view["status"] == "ready" and view["minutes"]["actions"][0]["owner"] == "江古月"
     assert actions.state.get("meetings", "s", "analysis_fingerprint") == fingerprint
     assert not actions.state.get("meetings", "s", "analysis_invalidated")
-    assert resolver.asked == 1 and calls == []
+    assert resolver.asked == RUNS and calls == []
+
+
+def test_source_change_withdraws_minutes_title_but_keeps_review_citations():
+    actions, meetings, calls, _ = fixture()
+    analysis = actions.state.get('meetings', 's', 'analysis')
+    actions.state.put(dict(analysis, theme='周五样片评审'), 'meetings', 's', 'analysis')
+    meetings.cited = actions.cited_sentences
+    assert meetings.load('s')['title_source'] == 'minutes'
+    review(actions, owner='江古月')
+    assert meetings.load('s')['title_source'] != 'minutes'
+    assert actions.cited_sentences('s')['tasks'] == {'u1'}
 
 
 def test_review_during_model_generation_keeps_result_as_history_and_never_sends_it():
@@ -94,7 +106,7 @@ def test_review_during_model_generation_keeps_result_as_history_and_never_sends_
     assert_stale(actions, meetings)
     assert actions.state.get("meetings", "s", "analysis") and calls == []
     actions.after_meeting(meetings.load("s"))
-    assert resolver.asked == 1 and calls == []
+    assert resolver.asked == RUNS and calls == []
 
 
 def test_old_card_buttons_cannot_create_new_actions_but_existing_receipt_is_readable():
@@ -238,7 +250,7 @@ def test_manual_review_precedes_generation_and_rejected_candidates_do_not_become
     view = actions.minutes_view(meetings.load("s"))
     assert view["status"] == "ready"
     assert view["minutes"]["decisions"] == [] and view["minutes"]["follow_ups"] == []
-    assert view["minutes"]["actions"][0]["owner"] == "江古月" and resolver.asked == 1
+    assert view["minutes"]["actions"][0]["owner"] == "江古月" and resolver.asked == RUNS
 
 
 def test_legacy_reviewed_minutes_are_not_assumed_current_and_automatic_jobs_keep_their_rules():
