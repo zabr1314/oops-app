@@ -51,14 +51,14 @@
   },
   {
     "id": "H06",
-    "title": "选择工作空间",
+    "title": "内容范围与共享入口",
     "module": "首页",
     "route": {
       "view": "home"
     },
     "scene": "default",
     "merged": true,
-    "note": "首页顶栏点击空间名称，打开「选择工作空间」面板；管理入口到 settings-spaces。"
+    "note": "首页默认查看我的内容；内容范围与共享已合并到设置 → 内容范围与共享（settings-spaces），可在对应内容中明确选择共享或撤回。"
   },
   {
     "id": "H07",
@@ -1117,18 +1117,18 @@
   },
   {
     "id": "U01",
-    "title": "我的",
-    "module": "我的",
+    "title": "设置",
+    "module": "设置",
     "route": {
       "view": "settings"
     },
     "scene": "default",
-    "note": "我的主入口，身份、助理、声音、设备、连接、空间、隐私、通知、账户与用量。"
+    "note": "设置主入口，账户、身份、助理偏好、声音、设备、连接、隐私与共享、通知及用量。"
   },
   {
     "id": "U02",
     "title": "身份与多角色",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-identity"
     },
@@ -1138,7 +1138,7 @@
   {
     "id": "U03",
     "title": "助理偏好",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-preferences"
     },
@@ -1148,7 +1148,7 @@
   {
     "id": "U04",
     "title": "我的声音身份",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice"
     },
@@ -1159,7 +1159,7 @@
   {
     "id": "U05",
     "title": "设备与声音入口",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-devices"
     },
@@ -1169,7 +1169,7 @@
   {
     "id": "U06",
     "title": "配对与连接失败",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-pair",
       "id": "录音豆"
@@ -1180,7 +1180,7 @@
   {
     "id": "U07",
     "title": "桌宠与会议室扩展",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-deskpet"
     },
@@ -1190,7 +1190,7 @@
   {
     "id": "U08",
     "title": "工具连接",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tools"
     },
@@ -1200,7 +1200,7 @@
   {
     "id": "U09",
     "title": "飞书授权与过期",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "飞书"
@@ -1211,7 +1211,7 @@
   {
     "id": "U10",
     "title": "日历与会议同步",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "日历"
@@ -1222,7 +1222,7 @@
   {
     "id": "U11",
     "title": "资料库范围",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "资料库"
@@ -1233,7 +1233,7 @@
   {
     "id": "U12",
     "title": "电脑 Agent",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-tool",
       "id": "电脑助手"
@@ -1244,7 +1244,7 @@
   {
     "id": "U13",
     "title": "录音豆详情",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-device",
       "id": "录音豆"
@@ -1255,7 +1255,7 @@
   {
     "id": "U14",
     "title": "离线记录与同步",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-sync"
     },
@@ -1265,7 +1265,7 @@
   {
     "id": "U15",
     "title": "分享与撤销",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-sharing"
     },
@@ -1275,7 +1275,7 @@
   {
     "id": "U16",
     "title": "保存期限",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-retention"
     },
@@ -1285,7 +1285,7 @@
   {
     "id": "U17",
     "title": "内容范围与共享",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-spaces"
     },
@@ -1295,7 +1295,7 @@
   {
     "id": "U18",
     "title": "协作与共享 · 兼容入口",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-members"
     },
@@ -1306,7 +1306,7 @@
   {
     "id": "U19",
     "title": "删除与回收站",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-trash"
     },
@@ -1316,7 +1316,7 @@
   {
     "id": "U20",
     "title": "隐私与数据",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-privacy"
     },
@@ -1326,7 +1326,7 @@
   {
     "id": "U21",
     "title": "数据导出与清理",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-export"
     },
@@ -1336,7 +1336,7 @@
   {
     "id": "U22",
     "title": "访问与操作记录",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-logs"
     },
@@ -1346,7 +1346,7 @@
   {
     "id": "U23",
     "title": "通知与自主等级",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-notifications"
     },
@@ -1356,7 +1356,7 @@
   {
     "id": "U24",
     "title": "登录与账户安全",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-account"
     },
@@ -1366,7 +1366,7 @@
   {
     "id": "U25",
     "title": "用量与方案",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-usage"
     },
@@ -1584,7 +1584,7 @@
   {
     "id": "P10",
     "title": "智能聆听 · 唤醒与起止设置",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-listening"
     },
@@ -1608,7 +1608,7 @@
   {
     "id": "P12",
     "title": "声音身份 · 样本与明确关联",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-identities"
     },
@@ -1619,7 +1619,7 @@
   {
     "id": "P13",
     "title": "声音身份 · 已匹配结果",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1630,7 +1630,7 @@
   {
     "id": "P14",
     "title": "声音身份 · 低把握待确认",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1641,7 +1641,7 @@
   {
     "id": "P15",
     "title": "声音身份 · 识别失败",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -1652,7 +1652,7 @@
   {
     "id": "P16",
     "title": "声音身份 · 人工核对关联",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-voice-match"
     },
@@ -2025,7 +2025,7 @@
   {
     "id": "F05",
     "title": "助理偏好 · 自定义方式与长度",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-preferences"
     },
@@ -2062,7 +2062,7 @@
   {
     "id": "F06",
     "title": "助理偏好 · 可修改的引导草稿",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-preferences"
     },
@@ -2223,7 +2223,7 @@
   {
     "id": "F15",
     "title": "文档角色 · 选定来源与原话",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-role-import"
     },
@@ -2242,7 +2242,7 @@
   {
     "id": "F16",
     "title": "文档角色 · 可修改并明确应用的草稿",
-    "module": "我的",
+    "module": "设置",
     "route": {
       "view": "settings-role-import"
     },
@@ -2642,5 +2642,165 @@
     "shot": "f33-project-sharing",
     "actions": [],
     "note": "保留项目背景、历史决定、获准资料及同一任务引用；不另建团队门户。"
+  },
+  {
+    "id": "D01",
+    "title": "首次配对 · 开机聆听默认未选",
+    "module": "设置",
+    "route": {
+      "view": "settings-pair",
+      "id": "录音豆"
+    },
+    "scene": "default",
+    "shot": "d01-device-p1-pair",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "扫描示例设备",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "id": "D02",
+    "title": "设备开机 · 日常临时聆听",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-listening",
+    "shot": "d02-device-p1-listening",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D03",
+    "title": "设备启动 · 声音权限缺失",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-permission",
+    "shot": "d03-device-p1-permission",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D04",
+    "title": "设备启动 · 后台受限",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-background",
+    "shot": "d04-device-p1-background",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D05",
+    "title": "设备启动 · 设备断连",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-disconnected",
+    "shot": "d05-device-p1-disconnected",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D06",
+    "title": "设备启动 · 安静时段",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-quiet",
+    "shot": "d06-device-p1-quiet",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D07",
+    "title": "设备启动 · 服务不可用",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-service",
+    "shot": "d07-device-p1-service",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D08",
+    "title": "条件恢复 · 等待明确继续",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-recovery",
+    "shot": "d08-device-p1-recovery",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D09",
+    "title": "暂停后重连 · 不自行恢复",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-paused",
+    "shot": "d09-device-p1-paused",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D10",
+    "title": "停止后重连 · 不重新开始",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-stopped",
+    "shot": "d10-device-p1-stopped",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D11",
+    "title": "已有会议 · 设备启动让位",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-meeting",
+    "shot": "d11-device-p1-meeting",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。"
+  },
+  {
+    "id": "D12",
+    "title": "开机聆听 · 独立开启确认",
+    "module": "设置",
+    "route": {
+      "view": "settings-device",
+      "id": "录音豆"
+    },
+    "scene": "device-p1-enable",
+    "shot": "d12-device-p1-enable",
+    "note": "P1前端示例：首次配对、启动与恢复选择可操作；不会启动真实设备或调用麦克风。已有会议、暂停、停止和安静时段优先。",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "switch",
+        "name": "开机自动聆听",
+        "exact": true
+      }
+    ]
   }
 ]

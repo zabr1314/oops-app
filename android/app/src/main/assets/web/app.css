@@ -113,6 +113,21 @@ body { -webkit-tap-highlight-color: transparent; }
 .minutes-item { padding: 10px 0; border-bottom: 1px solid #eeeaf4; }
 .minutes-item p, .minutes-overview { white-space: pre-wrap; overflow-wrap: anywhere; }
 .minutes-item .chip { margin: 6px 6px 0 0; }
+
+/* Independent pairing example: this surface never represents native hardware state. */
+.native-device-boundary { padding: 12px 14px; border: 1px solid #e8e0f8; border-radius: 14px; background: #faf7ff; }
+.native-device-boundary p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.native-device-hero > .row-icon { width: 52px; height: 52px; margin-bottom: 10px; border-radius: 16px; background: var(--soft); display: grid; place-items: center; }
+.native-device-hero > strong { display: block; color: var(--brand); margin: 14px 0; line-height: 1.6; }
+.native-device-preferences { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--line); }
+.native-device-preferences p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.native-device-conditions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.native-device-conditions .chip { min-height: 42px; display: inline-flex; align-items: center; gap: 5px; }
+.native-device-conditions .chip.selected { color: var(--brand); background: var(--soft); border-color: #c8b7ef; }
+.native-device-controls .button + .button { margin-top: 8px; }
+.native-device-times { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.native-device-times input { min-width: 0; width: 100%; }
+
 .minutes-theme { display: grid; gap: 2px; margin: 4px 0 8px; }
 .minutes-theme small { color: #7a7490; font-size: 12px; }
 .minutes-theme strong { font-size: 18px; line-height: 1.4; }

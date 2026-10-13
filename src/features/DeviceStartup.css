@@ -1,0 +1,12 @@
+.device-startup .ds-pair-hero { display: grid; justify-items: center; gap: 12px; padding: 24px 18px; text-align: center; background: linear-gradient(145deg,#f7f4ff,#fff); }
+.device-startup .ds-device-head { display: flex; align-items: center; gap: 12px; }
+.device-startup .ds-device-head > div { flex: 1; min-width: 0; }
+.device-startup .ds-device-head h2 { font-size: 20px; margin: 0 0 4px; }
+.device-startup .ds-device-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 16px; background: #f0eaff; }
+.device-startup .ds-status { border-color: #e4def4; }
+.device-startup .ds-status-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.device-startup .ds-status h3 { margin: 0 0 8px; font-size: 19px; }
+.device-startup .ds-status p { font-size: 13px; line-height: 1.7; margin: 0; color: #68657a; }
+.device-startup .ds-listening { background: #f3faf7; border-color: #d8e9df; }
+.device-startup .ds-blocked,.device-startup .ds-held { background: #fffbf4; border-color: #f0e2c7; }
+.device-startup .ds-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

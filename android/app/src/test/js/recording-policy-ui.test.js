@@ -150,3 +150,35 @@ test('idle and active labels follow daily versus formal policy without claiming 
   u.receive('state',{capturing:true,sessionId:'meeting-label',recordingMode:'meeting',memorySync:true,sourceReady:true});u.click('go',{route:'home'});
   assert.match(u.el('screen').innerHTML,/正式会议 ·/);u.click('go',{route:'sessions'});assert.match(u.el('screen').innerHTML,/分别保留所选7、30或90天/);assert.doesNotMatch(u.el('screen').innerHTML,/长期保留在团队服务器/);
 });
+
+const board = (session, text='合并后的真实会议任务') => ({session_id:session,pending:false,tasks:[{id:'t1',what:text,owner:'',priority:'P0',status:'open',sources:['u1'],reason:'主线任务'}]});
+const showActions = u => {u.click('go',{route:'live'});u.click('tab',{tab:'actions'});};
+test('daily rejects live and restored task boards even after five-minute prune and stop',()=>{
+  const u=ui();u.receive('state',{capturing:true,recordingMode:'daily',sessionId:'daily-board'});u.receive('tasks.board',board('daily-board','不应长期留下的日常内容'));showActions(u);
+  assert.doesNotMatch(u.el('screen').innerHTML,/不应长期留下的日常内容/);
+  u.receive('transcript.pruned',{ids:['u1']});u.receive('tasks.board',board('daily-board','不应长期留下的日常内容'));showActions(u);assert.doesNotMatch(u.el('screen').innerHTML,/不应长期留下的日常内容/);
+  u.receive('snapshot',{state:{capturing:true,recordingMode:'daily',sessionId:'daily-board'},transcript:[],team:[],board:board('daily-board','旧快照里的日常内容')});showActions(u);assert.doesNotMatch(u.el('screen').innerHTML,/旧快照里的日常内容/);
+  u.receive('capture.cleared',{mode:'daily'});u.receive('state',{capturing:false,sessionId:''});u.receive('tasks.board',board('daily-board','停止后的日常内容'));showActions(u);assert.doesNotMatch(u.el('screen').innerHTML,/停止后的日常内容/);
+});
+test('formal board survives normal subtitle pruning but never actual transcript expiry or a stale restore',()=>{
+  const u=ui();u.receive('state',{capturing:true,recordingMode:'meeting',sessionId:'formal-board',transcriptExpired:false});u.receive('tasks.board',board('formal-board'));showActions(u);assert.match(u.el('screen').innerHTML,/合并后的真实会议任务/);
+  u.receive('transcript.pruned',{ids:['u1']});showActions(u);assert.match(u.el('screen').innerHTML,/合并后的真实会议任务/);
+  u.receive('capture.assetsExpired',{asset:'transcript'});u.receive('tasks.board',board('formal-board'));showActions(u);assert.doesNotMatch(u.el('screen').innerHTML,/合并后的真实会议任务/);
+  u.receive('snapshot',{state:{capturing:false,recordingMode:'meeting',sessionId:'formal-board',transcriptExpired:false},transcript:[],team:[],board:board('formal-board')});showActions(u);assert.doesNotMatch(u.el('screen').innerHTML,/合并后的真实会议任务/);
+});
+test('mode change and authoritative expired state immediately revoke board; another session cannot restore it',()=>{
+  const u=ui();u.receive('state',{capturing:true,recordingMode:'meeting',sessionId:'mode-board',transcriptExpired:false});u.receive('tasks.board',board('mode-board'));showActions(u);assert.match(u.el('screen').innerHTML,/合并后的真实会议任务/);
+  u.receive('state',{recordingMode:'daily'});assert.doesNotMatch(u.el('screen').innerHTML,/合并后的真实会议任务/);
+  u.receive('state',{recordingMode:'meeting',transcriptExpired:true});u.receive('tasks.board',board('mode-board'));showActions(u);assert.doesNotMatch(u.el('screen').innerHTML,/合并后的真实会议任务/);
+  u.receive('state',{sessionId:'new-formal',recordingMode:'meeting',transcriptExpired:false});u.receive('tasks.board',board('mode-board'));showActions(u);assert.doesNotMatch(u.el('screen').innerHTML,/合并后的真实会议任务/);
+  u.receive('tasks.board',board('new-formal','新正式会议任务'));assert.match(u.el('screen').innerHTML,/新正式会议任务/);
+});
+test('a restored formal board requires usable source IDs and old-service replies cannot override it',()=>{
+  const u=ui();u.receive('snapshot',{state:{capturing:true,recordingMode:'meeting',sessionId:'restore-board',transcriptExpired:false,backendUrl:'new-server'},transcript:[],team:[],board:{...board('restore-board'),tasks:[...board('restore-board').tasks,{id:'bad',what:'没有来源不应显示',priority:'P0',status:'open'}]}});showActions(u);
+  assert.match(u.el('screen').innerHTML,/合并后的真实会议任务/);assert.doesNotMatch(u.el('screen').innerHTML,/没有来源不应显示/);
+  u.receive('tasks.board',{...board('restore-board','旧服务器内容'),backendUrl:'old-server'});assert.doesNotMatch(u.el('screen').innerHTML,/旧服务器内容/);
+});
+test('simulator matches the native meeting-only board contract',()=>{
+  const daily=mock();daily.send('capture.start');daily.advance(26000);assert.equal(daily.last('tasks.board'),undefined);daily.advance(326000);assert.equal(daily.last('tasks.board'),undefined);
+  const meeting=mock();meeting.send('capture.start',{recordingMode:'meeting',cloudSaveConfirmed:true,audioRetentionDays:30,transcriptRetentionDays:30});meeting.advance(26000);assert.ok(meeting.last('tasks.board')?.tasks.length);
+});

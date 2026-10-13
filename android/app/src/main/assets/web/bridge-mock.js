@@ -76,7 +76,7 @@
           state.notices.push(n); emit('notice', n);
         }
         emit('session.summary', summary());
-        if (final.tag === 'commitment') { // the server's running task list (task_board), simulated
+        if (state.recordingMode === 'meeting' && final.tag === 'commitment') { // Native task_board is formal-meeting only.
           const tasks = sessionTranscript.filter((x) => x.tag === 'commitment').map((x, n) => ({ id: `t${n + 1}`, what: x.text.replace(/[。！？]$/, ''),
             owner: '', priority: n ? 'P2' : 'P0', status: 'open', sources: [x.id], reason: n ? '有参考价值，可以排期（模拟）' : '直接影响本次结论（模拟）' }));
           emit('tasks.board', { session_id: state.sessionId, tasks, pending: false, updated_at: new Date().toISOString() });

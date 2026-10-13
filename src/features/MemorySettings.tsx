@@ -11,6 +11,7 @@ import { VoiceIdentityMatch, VoiceIdentitySamples } from './VoiceIdentity';
 import { Avatar, Badge, Button, Card, Check, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, SelectField, Sheet, Source, Tabs, Toggle } from '../ui';
 import { PrivacyNoticeCard } from './PrivacyNotice';
 import { DocumentRoleDraft } from './DocumentRoleDraft';
+import { DevicePair, DeviceDetail } from './DeviceStartup';
 import './MemorySettings.css';
 
 const PERSONAL = '我的空间';
@@ -417,8 +418,8 @@ export function memoryTitle(route: Route) {
   return titles[route.view] || '记忆';
 }
 export function settingsTitle(route: Route) {
-  const titles: Record<string, string> = { settings: '我的', 'settings-role-import': '文档角色建议', 'settings-identity': '身份与角色', 'settings-preferences': '助理偏好', 'settings-voice': '我的声音身份', 'settings-voice-identities': '声音样本与身份', 'settings-voice-match': '声音识别与核对', 'settings-devices': '设备与声音入口', 'settings-device': '设备详情', 'settings-pair': '添加设备', 'settings-deskpet': '桌面伙伴', 'settings-tools': '工具连接', 'settings-tool': '连接与权限', 'settings-sync': '离线记录', 'settings-sharing': '已共享内容', 'settings-retention': '保存期限', 'settings-spaces': '内容范围与共享', 'settings-members': '协作与共享', 'settings-trash': '回收站', 'settings-privacy': '隐私与数据', 'settings-export': '导出与清理', 'settings-logs': '操作记录', 'settings-notifications': '通知与自主等级', 'settings-account': '账户与安全', 'settings-usage': '用量与方案' };
-  return titles[route.view] || '我的';
+  const titles: Record<string, string> = { settings: '设置', 'settings-role-import': '文档角色建议', 'settings-identity': '身份与角色', 'settings-preferences': '助理偏好', 'settings-voice': '我的声音身份', 'settings-voice-identities': '声音样本与身份', 'settings-voice-match': '声音识别与核对', 'settings-devices': '设备与声音入口', 'settings-device': '设备详情', 'settings-pair': '添加设备', 'settings-deskpet': '桌面伙伴', 'settings-tools': '工具连接', 'settings-tool': '连接与权限', 'settings-sync': '离线记录', 'settings-sharing': '已共享内容', 'settings-retention': '保存期限', 'settings-spaces': '内容范围与共享', 'settings-members': '协作与共享', 'settings-trash': '回收站', 'settings-privacy': '隐私与数据', 'settings-export': '导出与清理', 'settings-logs': '操作记录', 'settings-notifications': '通知与自主等级', 'settings-account': '账户与安全', 'settings-usage': '用量与方案' };
+  return titles[route.view] || '设置';
 }
 export function MemoryScreens() {
   const { data, route } = useOops();
@@ -737,8 +738,34 @@ export function SettingsScreens() {
   return components[route.view] || <SettingsHome />;
 }
 function SettingsHome() {
-  const { data, navigate } = useOops(); const sections = [{ title: '我与助理', rows: [['身份与角色', 'settings-identity', 'user-circle'], ['助理偏好', 'settings-preferences', 'sliders-horizontal'], ['我的声音身份', 'settings-voice', 'waveform']] }, { title: '连接', rows: [['聆听设置', 'settings-listening', 'ear'], ['设备与声音入口', 'settings-devices', 'bluetooth'], ['工具连接', 'settings-tools', 'plugs-connected']] }, { title: '数据与运行', rows: [['内容范围与共享', 'settings-spaces', 'share-network'], ['隐私与数据', 'settings-privacy', 'shield-check'], ['通知与自主等级', 'settings-notifications', 'bell'], ['账户与安全', 'settings-account', 'lock-key'], ['用量与方案', 'settings-usage', 'chart-bar']] }];
-  return <div className="stack"><Card className="ms-profile"><div className="ms-person-head"><Avatar name={data.settings.name} /><div><h2>{data.settings.name || '登录 Oops'}</h2><p className="meta">{data.settings.role}</p></div></div>{data.settings.retention.focus && <p className="ms-profile-focus">现在关注：{data.settings.retention.focus}</p>}<p className="meta">{data.settings.tone} · {data.settings.retention.answerLength || '适中'}</p><p className="meta">正在查看：{data.settings.space === PERSONAL ? '我的内容' : data.settings.space + '的共享内容'}</p></Card>{sections.map(s => <div key={s.title}><SectionTitle>{s.title}</SectionTitle><Card>{s.rows.map(([title, view, icon]) => <Row key={view} title={title} icon={icon} onClick={() => navigate({ view })} subtitle={view === 'settings-tools' ? Object.values(data.settings.connections).filter(Boolean).length + ' 个示例连接' : view === 'settings-devices' ? Object.values(data.settings.devices).filter(Boolean).length + ' 台设备' : view === 'settings-spaces' ? '查看已有内容范围，管理主动共享的内容' : undefined} />)}</Card></div>)}<p className="meta ms-center">Oops 体验版 · 数据保存在当前浏览器</p></div>;
+  const { data, navigate } = useOops();
+  const sections = [
+    { title: '账户', rows: [['账户与安全', 'settings-account', 'lock-key'], ['用量与方案', 'settings-usage', 'chart-bar']] },
+    { title: '身份与助理', rows: [['身份与角色', 'settings-identity', 'user-circle'], ['助理偏好', 'settings-preferences', 'sliders-horizontal'], ['我的声音身份', 'settings-voice', 'waveform']] },
+    { title: '设备与聆听', rows: [['设备与声音入口', 'settings-devices', 'bluetooth'], ['聆听设置', 'settings-listening', 'ear']] },
+    { title: '工具与通知', rows: [['工具连接', 'settings-tools', 'plugs-connected'], ['通知与自主等级', 'settings-notifications', 'bell']] },
+    { title: '隐私与共享', rows: [['隐私与数据', 'settings-privacy', 'shield-check'], ['内容范围与共享', 'settings-spaces', 'share-network']] },
+  ];
+  function subtitle(view: string) {
+    if (view === 'settings-account') return data.settings.name || '管理账户和登录安全';
+    if (view === 'settings-identity') return data.settings.role || '称呼、角色与适用场景';
+    if (view === 'settings-preferences') return '回答方式、长度与关注事项';
+    if (view === 'settings-voice') return '声音样本、身份关联与使用范围';
+    if (view === 'settings-tools') return Object.values(data.settings.connections).filter(Boolean).length + ' 个示例连接';
+    if (view === 'settings-devices') return Object.values(data.settings.devices).filter(Boolean).length + ' 台示例设备';
+    if (view === 'settings-listening') return '对话检测、唤醒与自动起止';
+    if (view === 'settings-privacy') return '记录保存、声音许可与数据管理';
+    if (view === 'settings-spaces') return data.settings.space === PERSONAL ? '我的内容 · 管理主动共享的内容' : '正在查看：' + data.settings.space + '的共享内容';
+    return undefined;
+  }
+  return <div className="stack settings-home">
+    <p className="settings-home-intro">调整你的助理、设备与资料使用方式</p>
+    {sections.map(section => <div className="settings-home-section" key={section.title}>
+      <SectionTitle>{section.title}</SectionTitle>
+      <Card className="settings-home-list">{section.rows.map(([title, view, icon]) => <Row key={view} title={title} subtitle={subtitle(view)} icon={icon} onClick={() => navigate({ view })} />)}</Card>
+    </div>)}
+    <p className="meta settings-home-version">Oops 体验版</p>
+  </div>;
 }
 function Identity() {
   const { data, update, navigate, toast } = useOops(); const key = 'identity-draft:' + data.settings.space + ':' + JSON.stringify([data.settings.name, data.settings.role, data.settings.retention.roles, data.settings.retention.roleContext, data.settings.retention['identity-updated-at']]);
@@ -769,18 +796,9 @@ function VoiceEnrollment() {
 function Devices() {
   const { data, navigate } = useOops(); return <div className="stack"><Notice>硬件连接为本机示例，未接入真实设备。</Notice><SectionTitle action="添加" onAction={() => navigate({ view: 'settings-pair' })}>我的设备</SectionTitle><Card>{Object.entries(data.settings.devices).map(([name, connected]) => <Row key={name} title={name} icon={name === '桌面伙伴' ? 'desktop' : 'microphone'} subtitle={connected ? '示例已连接' : '未连接'} onClick={() => navigate({ view: name === '桌面伙伴' ? 'settings-deskpet' : 'settings-device', id: name })} />)}</Card><Card><Row title="离线记录与同步" icon="cloud-arrow-up" subtitle="查看待同步的示例记录" onClick={() => navigate({ view: 'settings-sync' })} /><Row title="电脑助手" icon="desktop" onClick={() => navigate({ view: 'settings-tool', id: '电脑助手' })} /></Card><SectionTitle>可选扩展</SectionTitle><Card><Row title="桌面伙伴与会议室" subtitle="通过状态表达陪伴" icon="sparkle" onClick={() => navigate({ view: 'settings-deskpet' })} /></Card></div>;
 }
-function DevicePair() {
-  const { data, route, update, navigate, toast } = useOops(); const [device, setDevice] = useState(route.id || '录音豆'); const [state, setState] = useState('待扫描');
-  return <div className="stack"><Notice>扫描和配对为示例，不请求真实蓝牙连接。</Notice><SelectField label="设备类型" value={device} onChange={v => { setDevice(v); setState('待扫描'); }} options={['录音豆', '桌面伙伴', '会议室入口']} /><Card className="ms-voice-card"><Icon name="bluetooth" size={42} /><h3>{state === '待扫描' ? '让设备靠近手机' : state === '已发现' ? device + ' · OOPS Demo' : state === '失败' ? '没有连接成功' : '配对完成'}</h3><p className="meta">{state === '失败' ? '检查电源后重试。' : state === '已发现' ? '选择设备以完成示例配对。' : '示例设备 · 不含真实硬件状态'}</p></Card>{state === '待扫描' || state === '失败' ? <Button onClick={() => setState('已发现')}>{state === '失败' ? '重新扫描' : '扫描示例设备'}</Button> : state === '已发现' ? <><Button onClick={() => { update(d => saveSetting(d, { devices: { ...d.settings.devices, [device]: true }, retention: { ...d.settings.retention, ['device-status:' + device]: '在线', ['device-battery:' + device]: '86%' } }, '配对示例设备：' + device)); setState('完成'); toast('示例配对完成'); }}>确认配对</Button><Button tone="secondary" onClick={() => setState('失败')}>体验连接失败</Button></> : <Button onClick={() => navigate({ view: device === '桌面伙伴' ? 'settings-deskpet' : 'settings-device', id: device })}>查看设备</Button>}<p className="meta">{Object.values(data.settings.devices).filter(Boolean).length} 台设备已完成本机示例连接</p></div>;
-}
-function DeviceDetail() {
-  const { data, route, update, navigate, toast } = useOops(); const device = route.id || '录音豆'; const connected = !!data.settings.devices[device]; const offline = data.settings.retention['device-status:' + device] === '离线'; const [remove, setRemove] = useState(false);
-  const toggle = (key: string, value: boolean) => update(d => saveSetting(d, { toggles: { ...d.settings.toggles, [key]: value } }, '调整设备设置：' + device));
-  return <div className="stack"><Notice>设备状态与控制均为本机示例。</Notice><Card><Icon name="microphone" size={38} /><h2>{device}</h2><Badge tone={connected && !offline ? 'green' : 'orange'}>{connected ? offline ? '示例离线' : '示例在线' : '未配对'}</Badge>{connected && <p className="meta">电量 {data.settings.retention['device-battery:' + device] || '86%'} · 固件 1.0 示例</p>}</Card>{!connected ? <Button onClick={() => navigate({ view: 'settings-pair', id: device })}>配对设备</Button> : <><Toggle label="按键启动记录" value={data.settings.toggles['buttonRecord:' + device] !== false} onChange={v => toggle('buttonRecord:' + device, v)} /><Toggle label="指示灯反馈" value={data.settings.toggles['light:' + device] !== false} onChange={v => toggle('light:' + device, v)} /><Button onClick={() => { if (offline) { toast('设备离线，请先重连'); return; } navigate({ view: 'session-create', mode: '日常' }); }}>打开记录控制</Button><Button tone="secondary" onClick={() => { update(d => saveSetting(d, { retention: { ...d.settings.retention, ['device-status:' + device]: offline ? '在线' : '离线', offlinePending: offline ? d.settings.retention.offlinePending || '0' : '2' } }, offline ? '重连示例设备' : '切换示例离线状态')); toast(offline ? '示例已重连' : '已切换为示例离线'); }}>{offline ? '重新连接（示例）' : '体验设备离线'}</Button><Button tone="secondary" onClick={() => navigate({ view: 'settings-sync' })}>查看离线记录</Button><Button tone="danger" onClick={() => setRemove(true)}>解除配对</Button></>}<Sheet open={remove} onClose={() => setRemove(false)} title="解除配对？"><p>已保存的会话保留，设备不再作为声音入口。</p><Button tone="danger" onClick={() => { update(d => saveSetting(d, { devices: { ...d.settings.devices, [device]: false } }, '解除配对：' + device)); setRemove(false); toast('已解除示例配对'); }}>解除配对</Button></Sheet></div>;
-}
 function Deskpet() {
   const { data, update, navigate, toast } = useOops(); const [state, setState] = useState(data.settings.retention.petFeedback || '陪伴中'); const connected = !!data.settings.devices['桌面伙伴'];
-  return <div className="stack"><Card className="ms-voice-card"><img src="/brand/mascot.png" className="ms-pet" alt="Oops 桌面伙伴" /><h2>{state}</h2><Badge>{connected ? '示例已连接' : '概念体验'}</Badge></Card><Notice>反馈为屏幕演示，不控制真实桌宠或会议室设备。</Notice>{!connected && <Button onClick={() => navigate({ view: 'settings-pair', id: '桌面伙伴' })}>体验桌宠配对</Button>}<SectionTitle>看看它怎样回应</SectionTitle><div className="action-grid">{['陪伴中', '正在听', '正在想', '等待确认', '暂时安静'].map(x => <Button key={x} tone={state === x ? 'primary' : 'secondary'} onClick={() => { setState(x); update(d => saveSetting(d, { retention: { ...d.settings.retention, petFeedback: x } }, '桌宠反馈示例：' + x)); }}>{x}</Button>)}</div><Toggle label="允许轻声提示" value={!!data.settings.toggles.petVoice} onChange={v => { update(d => saveSetting(d, { toggles: { ...d.settings.toggles, petVoice: v } }, '桌宠提示设置')); toast('已保存'); }} /><Toggle label="安静时只用状态反馈" value={data.settings.toggles.petQuiet !== false} onChange={v => update(d => saveSetting(d, { toggles: { ...d.settings.toggles, petQuiet: v } }, '桌宠安静反馈'))} /><SelectField label="使用场景" value={data.settings.retention.petScene || '个人桌面'} options={['个人桌面', '共享会议室（概念）']} onChange={v => update(d => saveSetting(d, { retention: { ...d.settings.retention, petScene: v } }, '桌宠使用场景'))} /></div>;
+  return <div className="stack"><Card className="ms-voice-card"><img src="/brand/mascot.png" className="ms-pet" alt="Oops 桌面伙伴" /><h2>{state}</h2><Badge>{connected ? '示例已连接' : '概念体验'}</Badge></Card><Notice>反馈为屏幕演示，不控制真实桌宠或会议室设备。</Notice>{!connected && <Button onClick={() => navigate({ view: 'settings-pair', id: '桌面伙伴' })}>体验桌宠配对</Button>}<Card><Row title="设备与开机聆听" subtitle="单独管理这台设备的启动选择" icon="ear" onClick={() => navigate({ view: 'settings-device', id: '桌面伙伴' })} /></Card><SectionTitle>看看它怎样回应</SectionTitle><div className="action-grid">{['陪伴中', '正在听', '正在想', '等待确认', '暂时安静'].map(x => <Button key={x} tone={state === x ? 'primary' : 'secondary'} onClick={() => { setState(x); update(d => saveSetting(d, { retention: { ...d.settings.retention, petFeedback: x } }, '桌宠反馈示例：' + x)); }}>{x}</Button>)}</div><Toggle label="允许轻声提示" value={!!data.settings.toggles.petVoice} onChange={v => { update(d => saveSetting(d, { toggles: { ...d.settings.toggles, petVoice: v } }, '桌宠提示设置')); toast('已保存'); }} /><Toggle label="安静时只用状态反馈" value={data.settings.toggles.petQuiet !== false} onChange={v => update(d => saveSetting(d, { toggles: { ...d.settings.toggles, petQuiet: v } }, '桌宠安静反馈'))} /><SelectField label="使用场景" value={data.settings.retention.petScene || '个人桌面'} options={['个人桌面', '共享会议室（概念）']} onChange={v => update(d => saveSetting(d, { retention: { ...d.settings.retention, petScene: v } }, '桌宠使用场景'))} /></div>;
 }
 const tools = ['飞书', '邮箱', '日历', '资料库', '电脑助手'];
 function Tools() {

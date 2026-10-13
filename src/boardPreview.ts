@@ -8,6 +8,7 @@ import { refreshTaskSuggestions } from './taskSuggestionsLogic';
 import { refreshSessionIntelligence, saveNoticePlan, readSessionIntelligence, updateIntelligenceItem } from './sessionIntelligenceLogic';
 import { SELF_VOICE_ID, addVoiceSample, bindVoiceSample, runVoiceMatch } from './voiceIdentityLogic';
 import { applyStorageDeadlines, finishDailySession, newStoragePolicy, pinSessionEvidence } from './storagePolicy';
+import { pairStartupDevice, transitionDeviceStartup, reconcileDeviceStartupHolds, type DeviceCondition } from './deviceStartupLogic';
 
 const PERSONAL = '我的空间';
 const TEAM = 'Oops 产品团队';
@@ -129,6 +130,31 @@ function p0VoiceData(data: AppData, scenario?: '匹配' | '低置信度' | '识�
   data = addVoiceSample(data, { id: 'p0-voice-sample', label: '我的对话声音', phrase: '今天我想把重要的想法记下来，让每一步都更清楚。', duration: 8, quality: '清晰', created: '10月9日 10:00' }).data;
   data = bindVoiceSample(data, 'p0-voice-sample', SELF_VOICE_ID).data;
   return scenario ? runVoiceMatch(data, 'p0-voice-sample', scenario, 'p0-voice-result', '10月9日 10:01').data : data;
+}
+
+function deviceStartupPreview(data: AppData, scene: string): AppData {
+  const now = new Date();
+  data = pairStartupDevice(data, '录音豆', scene !== 'device-p1-enable');
+  let condition: DeviceCondition = 'ready';
+  if (['device-p1-listening', 'device-p1-paused', 'device-p1-stopped', 'device-p1-recovery'].includes(scene)) {
+    data = transitionDeviceStartup(data, { condition: 'ready', recoveryRequired: false }, '录音豆', { type: 'signal' }, { sessionId: 'device-p1-daily', now }).data;
+  }
+  if (scene === 'device-p1-paused') data = transitionDeviceStartup(data, { condition: 'ready', recoveryRequired: false }, '录音豆', { type: 'pause' }, { sessionId: '', now }).data;
+  if (scene === 'device-p1-stopped') data = reconcileDeviceStartupHolds(data, finishDailySession(data, 'device-p1-daily', [], now.getTime()));
+  if (scene === 'device-p1-meeting') {
+    data.activeSessionId = 'session-001';
+    data.sessions = data.sessions.map(s => s.id === 'session-001' ? { ...s, status: '进行中', storage: newStoragePolicy(data, 'meeting', true, now.getTime()) } : s);
+  }
+  const blocked: Record<string, DeviceCondition> = { 'device-p1-permission': 'permission', 'device-p1-background': 'background',
+    'device-p1-disconnected': 'disconnected', 'device-p1-quiet': 'quiet', 'device-p1-service': 'service' };
+  if (blocked[scene]) condition = blocked[scene];
+  if (scene === 'device-p1-recovery') {
+    const result = transitionDeviceStartup(data, { condition: 'ready', recoveryRequired: false }, '录音豆', { type: 'condition', condition: 'disconnected' }, { sessionId: '', now });
+    data = result.data;
+  }
+  data.settings.retention['board-device-condition'] = condition;
+  data.settings.toggles['board-device-recovery'] = scene === 'device-p1-recovery' || !!blocked[scene];
+  return data;
 }
 
 export function boardPreviewData(scene: string): AppData {
@@ -327,6 +353,7 @@ export function boardPreviewData(scene: string): AppData {
     default:
       break;
   }
+  if (scene.startsWith('device-p1-')) data = deviceStartupPreview(data, scene);
   // Bind after every scene-specific mutation, so approval always refers to its actual data.
   return bindDrafts(data);
 }
