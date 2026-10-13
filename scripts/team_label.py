@@ -28,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from label_meeting import clip_wav  # noqa: E402
-from label_workflow import expressions, content_audit, current_label, row_fingerprint  # noqa: E402
+from label_workflow import expressions, content_audit, current_label, row_fingerprint, digest  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PEOPLE = ["林春源", "洪玉麟", "江古月", "黄丽萍"]
@@ -93,7 +93,7 @@ def clean(raw, rows):
                     if field == 'kind':
                         if source.get('review_mode') in ('blind', 'ai_assisted'):
                             item['kind_source']['review_mode'] = source['review_mode']
-                            for key in ('suggestion_fingerprint', 'model', 'prompt_version'):
+                            for key in ('suggestion_fingerprint', 'model', 'prompt_version', 'group_transaction'):
                                 if isinstance(source.get(key), str):
                                     item['kind_source'][key] = source[key][:200]
                         elif 'review_mode' in source:
@@ -226,6 +226,13 @@ class Data:
                                   "wav": os.path.join(path, "audio.wav")}
         self.lock = threading.RLock()
         self.groups = self._voice_groups()
+        self._similarity_recovering = False
+        self._similarity_cache = None
+        self._recover_similarity()
+
+    def _recover_similarity(self):
+        from label_similarity_review import recover
+        recover(self)
 
     def _voice_groups(self):
         groups = {}
@@ -267,6 +274,7 @@ class Data:
         os.replace(path + '.tmp', path)
 
     def _document(self, mid, name):
+        self._recover_similarity()
         doc = self._read(self.labels_path(mid, name), {})
         doc['labels'] = clean(doc.get('labels', {}), self.meetings[mid]['rows'])
         # Group approval lives separately. Never persist its materialized speaker as single-row truth.
@@ -347,7 +355,10 @@ class Data:
             snapshot = json.loads(json.dumps(doc[field]))
             entry = dict(_label_review=True, review_mode=body.get('review_mode', 'assisted'),
                 snapshot=snapshot, changed_ids=[]) if field == 'labels' else snapshot
-            doc['history'] = (doc['history'] + [entry])[-30:]
+            history = doc['history'] + [entry]
+            ordinary = [i for i, item in enumerate(history) if not item.get('group_transaction')]
+            keep = set(ordinary[-30:])
+            doc['history'] = [item for i, item in enumerate(history) if item.get('group_transaction') or i in keep]
         doc['revision'] += 1
         doc['seen'][request] = fingerprint
         doc['seen'] = dict(list(doc['seen'].items())[-100:])
@@ -412,13 +423,98 @@ class Data:
                 self._write(self._exposure_path(mid, name), dict(ids=sorted(current),
                     at=time.strftime('%Y-%m-%dT%H:%M:%S'), source='suggestions_delivered'))
 
+    def similar_review_state(self, name):
+        from label_similarity_review import latest_undo
+        transaction = latest_undo(self, name)
+        return dict(can_undo_group=bool(transaction), transaction=transaction)
+
+    def similar_payload(self, mid, name, expression, threshold=80, scope='all'):
+        """Find source-bound, unreviewed near-duplicates; never call a model."""
+        from label_similarity import SimilarityIndex, VERSION
+        if name not in PEOPLE or mid not in self.meetings or not isinstance(expression, str):
+            raise ValueError('unknown anchor')
+        if isinstance(threshold, bool) or threshold not in (60, 70, 80) or scope not in ('all', 'current'):
+            raise ValueError('invalid similarity filter')
+        with self.lock:
+            self._recover_similarity()
+            mids = sorted(self.meetings) if scope == 'all' else [mid]
+            pool, members, allowed, revisions, source_keys = [], {}, set(), {}, []
+            for meeting_id in mids:
+                ai, status = self.annotation_state(meeting_id)
+                if not ai or status not in ('ready', 'partial'):
+                    continue
+                document = self._document(meeting_id, name)
+                revisions[meeting_id] = document['revision']
+                labels = document['labels']
+                rows = self.rows_with_claims(meeting_id)
+                row_map = {row['id']: row for row in rows}
+                units = expressions(self.meetings[meeting_id]['rows'], ai)
+                legacy = {uid: e for e in expressions(rows) for uid in e['ids']}
+                reserved = set(ai['blind']['ids'])
+                predictions = {e['id']: e for e in ai['expressions']}
+                source_keys.append((meeting_id, ai['source_hash'], ai.get('updated_at'),
+                                    [e['suggestion_fingerprint'] for e in ai['expressions']]))
+                for unit in units:
+                    prediction = predictions.get(unit['id'])
+                    if (not prediction or prediction['kind'] not in ('fact', 'info', 'noise')
+                            or reserved.intersection(unit['ids'])):
+                        continue
+                    uid = meeting_id + '/' + unit['id']
+                    member = dict(meeting=meeting_id, title=self.meetings[meeting_id]['title'],
+                        expression=unit['id'], fingerprint=unit['fingerprint'],
+                        suggestion_fingerprint=prediction['suggestion_fingerprint'],
+                        kind=prediction['kind'], text=unit['text'], start_ms=unit['start_ms'], ids=unit['ids'])
+                    members[uid] = member
+                    pool.append(dict(unit, id=uid, kind=prediction['kind']))
+                    existing = [labels.get(child, {}) for child in unit['ids']]
+                    if not any(label.get('kind') for label in existing):
+                        allowed.add(uid)
+                    elif meeting_id == mid and unit['id'] == expression:
+                        current = [current_label(row_map[child], labels.get(child, {}), unit,
+                            legacy.get(child)) for child in unit['ids']]
+                        if (all(label.get('kind') == prediction['kind'] for label in current)
+                                and not any(label.get('kind_source', {}).get('mode') == 'single' for label in current)):
+                            member['readonly'] = True
+                            allowed.add(uid)
+            anchor_id = mid + '/' + expression
+            if anchor_id not in members or anchor_id not in allowed:
+                raise RevisionConflict('Anchor no longer eligible')
+            protected_terms = sorted(set(PEOPLE + [person[-2:] for person in PEOPLE]))
+            cache_key = digest(dict(sources=source_keys, protected_terms=protected_terms))
+            if not self._similarity_cache or self._similarity_cache[0] != cache_key:
+                self._similarity_cache = (cache_key, SimilarityIndex(pool, protected_terms=protected_terms))
+            matches = self._similarity_cache[1].matches(anchor_id, threshold=threshold,
+                allowed_ids=allowed, limit=100)
+            candidates = [dict(members[item['id']], score=item['score']) for item in matches[:99]]
+            anchor = dict(members[anchor_id], score=100, readonly=bool(members[anchor_id].get('readonly')))
+            payload = dict(anchor=anchor, candidates=candidates, revisions=revisions,
+                threshold=threshold, scope=scope, method=VERSION, limit=100, truncated=len(matches) > 99)
+            payload['group_fingerprint'] = digest(payload)
+            for meeting_id in mids:
+                self._mark_exposed(meeting_id, name, [child for member in [anchor] + candidates
+                    if member['meeting'] == meeting_id for child in member['ids']])
+            return dict(payload, **self.similar_review_state(name))
+
+    def review_similar(self, name, body):
+        from label_similarity_review import review
+        if name not in PEOPLE:
+            raise ValueError('unknown reviewer')
+        anchor = body.get('anchor', {})
+        return review(self, name, body, resolve_group=lambda: self.similar_payload(
+            anchor.get('meeting'), name, anchor.get('expression'), body.get('threshold', 80), body.get('scope', 'all')))
+
     def meeting_payload(self, mid, name, review_mode='assisted'):
+        with self.lock:
+            self._recover_similarity()
+            return self._meeting_payload(mid, name, review_mode)
+
+    def _meeting_payload(self, mid, name, review_mode='assisted'):
         if review_mode not in ('assisted', 'blind'):
             raise ValueError('unknown review mode')
         all_rows = self.rows_with_claims(mid)
         ai, status = self.annotation_state(mid)
         reserved = set((ai or {}).get('blind', {}).get('ids', []))
-        units = self.content_units(mid)
+        units = expressions(self.meetings[mid]['rows'], ai)
         selected = [e for e in units if (set(e['ids']) <= reserved) == (review_mode == 'blind')]
         ids = {uid for e in selected for uid in e['ids']}
         rows = [r for r in all_rows if r['id'] in ids]
@@ -452,6 +548,7 @@ class Data:
             review_mode=review_mode,
             blind=dict(total=len(blind_units), completed=complete_blind, remaining=len(blind_units)-complete_blind),
             assistance=dict(status=status, model=(ai or {}).get('model'), generated_at=(ai or {}).get('updated_at')) if review_mode == 'assisted' else None,
+            similar_review=self.similar_review_state(name) if review_mode == 'assisted' else None,
             content_progress={k: audit[k] for k in ('required_expression_count', 'complete_required_expressions',
                 'context_expression_count', 'ready_for_content')})
 
@@ -536,7 +633,7 @@ class Data:
                     if not expression and field in ('owner', 'dup') and label.get('kind'):
                         # Correcting a dependent content field makes this row an explicit exception too.
                         provenance = {k: v for k, v in label.get('kind_source', {}).items()
-                            if k in ('review_mode', 'suggestion_fingerprint', 'model', 'prompt_version')}
+                            if k in ('review_mode', 'suggestion_fingerprint', 'model', 'prompt_version', 'group_transaction')}
                         label['kind_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row), **provenance)
                 doc['labels'] = clean(doc['labels'], rows)
             self._finish_review(doc, body)
@@ -617,14 +714,18 @@ class Data:
         labels = clean(raw, self.meetings[mid]["rows"])
         # Legacy whole-document clients cannot assert a server-controlled blind/AI origin.
         for label in labels.values():
-            for key in ('review_mode', 'suggestion_fingerprint', 'model', 'prompt_version'):
+            for key in ('review_mode', 'suggestion_fingerprint', 'model', 'prompt_version', 'group_transaction'):
                 label.get('kind_source', {}).pop(key, None)
         path = self.labels_path(mid, name)
         with self.lock:
             doc = self._document(mid, name)
             if revision is not None and revision != doc['revision']:
                 raise RevisionConflict('State changed')
-            doc['history'] = (doc['history'] + [doc['labels']])[-30:]
+            history = doc['history'] + [doc['labels']]
+            ordinary = [item for item in history if not isinstance(item, dict) or not item.get('group_transaction')][-30:]
+            keep = {id(item) for item in ordinary}
+            doc['history'] = [item for item in history if id(item) in keep
+                or isinstance(item, dict) and item.get('group_transaction')]
             doc.update(meeting=mid, labeler=name, labels=labels, revision=doc['revision'] + 1)
             self._write(path, doc)
         return labels
@@ -711,6 +812,15 @@ def make_handler(data, secret):
             return name
 
         def do_GET(self):
+            from label_similarity_review import SimilarityRecoveryError
+            try:
+                return self._get()
+            except SimilarityRecoveryError:
+                return self.send(503, b'{"error":"recovery_required"}')
+            except OSError:
+                return self.send(503, b'{"error":"storage_unavailable"}')
+
+        def _get(self):
             url = urllib.parse.urlsplit(self.path)
             query = urllib.parse.parse_qs(url.query)
             if url.path in ("/", "/index.html"):
@@ -729,6 +839,16 @@ def make_handler(data, secret):
                 return self.send(200, json.dumps({"roles": data.roles, "claims": data.claims()}, ensure_ascii=False).encode())
             if url.path == '/api/identity' and name != TEAM:
                 return self.send(200, json.dumps(data.identity_payload(name), ensure_ascii=False).encode())
+            if url.path == '/api/similar' and name != TEAM:
+                try:
+                    result = data.similar_payload((query.get('meeting') or [''])[0], name,
+                        (query.get('expression') or [''])[0], int((query.get('threshold') or ['80'])[0]),
+                        (query.get('scope') or ['all'])[0])
+                except RevisionConflict:
+                    return self.send(409, b'{"error":"changed"}')
+                except (ValueError, TypeError):
+                    return self.send(400, b'{}')
+                return self.send(200, json.dumps(result, ensure_ascii=False).encode())
             m = re.fullmatch(r"/api/meeting/([0-9]{4})", url.path)
             if m and name == TEAM:
                 return self.send(400, b'{"error":"who"}')
@@ -754,11 +874,36 @@ def make_handler(data, secret):
             self.send(404, b"{}")
 
         def do_POST(self):
+            from label_similarity_review import SimilarityRecoveryError
+            try:
+                return self._post()
+            except SimilarityRecoveryError:
+                return self.send(503, b'{"error":"recovery_required"}')
+            except OSError:
+                return self.send(503, b'{"error":"storage_unavailable"}')
+
+        def _post(self):
             url = urllib.parse.urlsplit(self.path)
             name = self.who({})
             if not name or name == TEAM:
                 return self.send(401, b'{"error":"link"}')
             size = int(self.headers.get("Content-Length") or 0)
+            if url.path == '/api/similar/review':
+                from label_similarity_review import SimilarityConflict, SimilarityRecoveryError
+                if not 0 < size <= 1_000_000:
+                    return self.send(400, b'{}')
+                try:
+                    body = json.loads(self.rfile.read(size))
+                    if not isinstance(body, dict):
+                        raise ValueError('object required')
+                    result = data.review_similar(name, body)
+                except (RevisionConflict, SimilarityConflict):
+                    return self.send(409, b'{"error":"changed"}')
+                except SimilarityRecoveryError:
+                    return self.send(503, b'{"error":"recovery_required"}')
+                except (ValueError, TypeError, AttributeError):
+                    return self.send(400, b'{}')
+                return self.send(200, json.dumps(result, ensure_ascii=False).encode())
             review = re.fullmatch(r'/api/meeting/([0-9]{4})/review', url.path)
             if url.path == '/api/identity' or review and review.group(1) in data.meetings:
                 if not 0 < size <= 65536:
