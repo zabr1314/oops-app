@@ -199,6 +199,11 @@ def validate_response(raw, batch, rows, model):
     if not isinstance(raw, dict) or not isinstance(raw.get("expressions"), list):
         raise InvalidSuggestion("response_shape")
     by_id = {row["id"]: row for row in rows}
+    # Every expression binds to the same immutable source in this validation.
+    # Rehashing the entire meeting for each expression made review requests
+    # quadratic in transcript size. Keep this local: a subsequent validation
+    # always rehashes its current rows, without a source/sidecar cache.
+    frozen_source = source_hash(rows)
     expected = batch["ids"]
     covered, result = [], []
     for item in raw["expressions"]:
@@ -218,7 +223,7 @@ def validate_response(raw, batch, rows, model):
         expression = dict(id="ai:" + group[0], ids=group, kind=item["kind"], reason=reason.strip(),
             row_fingerprints={row["id"]: row_fingerprint(row) for row in selected},
             fingerprint=digest([_evidence(row) for row in selected]), model=model, batch_id=batch["id"])
-        expression["suggestion_fingerprint"] = suggestion_fingerprint(expression, source_hash(rows))
+        expression["suggestion_fingerprint"] = suggestion_fingerprint(expression, frozen_source)
         result.append(expression)
         covered.extend(group)
     if covered != expected:
