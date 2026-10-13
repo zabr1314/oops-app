@@ -607,7 +607,7 @@
         <div class="ask-footer"><small>${icon('lock-key', 13)}${S.homeAskHistory ? '已存会议原话' : S.state.recordingMode === 'meeting' ? '本场会议原话' : '本场临时原话'}</small>
           <button class="input-text" data-act="home-ask-scope">${S.homeAskHistory ? '查往期会议' : '查本场'}</button>
           <button class="mic-button" data-act="home-ask" aria-label="提问">${icon('paper-plane-tilt', 23)}</button></div></div>
-      ${listRow({ act: 'go', data: 'data-route="settings"', ic: 'waveform', title: '收音与唤醒', sub: `${SOURCE_TEXT[S.state.source] || '手机麦克风'} · ${S.state.voiceTrigger !== false ? '说「Oops」找回刚才' : '语音唤醒已关闭'}` })}
+      ${listRow({ act: 'go', data: 'data-route="settings"', ic: 'waveform', title: '智能聆听', sub: `${SOURCE_TEXT[S.state.source] || '手机麦克风'} · ${S.state.voiceTrigger !== false ? '说「Oops」找回刚才' : '语音唤醒已关闭'}` })}
       ${sectionTitle('接着聊', '全部', 'go', 'data-route="sessions"')}
       <div class="home-recent">
         ${requestNotice(S.requests.history, 'history-retry', !!S.historyItems)}
@@ -971,7 +971,7 @@
 
   function memoryHtml() {
     const tab = S.memoryTab;
-    const seg = `<div class="segmented" role="tablist">${[['projects', '项目'], ['people', '人物']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
+    const seg = `<div class="segmented" role="tablist">${[['people', '人物'], ['projects', '项目']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
     if (tab === 'people') {
       const v = S.state.voiceprint || {};
       const people = v.catalog?.people || [];
