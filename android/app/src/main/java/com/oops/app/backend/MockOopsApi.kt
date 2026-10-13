@@ -6,6 +6,10 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 import java.util.concurrent.ConcurrentHashMap
+import java.security.MessageDigest
+import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.math.exp
 
 /**
@@ -21,6 +25,7 @@ class MockOopsApi(
     override suspend fun historyMinutes(id: String) = org.json.JSONObject()
         .put("session_id", id).put("status", "unavailable").put("reason", "mock")
     private val actions = ConcurrentHashMap<String, ActionResult>()
+    private val sourceNamespace = "mock-isolated-" + UUID.randomUUID().toString()
 
     override suspend fun recall(request: RecallRequest): RecallResponse {
         delay(latencyMs)
@@ -79,6 +84,7 @@ class MockOopsApi(
             .firstNotNullOfOrNull { CONSTRAINT.find(it.text)?.value }
         // No self auto-owner until independent split/owner validation has passed.
         val who = CommitmentRules.evidence(main, team).owner
+        val binding = mockSourceBinding(request)
         return DraftResponse(
             who = who,
             what = main.trim().trimEnd('。', '.', '！', '!'),
@@ -86,7 +92,30 @@ class MockOopsApi(
             whenRaw = whenRaw,
             constraint = constraint,
             assigneeCandidates = team,
+            sourceBinding = binding?.toString(),
+            sourceError = if (binding == null) "Mock 示例尚未选择有效原话，请重新选择后起草" else null,
         )
+    }
+
+    /** Presentation-only contract. It has no real server signature and never grants a production write. */
+    private fun mockSourceBinding(request: DraftRequest): JSONObject? {
+        val selected = request.utterances
+        val ids = selected.map { it.id }
+        val context = request.context.filter { it.id !in ids }.distinctBy { it.id }
+        if (request.sessionId.isBlank() || selected.size !in 1..20 || ids.distinct().size != ids.size || context.size > 20 ||
+            (selected + context).any { it.id.isBlank() || it.text.isBlank() }) return null
+        fun source(candidate: Candidate): JSONObject {
+            val hash = MessageDigest.getInstance("SHA-256").digest(candidate.text.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it.toInt() and 255) }
+            val end = candidate.text.offsetByCodePoints(0, minOf(280, candidate.text.codePointCount(0, candidate.text.length)))
+            return JSONObject().put("id", candidate.id).put("kind", "transcript").put("text_hash", hash)
+                .put("source_revision", "$sourceNamespace:$hash:${candidate.speaker.orEmpty()}")
+                .put("quote", candidate.text.substring(0, end)).put("speaker", candidate.speaker ?: JSONObject.NULL)
+                .put("review", JSONObject())
+        }
+        return JSONObject().put("version", 1).put("session_id", request.sessionId)
+            .put("sources", JSONArray(selected.map(::source))).put("context_sources", JSONArray(context.map(::source)))
+            .put("proof", sourceNamespace)
     }
 
     override suspend fun confirmAction(request: ConfirmRequest): ActionResult {

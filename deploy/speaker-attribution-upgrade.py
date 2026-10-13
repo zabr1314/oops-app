@@ -23,7 +23,7 @@ SOURCES = ('scripts/local_backend.py', 'scripts/voiceprint_registry.py',
            'scripts/speaker_attribution.py', 'scripts/speaker_validation.py',
            'scripts/voiceprint_split.py', 'scripts/speaker_preview.py',
            'scripts/meeting_features.py', 'scripts/voiceprint.py')
-SOURCES += ('scripts/speaker_acceptance.py',)
+SOURCES += ('scripts/speaker_acceptance.py', 'scripts/action_sources.py', 'scripts/task_board.py')
 VALIDATION = 'models/voiceprint/split-validation.json'
 FILES = SOURCES + (VALIDATION,)
 ALLOWED_SIGNERS = Path('/etc/oops/acceptance_allowed_signers')

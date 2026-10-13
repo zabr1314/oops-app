@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 
 BASELINE = '5b7941a5a61d52497b653bdda188cf8d179136259317cc9531f4724907196734'
-FILES = ('scripts/local_backend.py', 'scripts/meeting_features.py')
+FILES = ('scripts/local_backend.py', 'scripts/meeting_features.py', 'scripts/action_sources.py', 'scripts/task_board.py')
 APP = Path('/opt/oops/app')
 BASE = 'http://127.0.0.1:8787'
 

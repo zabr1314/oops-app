@@ -32,6 +32,9 @@
   const emit = (type, payload) => bridge.onmessage?.({ data: JSON.stringify({ type, payload }) });
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const id = (prefix) => `${prefix}-${crypto.randomUUID()}`;
+  // Isolated fixture only: no real signature, server credential, or external write.
+  const mockBinding = (sessionId, rows) => ({ version: 1, session_id: sessionId,
+    sources: rows.map(row => ({id: row.id, kind: 'transcript', text_hash: '0'.repeat(64), source_revision: 'mock-v1', quote: row.text.slice(0, 280)})) });
   let startedAt = 0, timer = null, transcript = [], cards = new Map(), drafts = new Map();
   let sessionTranscript = [], dailyCandidates = [];
   const emitted = new Set();
@@ -78,7 +81,7 @@
         emit('session.summary', summary());
         if (state.recordingMode === 'meeting' && final.tag === 'commitment') { // Native task_board is formal-meeting only.
           const tasks = sessionTranscript.filter((x) => x.tag === 'commitment').map((x, n) => ({ id: `t${n + 1}`, what: x.text.replace(/[。！？]$/, ''),
-            owner: '', priority: n ? 'P2' : 'P0', status: 'open', sources: [x.id], reason: n ? '有参考价值，可以排期（模拟）' : '直接影响本次结论（模拟）' }));
+            owner: '', priority: n ? 'P2' : 'P0', status: 'open', sources: [x.id], source_binding: mockBinding(state.sessionId, [x]), reason: n ? '有参考价值，可以排期（模拟）' : '直接影响本次结论（模拟）' }));
           emit('tasks.board', { session_id: state.sessionId, tasks, pending: false, updated_at: new Date().toISOString() });
         }
       } else if (state.sessionMs >= u.startMs && state.sessionMs < u.endMs) {
@@ -127,7 +130,9 @@
     const d = { draftId: id('d'), cardId: card.id, who: '', what: chosen.map((u) => u.text).join(' '),
       whenIso: null, whenRaw: null, constraint: '预算不能超过10万', assigneeCandidates: team,
       evidence: { utteranceIds: chosen.map((u) => u.id), quote: chosen.map((u) => u.text).join(' '),
-        startMs: chosen[0].startMs, endMs: chosen.at(-1).endMs } };
+        startMs: chosen[0].startMs, endMs: chosen.at(-1).endMs,
+        sourceBinding: flow === 'task-source-missing' ? null : mockBinding(state.sessionId || 'demo', chosen) },
+      ...(flow === 'task-source-changed' ? {sourceError: 'source_changed'} : {}) };
     drafts.set(d.draftId, d);emit('action.draft', d);
   }
   async function confirm(p) {
@@ -136,6 +141,7 @@
     const opId = draftOps.get(d.draftId) || id('op');draftOps.set(d.draftId, opId);
     const previous = actions.get(opId);
     if (previous) return emit('action.result', previous);
+    if (d.sourceError || !d.evidence.sourceBinding) throw new Error('示例原话依据尚未核验或已经变化，请重新读取后核对');
     Object.assign(d, { who: p.who, what: p.what, whenIso: p.whenIso, constraint: p.constraint });
     emit('action.result', { draftId: d.draftId, opId, status: 'pending', polling: true, mock: true });
     await sleep(600);

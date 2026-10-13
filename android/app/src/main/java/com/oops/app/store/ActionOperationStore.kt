@@ -29,6 +29,7 @@ class ActionOperationStore(private val dir: File) {
                 .put("feishu_task", JSONObject().put("guid", operation.result.taskGuid ?: JSONObject.NULL)
                     .put("url", operation.result.taskUrl ?: JSONObject.NULL))
                 .put("message", operation.result.message ?: JSONObject.NULL)
+                .put("source_invalidated", operation.result.sourceInvalidated).put("source_blocked", operation.result.sourceBlocked)
                 .put("read_back_confirmed", operation.result.readBackConfirmed))
         val target = File(dir, "${r.opId}.json")
         val temp = File(dir, "${r.opId}.tmp")
@@ -50,7 +51,7 @@ class ActionOperationStore(private val dir: File) {
                     d.getString("who"), d.getString("what"), time?.nullable("iso"), time?.nullable("raw"),
                     d.nullable("constraint"), j.getJSONArray("assignees").strings(),
                     Evidence(e.getJSONArray("utterance_ids").strings(), e.getString("quote"),
-                        e.getLong("clip_start_ms"), e.getLong("clip_end_ms")),
+                        e.getLong("clip_start_ms"), e.getLong("clip_end_ms"), e.optJSONObject("source_binding")?.toString()),
                     d.nullable("suggested_owner"), d.optString("owner_source", "none"),
                     if (d.isNull("owner_confidence")) null else d.optDouble("owner_confidence").takeIf { it.isFinite() && it in 0.0..1.0 },
                     d.optString("tier", "C"), d.optString("reason", "负责人待确认"),

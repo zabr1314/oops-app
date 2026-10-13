@@ -30,6 +30,10 @@ import com.oops.app.backend.OopsApi
 import com.oops.app.backend.RecallRequest
 import com.oops.app.backend.RecallResponse
 import com.oops.app.backend.SpeakerRequest
+import com.oops.app.backend.TaskBoardPolicy
+import com.oops.app.backend.TaskSourceBinding
+import com.oops.app.backend.RetainedTaskEvidence
+import com.oops.app.backend.TaskSourceVersions
 import com.oops.app.backend.toCandidate
 import com.oops.app.buffer.AudioRingBuffer
 import com.oops.app.buffer.TranscriptBuffer
@@ -156,6 +160,7 @@ object OopsEngine {
     private var previewResultMs = 0L
 
     @Volatile private var recordingPolicy = com.oops.app.store.RecordingPolicy()
+    @Volatile private var recordingArchiveStartedAt = ""
     private val sessionModes = ConcurrentHashMap<String, String>()
     @Volatile private var sessionId = ""
     @Volatile private var recorder: com.oops.app.store.SessionRecorder? = null
@@ -167,6 +172,12 @@ object OopsEngine {
     private val ownerHints = ConcurrentHashMap<String, com.oops.app.backend.DraftResponse>()
     /** The server's running task list for this session (P0–P3); display only, confirming still goes through drafts. */
     @Volatile private var taskBoard: JSONObject? = null
+    private var taskBoardContext: TaskBoardPolicy.Context? = null
+    private var boardSourceRevision = 0L
+    private val boardBlockedSources = mutableSetOf<String>()
+    private val boardLocalReviews = mutableMapOf<String, Map<String, String>>()
+    private val boardMutationVersions = mutableMapOf<String, Long>()
+    private val taskSourceVersions = TaskSourceVersions()
     private var boardPoll: Job? = null
     private val hintEpochs = ConcurrentHashMap<String, Long>()
     private val suggestionEpochs = ConcurrentHashMap<String, Long>()
@@ -200,6 +211,11 @@ object OopsEngine {
             opIds[draft.draftId] = operation.request.opId
         }
         rebuildApi()
+        BeanSdk.onScratchFailure = { detail -> fail("bean.storage", detail) }
+        runCatching { BeanSdk.cleanupScratch(application) }.onFailure {
+            _state.update { state -> state.copy(sourceDetail = "录音豆临时副本清理失败，请检查设备后重试") }
+            fail("capture", "录音豆临时副本清理失败，请检查设备后重试")
+        }
         recoverUnfinishedMeetings() // before any capture can start, so the new session is never mistaken for one
         watchNetwork()
         updateAssistanceState()
@@ -294,12 +310,15 @@ object OopsEngine {
             val textChanged = text && !_state.value.transcriptExpired
             if (audioChanged) { ring.discardAudio(); sessionIndex.discardAudio(); player.stop() }
             if (textChanged) {
+                _state.update { it.copy(transcriptExpired = true) }
+                invalidateTaskBoard("transcript_expired")
                 val ids = transcript.snapshot().map { it.id }
                 transcript.clear(); sessionIndex.reset(session); cards.clear()
                 drafts.keys.removeAll { !submitted.containsKey(it) }
                 ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear(); topicEvidence.clear(); conflictPairs.clear()
                 tracker = com.oops.app.notice.NoticeTracker(tracker.agenda)
                 emit(OopsEvent.Pruned(ids)); emit(OopsEvent.Json("capture.assetsExpired", JSONObject().put("asset", "transcript")))
+                refreshTaskBoard() // the server may still have independently confirmed short evidence
             }
             if (audioChanged || textChanged) {
                 _state.update { it.copy(audioExpired = audio, transcriptExpired = text) }
@@ -315,6 +334,7 @@ object OopsEngine {
     fun startCapture(kind: String, policy: com.oops.app.store.RecordingPolicy = com.oops.app.store.RecordingPolicy()) {
         synchronized(pipeline) {
             if (source != null) return
+            if (kind == Settings.SOURCE_BEAN) requireBeanSource(policy)
             settings.source = kind
             recordingPolicy = policy
             ring.reset()
@@ -323,10 +343,12 @@ object OopsEngine {
             cards.clear()
             drafts.keys.removeAll { !submitted.containsKey(it) }
             ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear()
-            taskBoard = null; boardPoll?.cancel()
+            taskBoard = null; taskBoardContext = null; boardPoll?.cancel(); boardSourceRevision++; boardBlockedSources.clear(); boardLocalReviews.clear(); boardMutationVersions.clear()
+            taskSourceVersions.invalidate(null)
             sessionId = UUID.randomUUID().toString()
             sessionModes[sessionId] = policy.mode
             val archiveStartedAt = Instant.now().toString()
+            recordingArchiveStartedAt = archiveStartedAt
             sessionIndex.reset(sessionId)
             recorder?.closeAudio()
             runCatching { com.oops.app.store.SessionRecorder.prune(File(app.filesDir, "recordings"), keep = null) }
@@ -347,31 +369,36 @@ object OopsEngine {
             optionalRequests = com.oops.app.backend.OptionalRequests()
             reconnectAttempt = 0
             asrDownSinceMs = null
-            val src = createAudioSource(kind)
+            var src: AudioSource? = null
             _state.update {
                 it.copy(
                     capturing = true, source = kind, sessionId = sessionId, sessionMs = 0, bufferedMs = 0,
                     recordingMode = policy.mode, cloudSaveConfirmed = policy.archives,
                     audioRetentionDays = policy.audioDays, transcriptRetentionDays = policy.transcriptDays,
                     audioExpired = false, transcriptExpired = false,
+                    boardSourceRevision = boardSourceRevision,
                     asr = "connecting", asrDetail = null, asrGaps = emptyList(), sourceDetail = null, sourceReady = false,
                     digestCounts = emptyMap(), notices = emptyList(), commitmentCount = 0, analysisPending = 0, analysisFailed = 0, tagsSupported = null, sessionTruncated = false,
                 )
             }
             try {
-                source = src
+                val created = createAudioSource(kind)
+                src = created
+                source = created
                 openAsrLocked()
-                src.start(audioListenerFor(src))
+                created.start(audioListenerFor(created))
             } catch (e: Throwable) {
                 Log.e(TAG, "capture failed to start", e)
                 source = null
-                src.stop()
+                runCatching { src?.stop() }.onFailure { fail("bean.storage", "音源启动失败后的临时副本清理失败，请检查设备后重试") }
                 asr?.cancel()
                 asr = null
                 _state.update { it.copy(capturing = false, asr = "off", sourceDetail = null, sourceReady = false) }
                 syncContext?.let { it.stopped = true; it.queue.halt(endToo = true); it.job?.cancel() }
                 recorder?.discard() // nothing was captured: no empty recording to upload later
                 recorder = null
+                sessionId = ""; sessionIndex.reset(""); ring.reset()
+                _state.update { it.copy(sessionId = "", sessionMs = 0, bufferedMs = 0) }
                 fail("capture", "无法开始收音：${e.message}")
                 CaptureService.stop(app)
                 return
@@ -398,7 +425,9 @@ object OopsEngine {
             client = asr
             reconnectJob?.cancel()
         }
-        src.stop()
+        runCatching { src.stop() }.onFailure {
+            fail("capture", "音源关闭或录音豆临时副本清理失败：${it.message ?: "请检查设备后重试"}")
+        }
         recorder?.closeAudio() // finals that flush after stop are still appended
         if (recordingPolicy.archives) client?.finish() else client?.cancel() // daily stop cannot flush text back into the cleared buffer
         tickJob?.cancel()
@@ -420,6 +449,7 @@ object OopsEngine {
         }
         if (!recordingPolicy.archives) {
             synchronized(pipeline) {
+                invalidateTaskBoard("daily_stopped")
                 val ids = transcript.snapshot().map { it.id }
                 sessionId = ""; asrGeneration++; asr = null
                 transcript.clear(); sessionIndex.reset(""); ring.reset(); cards.clear()
@@ -463,6 +493,12 @@ object OopsEngine {
         startCapture(kind, policy)
     }
 
+    private fun requireBeanSource(policy: com.oops.app.store.RecordingPolicy) {
+        BeanSdk.requireCaptureAllowed(policy)
+        check(BeanSdk.included) { "这个安装包没有包含录音豆 SDK，请选择手机麦克风" }
+        check(BeanAuth.fromBuildConfig().complete) { "缺少录音豆鉴权信息，请先完成设备授权" }
+    }
+
     private fun createAudioSource(kind: String): AudioSource = when (kind) {
         Settings.SOURCE_WAV -> WavFileAudioSource {
             val uri = settings.testWavUri
@@ -474,7 +510,7 @@ object OopsEngine {
                 ?: ("127.0.0.1" to RemoteAudioSource.DEFAULT_PORT)
             RemoteAudioSource(host, port)
         }
-        Settings.SOURCE_BEAN -> BeanAudioSource(BeanSdk.link(app, BeanAuth.fromBuildConfig()), ::MediaCodecOpusDecoder, kind)
+        Settings.SOURCE_BEAN -> BeanAudioSource(BeanSdk.link(app, BeanAuth.fromBuildConfig(), recordingPolicy, sessionId, recordingArchiveStartedAt), ::MediaCodecOpusDecoder, kind)
         Settings.SOURCE_BEAN_SIM -> BeanAudioSource(
             ReplayBeanLink("录音豆模拟（内置对话）", { app.assets.open(TEST_BEAN_STREAM) }), ::MediaCodecOpusDecoder, kind)
         else -> MicAudioSource()
@@ -482,14 +518,17 @@ object OopsEngine {
 
     /** Replace only the input; the timeline, transcript, retained clips and pending work survive. */
     private fun switchCaptureSource(kind: String) {
+        if (kind == Settings.SOURCE_BEAN) requireBeanSource(recordingPolicy)
+        val next = createAudioSource(kind) // construction failures must not stop the current working source
         val previous = synchronized(pipeline) {
             val active = source ?: return
             source = null // invalidate callbacks before closing the old worker
             _state.update { it.copy(sourceReady = false, sourceDetail = null, level = 0f) }
             active
         }
-        previous.stop()
-        val next = createAudioSource(kind)
+        runCatching { previous.stop() }.onFailure {
+            fail("capture", "音源关闭或录音豆临时副本清理失败：${it.message ?: "请检查设备后重试"}")
+        }
         synchronized(pipeline) {
             source = next
             resetSpeakerPreview()
@@ -964,6 +1003,8 @@ object OopsEngine {
             val hints = if (name != null) emptyList() else result?.candidates.orEmpty()
                 .filter { com.oops.app.backend.namedSpeaker(it.name) != null && it.score.isFinite() }.take(2)
             val trial = if (segments.isEmpty()) result?.usableTrial(u).orEmpty() else emptyList()
+            val previous = sessionIndex.get(u.id)
+            if (previous != null && (previous.speaker != name || previous.segments != segments)) invalidateTaskBoard("speaker_changed", setOf(u.id))
             sessionIndex.setSpeaker(session, u.id, name, segments, status, score, preview, hints, trial)?.let {
                 syncUtterance(session, it)
                 refreshOwnerHint(session, it)
@@ -981,51 +1022,122 @@ object OopsEngine {
     private fun refreshOwnerHint(session: String, utterance: Utterance) {
         if (utterance.tag != "commitment") return
         val epoch = hintEpochs.merge(utterance.id, 1L, Long::plus)!!
-        val client = api
+        val (client, requestContext) = synchronized(pipeline) { api to currentTaskBoardContext() }
         val policy = optionalRequests
         val reservation = policy.tryReserve("owner-hint") ?: return
         scope.launch {
             try {
                 val hintStart = SystemClock.elapsedRealtime()
                 val result = policy.request(reservation) { client.draftAction(DraftRequest(session,
-                    listOf(utterance.toCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toCandidate() }, board = sessionModes[session] == "meeting")) }
+                    listOf(utterance.toTaskCandidate()), sessionIndex.preceding(utterance.id, 4).map { it.toTaskCandidate() }, board = sessionModes[session] == "meeting")) }
                 timing(session, utterance.id, "draft", "http_ms" to (SystemClock.elapsedRealtime() - hintStart))
-                if (result != null && session == sessionId && hintEpochs[utterance.id] == epoch) {
-                    ownerHints[utterance.id] = result
-                    publishSessionSummary(session)
+                synchronized(pipeline) {
+                    if (requestContext.serviceEpoch != serviceEpoch || requestContext.sourceRevision != boardSourceRevision ||
+                        session != sessionId || hintEpochs[utterance.id] != epoch || sessionIndex.get(utterance.id) == null) return@synchronized
+                    if (result != null) {
+                        ownerHints[utterance.id] = result
+                        publishSessionSummary(session)
+                        result.board?.let { updateTaskBoard(requestContext, it) }
+                    }
                 }
-                result?.board?.let { updateTaskBoard(session, it) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { Log.w(TAG, "owner hint unavailable: ${error.javaClass.simpleName}") }
         }.invokeOnCompletion { reservation.close() }
     }
 
     /** The draft answer carries the list before this sentence; the server folds it in meanwhile, so read it again shortly. */
-    private fun updateTaskBoard(session: String, board: JSONObject) {
-        if (session != sessionId) return
+    private fun currentTaskBoardContext() = TaskBoardPolicy.Context(sessionId, serviceEpoch, _state.value.backendUrl,
+        boardSourceRevision, recordingPolicy.mode, _state.value.transcriptExpired)
+
+    private fun Utterance.toTaskCandidate() = copy(speaker = manualSpeaker ?: speaker).toCandidate()
+
+    private fun filteredTaskBoard(board: JSONObject, context: TaskBoardPolicy.Context): JSONObject? {
+        val rows = sessionIndex.snapshot()
+        return TaskBoardPolicy.filter(board, context, rows.associate { it.id to it.text }, boardBlockedSources,
+            rows.associate { it.id to (it.manualSpeaker ?: it.speaker) }, boardLocalReviews)
+    }
+
+    private fun rememberTaskReview(id: String, result: JSONObject) {
+        val review = result.optJSONObject("review") ?: return
+        boardLocalReviews[id] = review.keys().asSequence().filter { it in setOf("speaker", "owner", "verdict") && !review.isNull(it) }
+            .associateWith { review.getString(it) }
+    }
+
+    private fun taskSourceTicket(ids: Collection<String>) = taskSourceVersions.ticket(ids)
+    private fun taskSourcesCurrent(ticket: TaskSourceVersions.Ticket) = taskSourceVersions.current(ticket)
+
+    /** Call under pipeline. A new final/ordinary live-caption prune never calls this. */
+    private fun invalidateTaskBoard(reason: String, sourceIds: Set<String>? = null) {
         val previous = taskBoard
-        if (previous == null || previous.optString("updated_at") != board.optString("updated_at")) {
-            taskBoard = board
-            emit(OopsEvent.Json("tasks.board", JSONObject(board.toString()).put("session_id", session)))
+        taskSourceVersions.invalidate(sourceIds)
+        boardSourceRevision++
+        boardPoll?.cancel(); boardPoll = null
+        taskBoard = null; taskBoardContext = null
+        drafts.entries.forEach { (id, draft) ->
+            val dependencies = TaskSourceBinding.allSources(draft.evidence.sourceBinding, sessionId, draft.evidence.utteranceIds)
+            if (!submitted.containsKey(id) && (sourceIds == null || draft.evidence.utteranceIds.any { it in sourceIds } ||
+                    dependencies?.any { it.id in sourceIds } == true)) {
+                drafts[id] = draft.copy(evidence = draft.evidence.copy(sourceBinding = null))
+                suggestionEpochs.remove(id)
+            }
         }
-        if (!board.optBoolean("pending") || boardPoll?.isActive == true) return
-        val client = api
-        boardPoll = scope.launch {
-            repeat(BOARD_POLLS) {
-                delay(BOARD_POLL_MS)
-                val fresh = try { client.meetingBoard(session) } catch (error: CancellationException) { throw error }
-                    catch (error: Exception) { null } ?: return@repeat
-                if (session != sessionId) return@launch
-                if (taskBoard?.optString("updated_at") != fresh.optString("updated_at")) {
-                    taskBoard = fresh
-                    emit(OopsEvent.Json("tasks.board", JSONObject(fresh.toString()).put("session_id", session)))
+        _state.update { it.copy(boardSourceRevision = boardSourceRevision) }
+        val context = currentTaskBoardContext()
+        if (previous != null && sourceIds != null) {
+            val remaining = TaskBoardPolicy.withoutSources(previous, sourceIds).put("invalidated", false).put("reason", reason)
+                .put("invalidatedSourceIds", JSONArray(sourceIds.toList()))
+            if (remaining.getJSONArray("tasks").length() > 0) {
+                updateTaskBoard(context, remaining)
+                return
+            }
+        }
+        emit(OopsEvent.Json("tasks.board", serviceContext(context.serviceEpoch)
+            .put("session_id", context.sessionId).put("sourceRevision", context.sourceRevision)
+            .put("recording_mode", context.mode).put("tasks", JSONArray()).put("pending", false)
+            .put("invalidated", true).put("reason", reason).put("invalidatedSourceIds", sourceIds?.let { JSONArray(it.toList()) } ?: JSONObject.NULL)))
+    }
+
+    private fun updateTaskBoard(request: TaskBoardPolicy.Context, board: JSONObject, poll: Boolean = true) {
+        synchronized(pipeline) {
+            if (!TaskBoardPolicy.accepts(request, currentTaskBoardContext())) return
+            val accepted = filteredTaskBoard(board, request) ?: return
+            if (taskBoard?.toString() != accepted.toString()) {
+                taskBoard = accepted; taskBoardContext = request
+                emit(OopsEvent.Json("tasks.board", JSONObject(accepted.toString())))
+            }
+            if (!poll || !accepted.optBoolean("pending") || boardPoll?.isActive == true) return
+            val client = api
+            boardPoll = scope.launch {
+                repeat(BOARD_POLLS) {
+                    delay(BOARD_POLL_MS)
+                    if (!synchronized(pipeline) { TaskBoardPolicy.accepts(request, currentTaskBoardContext()) }) return@launch
+                    val fresh = try { client.meetingBoard(request.sessionId) } catch (error: CancellationException) { throw error }
+                        catch (_: Exception) { null } ?: return@repeat
+                    if (!synchronized(pipeline) { TaskBoardPolicy.accepts(request, currentTaskBoardContext()) }) return@launch
+                    updateTaskBoard(request, fresh, poll = false)
+                    if (!fresh.optBoolean("pending")) return@launch
                 }
-                if (!fresh.optBoolean("pending")) return@launch
             }
         }
     }
 
-    fun taskBoardSnapshot(): JSONObject? = taskBoard?.let { JSONObject(it.toString()).put("session_id", sessionId) }
+    private fun refreshTaskBoard() {
+        val (client, request) = synchronized(pipeline) {
+            val context = currentTaskBoardContext().takeIf { it.mode == "meeting" && it.sessionId.isNotBlank() } ?: return
+            api to context
+        }
+        scope.launch {
+            val result = try { client.meetingBoard(request.sessionId) } catch (error: CancellationException) { throw error }
+                catch (_: Exception) { null } ?: return@launch
+            updateTaskBoard(request, result)
+        }
+    }
+
+    fun taskBoardSnapshot(): JSONObject? = synchronized(pipeline) {
+        val request = taskBoardContext ?: return@synchronized null
+        if (!TaskBoardPolicy.accepts(request, currentTaskBoardContext())) return@synchronized null
+        taskBoard?.let { filteredTaskBoard(it, request) }
+    }
 
     private fun refreshDraftSuggestions(session: String, utteranceId: String) {
         drafts.values.filter { utteranceId in it.evidence.utteranceIds && !submitted.containsKey(it.draftId) }.forEach { draft ->
@@ -1038,14 +1150,18 @@ object OopsEngine {
                 try {
                     val chosen = draft.evidence.utteranceIds.mapNotNull(sessionIndex::get)
                     if (chosen.size != draft.evidence.utteranceIds.size) return@launch
+                    val context = sessionIndex.neighbors(draft.evidence.utteranceIds, 4, 1).filter { it.id !in draft.evidence.utteranceIds }
+                    val sourceTicket = taskSourceTicket((chosen + context).map { it.id })
                     val result = policy.request(reservation) { client.draftAction(DraftRequest(session,
-                        chosen.map { it.toCandidate() }, sessionIndex.neighbors(draft.evidence.utteranceIds, 4, 1)
-                            .filter { it.id !in draft.evidence.utteranceIds }.map { it.toCandidate() })) }
+                        chosen.map { it.toTaskCandidate() }, context.map { it.toTaskCandidate() })) }
                     synchronized(pipeline) {
-                        if (service != serviceEpoch || result == null || session != sessionId || submitted.containsKey(draft.draftId) ||
+                        if (service != serviceEpoch || !taskSourcesCurrent(sourceTicket) || result == null || session != sessionId || submitted.containsKey(draft.draftId) ||
                             suggestionEpochs[draft.draftId] != revision || "confirm:${draft.draftId}" in inFlight) return@synchronized
                         drafts.computeIfPresent(draft.draftId) { _, current ->
-                            com.oops.app.backend.DraftPolicy.updateModel(current, result, revision).also {
+                            val updated = com.oops.app.backend.DraftPolicy.updateModel(current, result, revision)
+                            val bound = TaskSourceBinding.sources(result.sourceBinding, session, current.evidence.utteranceIds)
+                            updated.copy(evidence = updated.evidence.copy(sourceBinding = if (bound != null) result.sourceBinding else null,
+                                quote = bound?.joinToString(" ") { it.quote } ?: updated.evidence.quote), sourceError = result.sourceError).also {
                                 emit(OopsEvent.Json("action.suggestion", com.oops.app.bridge.BridgeJson.draft(it)))
                             }
                         }
@@ -1330,10 +1446,16 @@ object OopsEngine {
                     .distinctBy { it.id }
                     .filter { it.id !in chosenIds }
                     .sortedBy { it.startMs }
+                val sourceTicket = taskSourceTicket((chosen + context).map { it.id })
                 val response = client.draftAction(
-                    DraftRequest(session, chosen.map { it.toCandidate() }, context.map { it.toCandidate() }),
+                    DraftRequest(session, chosen.map { it.toTaskCandidate() }, context.map { it.toTaskCandidate() }),
                 )
-                if (epoch != serviceEpoch || session != sessionId || (!recordingPolicy.archives && chosen.any { sessionIndex.get(it.id) == null })) return@launch
+                if (epoch != serviceEpoch || session != sessionId) return@launch
+                if (!taskSourcesCurrent(sourceTicket) || (!recordingPolicy.archives && chosen.any { sessionIndex.get(it.id) == null })) {
+                    fail("action", "原话或其上下文已变化，请重新核对并起草")
+                    return@launch
+                }
+                val binding = TaskSourceBinding.sources(response.sourceBinding, session, chosen.map { it.id })
                 val draft = ActionDraft(
                     draftId = "d" + UUID.randomUUID().toString().take(8),
                     cardId = cardId,
@@ -1345,14 +1467,15 @@ object OopsEngine {
                     assigneeCandidates = response.assigneeCandidates.ifEmpty { Settings.TEAM },
                     evidence = Evidence(
                         utteranceIds = chosen.map { it.id },
-                        quote = chosen.joinToString(" ") { it.text },
+                        quote = binding?.joinToString(" ") { it.quote } ?: chosen.joinToString(" ") { it.text },
                         clipStartMs = chosen.first().startMs,
                         clipEndMs = chosen.last().endMs,
+                        sourceBinding = if (binding != null) response.sourceBinding else null,
                     ),
                     suggestedOwner = response.suggestedOwner ?: response.who,
                     ownerSource = response.ownerSource, ownerConfidence = response.ownerConfidence,
                     tier = response.tier, reason = response.reason, ownerCandidates = response.ownerCandidates,
-                    modelRevision = 1, context = response.context,
+                    modelRevision = 1, context = response.context, sourceError = response.sourceError,
                 )
                 drafts[draft.draftId] = draft
                 Log.i(TAG, "draft ${draft.draftId}: ready")
@@ -1396,8 +1519,16 @@ object OopsEngine {
     ) {
         val base = drafts[draftId] ?: return fail("action", "这份草稿已失效")
         if (who.isBlank() || what.isBlank()) return fail("action", "请先填写负责人和事项")
-        if (!inFlight.add("confirm:$draftId")) return // 防连点
         val existing = submitted[draftId]
+        if (existing?.result?.sourceInvalidated == true)
+            return fail("action", "旧依据已撤回，请重新核对原话并生成新草稿；本次没有创建任务")
+        if (ActionWorkflow.shouldSubmit(existing?.result) && !(existing?.mock ?: (api is MockOopsApi))) {
+            val evidence = existing?.request?.draft?.evidence ?: base.evidence
+            val session = existing?.request?.sessionId ?: sessionId
+            if (!TaskSourceBinding.valid(evidence.sourceBinding, session, evidence.utteranceIds, evidence.quote))
+                return fail("action", base.sourceError ?: "原话尚未由当前服务器核对，请重新打开来源并生成草稿；不会创建飞书任务")
+        }
+        if (!inFlight.add("confirm:$draftId")) return // 防连点
         val opId = opIds.getOrPut(draftId) { UUID.randomUUID().toString() }
         val confirmedDraft = com.oops.app.backend.DraftPolicy.confirm(base, who, what, whenIso, whenRaw, constraint, ownerSelectionSource)
         val draft = existing?.request?.draft ?: if (recordingPolicy.archives) confirmedDraft else confirmedDraft.copy(
@@ -1419,6 +1550,7 @@ object OopsEngine {
 
     fun queryAction(draftId: String) {
         val operation = submitted[draftId] ?: return fail("action", "没有已提交的操作")
+        if (operation.result.sourceInvalidated) return fail("action", "已确认本次没有创建任务，请重新核对原话并起草")
         if (!inFlight.add("confirm:$draftId")) return
         runAction(operation, submit = false)
     }
@@ -1429,7 +1561,9 @@ object OopsEngine {
         val client = if (operation.mock) api.takeIf { it.name == "mock" } ?: MockOopsApi(Settings.TEAM)
             else HttpOopsApi(http, operation.backendUrl, settings.backendTokenFor(operation.backendUrl))
         emit(OopsEvent.ActionUpdate(draftId,
-            ActionResult(request.opId, ActionResult.PENDING, polling = true, mock = operation.mock)))
+            if (!submit && operation.result.sourceBlocked) ActionWorkflow.restoredPending(operation.result).copy(polling = true)
+            else ActionResult(request.opId, ActionResult.PENDING, polling = true, mock = operation.mock,
+                message = if (!submit) "正在查询原操作结果，不会重复提交" else null)))
         scope.launch {
             val result = try {
                 if (operation.result.status == ActionResult.CREATED && operation.mock) operation.result
@@ -1448,7 +1582,7 @@ object OopsEngine {
 
     fun pendingActions(): List<Pair<ActionDraft, ActionResult>> = submitted.values
         .filter { it.result.status == ActionResult.PENDING }
-        .map { it.request.draft to it.result.copy(polling = false, message = "上次操作结果尚未确认，请继续查询") }
+        .map { it.request.draft to ActionWorkflow.restoredPending(it.result) }
 
     fun selectTestWav(uri: String, name: String) {
         settings.testWavUri = uri
@@ -1756,11 +1890,38 @@ object OopsEngine {
                 .put("engine", "evidence").put("latencyMs", 0)))
             return
         }
-        if (current.size != ids.distinct().size) return fail("recall", "原话已不在本场索引里")
+        if (current.size != ids.distinct().size) {
+            if (recordingPolicy.archives && _state.value.transcriptExpired) return openRetainedTaskEvidence(ids)
+            return fail("recall", "原话已不在本场索引里")
+        }
         val card = RecallCard("c" + UUID.randomUUID().toString().take(8), if (ids.size > 1) "conflict" else "digest", null, nowMs,
             current.map { u -> CardItem(u.id, u.startMs, u.endMs, u.text, u.speaker, u.tagProb ?: 1.0, evidenceAudioAvailable(u)) },
             current.size == 1, sessionIndex.neighbors(ids, 2, 2), "session", 0, 0)
         cards[card.id] = card; emit(OopsEvent.RecallReady(card))
+    }
+
+    private fun openRetainedTaskEvidence(ids: List<String>) {
+        val (client, request) = synchronized(pipeline) {
+            val context = currentTaskBoardContext().takeIf { it.mode == "meeting" && it.transcriptExpired } ?: return
+            api to context
+        }
+        scope.launch {
+            try {
+                val history = client.historyOpen(request.sessionId)
+                synchronized(pipeline) {
+                    if (!TaskBoardPolicy.accepts(request, currentTaskBoardContext())) return@synchronized
+                    val rows = history?.let { RetainedTaskEvidence.select(it, request.sessionId, ids) }
+                    if (rows == null) { fail("recall", "这段短依据未单独确认保留，或已变化；不会恢复已到期的全文或原音"); return@synchronized }
+                    val card = RecallCard("c" + UUID.randomUUID().toString().take(8), "digest", null, nowMs,
+                        rows.map { CardItem(it.id, it.startMs, it.endMs, it.text, it.speaker, 1.0, false) },
+                        rows.size == 1, emptyList(), "saved_excerpt", 0, 0)
+                    cards[card.id] = card
+                    emit(OopsEvent.RecallReady(card))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { if (synchronized(pipeline) { TaskBoardPolicy.accepts(request, currentTaskBoardContext()) })
+                fail("recall", "短依据读取失败，请重试；不会恢复已到期的全文") }
+        }
     }
 
     private fun noticeTick(now: Long) {
@@ -1871,6 +2032,7 @@ object OopsEngine {
                         val result = client.historyDelete(value)
                         if (epoch != serviceEpoch) return@launch
                         if (result != null) {
+                            synchronized(pipeline) { if (value == sessionId) invalidateTaskBoard("source_deleted") }
                             syncContexts.filter { it.queue.sessionId == value }.forEach { it.queue.halt(endToo = true); it.job?.cancel() }
                             withContext(Dispatchers.IO) {
                                 val dir = File(app.filesDir, "recordings")
@@ -1903,8 +2065,13 @@ object OopsEngine {
                 val result = client.retainMeeting(body)
                 if (epoch != serviceEpoch) return@launch
                 if (result == null) fail("retention", "当前服务不支持独立保留，请更新服务后重试", context)
-                else emit(OopsEvent.Json("meeting.retained", result.put("sessionId", body.getString("session_id"))
-                    .put("requestId", payload.optString("requestId")).put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+                else {
+                    emit(OopsEvent.Json("meeting.retained", result.put("sessionId", body.getString("session_id"))
+                        .put("requestId", payload.optString("requestId")).put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+                    if (body.getString("session_id") == sessionId) synchronized(pipeline) {
+                        invalidateTaskBoard("retained_source_changed"); refreshTaskBoard()
+                    }
+                }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (epoch == serviceEpoch) {
                 val changed = e is com.oops.app.backend.HttpFailure && e.status == 409
@@ -1940,8 +2107,13 @@ object OopsEngine {
         require(speaker == null || speaker in Settings.TEAM || speaker in MANUAL_OTHER) { "说话人无效" }
         val epoch = serviceEpoch
         val context = serviceContext(epoch).put("operation", "speaker.correct").put("sessionId", session).put("utteranceId", utteranceId)
+        var mutationVersion: Long? = null
         val live = synchronized(pipeline) {
             if (session != sessionId) return@synchronized null
+            boardBlockedSources.add(utteranceId)
+            invalidateTaskBoard("speaker_corrected", setOf(utteranceId))
+            mutationVersion = boardSourceRevision
+            boardMutationVersions[utteranceId] = boardSourceRevision
             sessionIndex.setManual(session, utteranceId, speaker)?.also { transcript.setManual(utteranceId, speaker) }
         }
         if (live != null) {
@@ -1966,15 +2138,20 @@ object OopsEngine {
                     result = client.reviewMeeting(body)
                 }
                 if (epoch != serviceEpoch) return@launch
+                if (mutationVersion != null && synchronized(pipeline) { boardMutationVersions[utteranceId] != mutationVersion }) return@launch
                 if (result == null) {
                     fail("review", if (live != null) "服务器还没有这场会议的文字，改动只在本机" else "当前后端不支持修改说话人", context)
                     return@launch
                 }
                 emit(OopsEvent.Json("speaker.corrected", corrected(session, utteranceId, speaker, "saved")))
                 if (live != null) synchronized(pipeline) {
+                    boardBlockedSources.remove(utteranceId)
+                    boardMutationVersions.remove(utteranceId)
+                    rememberTaskReview(utteranceId, result)
                     // The server now drafts with the corrected speaker; ask again for this sentence's owner.
                     sessionIndex.get(utteranceId)?.let { refreshOwnerHint(session, it) }
                     refreshDraftSuggestions(session, utteranceId)
+                    refreshTaskBoard()
                 }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { if (epoch == serviceEpoch) fail("review", "说话人修改没有保存到服务器：${error.message}", context) }
@@ -1997,14 +2174,26 @@ object OopsEngine {
             body.put(key, value ?: JSONObject.NULL)
         }
         require(body.has("verdict") || body.has("owner")) { "没有要保存的核对" }
+        val mutationVersion = synchronized(pipeline) { if (session == sessionId) {
+            boardBlockedSources.add(utteranceId)
+            invalidateTaskBoard("review_changed", setOf(utteranceId))
+            boardSourceRevision.also { boardMutationVersions[utteranceId] = it }
+        } else null }
         val client = api
         scope.launch {
             try {
                 val result = client.reviewMeeting(body)
                 if (epoch != serviceEpoch) return@launch
+                if (mutationVersion != null && synchronized(pipeline) { boardMutationVersions[utteranceId] != mutationVersion }) return@launch
                 if (result == null) fail("review", "服务器上没有这场会议，核对没有保存", context)
-                else emit(OopsEvent.Json("review.saved", JSONObject().put("sessionId", session).put("utteranceId", utteranceId)
-                    .put("review", result.opt("review") ?: JSONObject.NULL).put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+                else {
+                    emit(OopsEvent.Json("review.saved", JSONObject().put("sessionId", session).put("utteranceId", utteranceId)
+                        .put("review", result.opt("review") ?: JSONObject.NULL).put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+                    if (session == sessionId) synchronized(pipeline) {
+                        boardBlockedSources.remove(utteranceId); boardMutationVersions.remove(utteranceId)
+                        rememberTaskReview(utteranceId, result); refreshTaskBoard()
+                    }
+                }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { if (epoch == serviceEpoch) fail("review", "核对没有保存到服务器：${error.message}", context) }
         }
@@ -2183,7 +2372,7 @@ object OopsEngine {
         emit(OopsEvent.Toast("设置已保存"))
     }
 
-    private fun rebuildApi() {
+    private fun rebuildApi() = synchronized(pipeline) {
         val url = settings.backendBaseUrl
         val nextService = Triple(settings.mockBackend, url, settings.backendToken)
         val serviceChanged = configuredService != null && configuredService != nextService
@@ -2204,7 +2393,10 @@ object OopsEngine {
                 remoteAddress = settings.remoteAddress,
             )
         }
-        if (serviceChanged) emit(OopsEvent.Json("backend.changed", JSONObject().put("backend", api.name).put("backendUrl", url).put("serviceEpoch", serviceEpoch)))
+        if (serviceChanged) {
+            emit(OopsEvent.Json("backend.changed", JSONObject().put("backend", api.name).put("backendUrl", url).put("serviceEpoch", serviceEpoch)))
+            synchronized(pipeline) { invalidateTaskBoard("service_changed") }
+        }
     }
 
     private fun serviceContext(epoch: Long) = JSONObject().put("serviceEpoch", epoch).put("backendUrl", _state.value.backendUrl)

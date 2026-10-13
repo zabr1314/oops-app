@@ -79,6 +79,61 @@ class BeanAudioSourceTest {
         override fun stop() { stopped = true }
     }
 
+    private fun listener(errors: LinkedBlockingQueue<Throwable> = LinkedBlockingQueue()) = object : AudioSource.Listener {
+        override fun onAudio(pcm: ByteArray) {}
+        override fun onError(error: Throwable) { errors.offer(error) }
+    }
+
+    @Test fun `decoder failure cannot start the real SDK or its file writer`() {
+        val link = FakeLink()
+        val source = BeanAudioSource(link, { error("no codec") }, "bean")
+        org.junit.Assert.assertThrows(IllegalStateException::class.java) { source.start(listener()) }
+        assertNull(link.sink)
+    }
+
+    @Test fun `synchronous SDK startup failure stops the link and releases decoder`() {
+        var stopped = false
+        val decoder = FakeDecoder()
+        val link = object : BeanLink {
+            override val label = "失败豆"
+            override fun start(sink: BeanLink.Sink) { error("sdk start failed") }
+            override fun stop() { stopped = true }
+        }
+        val source = BeanAudioSource(link, { decoder }, "bean")
+        org.junit.Assert.assertThrows(IllegalStateException::class.java) { source.start(listener()) }
+        assertTrue(stopped)
+        assertTrue(decoder.closed)
+    }
+
+    @Test fun `async SDK error closes the producer and stopped callbacks cannot affect a new run`() {
+        val link = FakeLink()
+        val errors = LinkedBlockingQueue<Throwable>()
+        val source = BeanAudioSource(link, { FakeDecoder() }, "bean_sim")
+        source.start(listener(errors))
+        val old = link.sink!!
+        old.onError(IllegalStateException("disconnected"))
+        assertEquals("disconnected", errors.poll(2, SECONDS)!!.message)
+        assertTrue(link.stopped)
+        source.stop()
+        source.start(listener(errors))
+        old.onError(IllegalStateException("late previous session"))
+        assertNull(errors.poll())
+        source.stop()
+    }
+
+    @Test fun `cleanup failure is propagated rather than reported as stopped successfully`() {
+        val decoder = FakeDecoder()
+        val link = object : BeanLink {
+            override val label = "失败豆"
+            override fun start(sink: BeanLink.Sink) {}
+            override fun stop() { error("scratch cleanup failed") }
+        }
+        val source = BeanAudioSource(link, { decoder }, "bean")
+        source.start(listener())
+        org.junit.Assert.assertThrows(IllegalStateException::class.java) { source.stop() }
+        assertTrue(decoder.closed)
+    }
+
     @Test
     fun `packets become 100 ms frames, lost packets a gap, the mark button a recall mark`() {
         val link = FakeLink()

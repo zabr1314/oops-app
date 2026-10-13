@@ -2,6 +2,7 @@
 import datetime as dt
 import json
 import hashlib
+from action_sources import refresh_versions, raw_revision, digest as source_text_hash, board_source_hash, board_source_row
 import logging
 import math
 import os
@@ -375,7 +376,9 @@ class Meetings:
                                 and row.get('confirmed_text_hashes', {}).get(u['id']) == hashlib.sha256(u['text'].encode()).hexdigest()):
                             evidence[u['id']] = dict(id=u['id'], text=u['text'][:280], start_ms=u['start_ms'],
                                 end_ms=u['end_ms'], tag=u.get('tag'), speaker=reviews[u['id']].get('speaker') or u.get('speaker'),
-                                confirmed=True, excerpt=True, source_status='expired', review=reviews[u['id']])
+                                confirmed=True, excerpt=True, source_status='expired', review=reviews[u['id']],
+                                source_text_hash=source_text_hash(u['text']), source_revision=raw_revision(row, u),
+                                source_board_hash=board_source_hash(board_source_row(row, u)))
                     row['retained_evidence'] = [dict(u, source_status='changed' if u.get('source_status') == 'changed' else 'expired',
                                                       transcript_status='expired') for u in list(evidence.values())[:50]]
                     changed_ids = {u['id'] for u in row['retained_evidence'] if u.get('source_status') == 'changed'}
@@ -528,6 +531,8 @@ class Meetings:
             return True
 
     def write(self, sid, row):
+        previous = read_json(self.path(sid)) if os.path.isfile(self.path(sid)) else None
+        refresh_versions(row, previous)
         row['updated_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
         fd, tmp = tempfile.mkstemp(dir=self.dir, suffix='.tmp')
         try:
@@ -609,7 +614,7 @@ class Meetings:
                     changed_quotes.add(uid)
                 kept[uid] = dict(id=uid, text=quote, start_ms=u['start_ms'], end_ms=u['end_ms'],
                     tag=u.get('tag'), speaker=u.get('review', {}).get('speaker') or u.get('speaker'),
-                    confirmed=True, confirmed_at=confirmed_at, excerpt=True, source_status='available')
+                    confirmed=True, confirmed_at=confirmed_at, excerpt=True, source_status='available', _action_rebind=True)
             saved = {s['id']: s for s in row.get('retained_summaries', [])}
             for summary in saved.values():
                 if changed_quotes.intersection(summary.get('source_ids', [])):

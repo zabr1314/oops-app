@@ -187,6 +187,7 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
                 val error = runCatching { JSONObject(text).optJSONObject("error") }.getOrNull()
                 val detail = error?.optString("message")?.take(160)?.takeIf { it.isNotBlank() }
                     ?: "服务暂时不可用"
+                ActionSourceRejected.fromHttp(response.code, text)?.let { throw it }
                 throw IOException("后端返回 ${response.code}：$detail")
             }
             JSONObject(text)

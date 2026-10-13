@@ -169,6 +169,9 @@ data class DraftResponse(
     val context: TaskContext? = null,
     /** The meeting's running task list as the server had it, when the request asked for it; display only. */
     val board: org.json.JSONObject? = null,
+    /** Server-verified source snapshot, preserved verbatim until explicit confirmation. */
+    val sourceBinding: String? = null,
+    val sourceError: String? = null,
 )
 
 /** Server-verified context resolution of the task wording: display only, never confirmed data. */
@@ -181,6 +184,7 @@ data class Evidence(
     val quote: String,
     val clipStartMs: Long,
     val clipEndMs: Long,
+    val sourceBinding: String? = null,
 )
 
 data class ActionDraft(
@@ -203,6 +207,7 @@ data class ActionDraft(
     val reviewStatus: String = "unreviewed",
     val ownerSelectionSource: String = "model",
     val context: TaskContext? = null,
+    val sourceError: String? = null,
 )
 
 data class ConfirmRequest(val opId: String, val sessionId: String, val draft: ActionDraft) {
@@ -225,6 +230,8 @@ data class ActionResult(
     val readBackConfirmed: Boolean = false,
     val polling: Boolean = false,
     val mock: Boolean = false,
+    val sourceInvalidated: Boolean = false,
+    val sourceBlocked: Boolean = false,
 ) {
     companion object {
         const val PENDING = "pending"

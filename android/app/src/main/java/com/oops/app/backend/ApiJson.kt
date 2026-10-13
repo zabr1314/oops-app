@@ -99,6 +99,8 @@ object ApiJson {
             ownerCandidates = readSpeakerCandidates(json.optJSONArray("owner_candidates")),
             context = json.optJSONObject("task_context")?.let { runCatching { taskContext(it) }.getOrNull() },
             board = json.optJSONObject("board")?.takeIf { it.optJSONArray("tasks") != null },
+            sourceBinding = json.optJSONObject("source_binding")?.toString(),
+            sourceError = json.stringOrNull("source_error"),
         )
     }
 
@@ -143,7 +145,8 @@ object ApiJson {
                     .put("utterance_ids", JSONArray(d.evidence.utteranceIds))
                     .put("quote", d.evidence.quote)
                     .put("clip_start_ms", d.evidence.clipStartMs)
-                    .put("clip_end_ms", d.evidence.clipEndMs),
+                    .put("clip_end_ms", d.evidence.clipEndMs)
+                    .apply { d.evidence.sourceBinding?.let { put("source_binding", JSONObject(it)) } },
             ).also { r.freezeWire(it.toString()) }
     }
 
@@ -155,6 +158,8 @@ object ApiJson {
             taskGuid = task?.stringOrNull("guid"),
             taskUrl = task?.stringOrNull("url"),
             message = json.stringOrNull("message"),
+            sourceInvalidated = json.opt("source_invalidated") == true,
+            sourceBlocked = json.opt("source_blocked") == true,
         )
     }
 

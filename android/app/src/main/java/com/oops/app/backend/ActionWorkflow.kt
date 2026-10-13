@@ -6,7 +6,10 @@ import kotlinx.coroutines.delay
 /** Submission and reconciliation share the same immutable request and operation id. */
 object ActionWorkflow {
     /** Only a definite failure allows an explicit re-submit; unknown outcomes must be queried. */
-    fun shouldSubmit(previous: ActionResult?) = previous == null || previous.status == ActionResult.FAILED
+    fun shouldSubmit(previous: ActionResult?) = previous == null || previous.status == ActionResult.FAILED && !previous.sourceInvalidated && !previous.sourceBlocked
+
+    fun restoredPending(result: ActionResult) = result.copy(polling = false, message = if (result.sourceBlocked)
+        result.message ?: "来源已暂停写入，上次操作结果待核实；只能查询原操作" else "上次操作结果尚未确认，请继续查询")
 
     suspend fun execute(
         api: OopsApi,
@@ -24,10 +27,12 @@ object ActionWorkflow {
         }
         return try {
             var result = checked(if (submit) api.confirmAction(request) else api.getAction(request.opId))
+            if (result.status == ActionResult.PENDING && result.sourceBlocked) return result.copy(polling = false)
             repeat(maxPolls) {
                 if (result.status == ActionResult.PENDING) {
                     delay(1_000)
                     result = checked(api.getAction(request.opId))
+                    if (result.status == ActionResult.PENDING && result.sourceBlocked) return result.copy(polling = false)
                 }
             }
             if (result.status == ActionResult.CREATED) {
@@ -42,6 +47,9 @@ object ActionWorkflow {
             } else result.copy(polling = false)
         } catch (e: CancellationException) {
             throw e
+        } catch (e: ActionSourceRejected) {
+            ActionResult(request.opId, ActionResult.FAILED,
+                message = "原话来源已失效，本次没有创建飞书任务。请重新核对原话并起草；不要重试旧依据。", sourceInvalidated = true)
         } catch (e: Exception) {
             // A lost HTTP response does not prove that the write failed.
             ActionResult(request.opId, ActionResult.PENDING,

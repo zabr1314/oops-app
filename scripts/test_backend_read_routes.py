@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 
 import task_board
-from local_backend import Handler
+from local_backend import Backend, Handler, Operations
 from meeting_features import Meetings
 
 
@@ -40,7 +40,9 @@ class ReadRoutesTest(unittest.TestCase):
         })
         self.minutes = MinutesCache()
         self.boards = task_board.Boards(self.directory.name + "/boards", None)
-        self.backend = SimpleNamespace(meetings=self.meetings, feishu=self.minutes, boards=self.boards)
+        self.backend = Backend.__new__(Backend)
+        self.backend.meetings, self.backend.feishu, self.backend.boards = self.meetings, self.minutes, self.boards
+        self.backend.ops = Operations(self.directory.name + '/operations')
 
         class Protected(Handler):
             api_token = "test-read-route-only"
@@ -102,10 +104,11 @@ class ReadRoutesTest(unittest.TestCase):
         status, empty = self.get("/v1/meetings/meeting-safe/board")
         self.assertEqual((status, empty["tasks"], empty["pending"]), (200, [], False))
         with open(self.boards.path("meeting-safe"), "w", encoding="utf-8") as f:
-            json.dump({"tasks": [{"id": "t1", "what": "列出 P0 功能点", "priority": "P0", "status": "open"}],
+            json.dump({"tasks": [{"id": "t1", "what": "列出 P0 功能点", "priority": "P0", "status": "open", "sources": ["u1"]}],
                        "updated_at": "2026-10-12T12:00:00+00:00"}, f, ensure_ascii=False)
         status, board = self.get("/v1/meetings/meeting-safe/board?refresh=1")
         self.assertEqual((status, board["session_id"], board["tasks"][0]["priority"]), (200, "meeting-safe", "P0"))
+        self.assertEqual('u1', board['tasks'][0]['source_binding']['sources'][0]['id'])
         self.assertEqual(self.get("/v1/meetings/meeting-safe/board", authenticated=False)[0], 401)
         self.assertEqual(self.get("/v1/meetings/bad.id/board")[0], 400)
         self.assertEqual(self.minutes.reads, [])

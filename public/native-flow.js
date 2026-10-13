@@ -6,6 +6,8 @@
     'minutes-pending':'进入会话→上线方案评审→AI 纪要。此情境保持等待生成，不会把刷新误当重新生成。',
     'minutes-source-changed':'进入会话→上线方案评审→AI 纪要。旧正文应收起，只保留来源变化提示和历史文档入口。',
     'minutes-failure':'进入会话→上线方案评审→AI 纪要。首次读取失败，重试后恢复，不产生新的纪要或外部任务。',
+    'task-source-missing':'开始一场示例会议，收到任务原话后生成行动。缺少服务端来源核验的草稿可以查看和编辑，但不能确认创建；此情境不会写入飞书。',
+    'task-source-changed':'开始一场示例会议，从原话生成行动。此情境模拟依据已经变化，旧草稿不能继续创建任务，需要重新读取核对。',
   };
   const select=document.getElementById('flow'), frame=document.getElementById('native-app'), guide=document.getElementById('guide');
   const requested=new URLSearchParams(location.search).get('flow');

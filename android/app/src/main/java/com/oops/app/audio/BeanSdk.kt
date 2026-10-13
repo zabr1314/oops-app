@@ -2,6 +2,10 @@ package com.oops.app.audio
 
 import android.content.Context
 import com.oops.app.BuildConfig
+import com.oops.app.store.BeanCaptureContract
+import com.oops.app.store.BeanScratchStore
+import com.oops.app.store.RecordingPolicy
+import java.io.File
 
 /**
  * What the Soundcore SDK needs to authenticate. The token and licence come from Anker's cloud
@@ -35,10 +39,25 @@ object BeanSdk {
 
     val included: Boolean by lazy { runCatching { Class.forName(LINK_CLASS) }.isSuccess }
 
-    fun link(context: Context, auth: BeanAuth): BeanLink {
+    /** Cleanup may finish after capture has stopped; report it independently of a stale audio listener. */
+    @Volatile var onScratchFailure: ((String) -> Unit)? = null
+
+    fun reportScratchFailure(error: Throwable) {
+        onScratchFailure?.invoke("录音豆临时副本清理失败，后续录音豆接入已阻止：${error.message ?: "请重试清理"}")
+    }
+
+    fun requireCaptureAllowed(policy: RecordingPolicy) = BeanCaptureContract.requireDailySafe(policy)
+
+    fun cleanupScratch(context: Context): Int = BeanScratchStore(File(context.filesDir, BeanScratchStore.DIRECTORY)).recover()
+
+    fun link(context: Context, auth: BeanAuth, policy: RecordingPolicy, sessionId: String, archiveStartedAt: String): BeanLink {
+        // No verified SDK switch disables its full recording. Reject daily capture before touching the SDK.
+        requireCaptureAllowed(policy)
+        val contract = BeanCaptureContract(policy, sessionId, archiveStartedAt)
         check(included) { "这个安装包没有包含录音豆 SDK" }
         check(auth.complete) { "缺少录音豆鉴权信息（token / license），请先向安克获取" }
-        return Class.forName(LINK_CLASS).getConstructor(Context::class.java, BeanAuth::class.java)
-            .newInstance(context, auth) as BeanLink
+        cleanupScratch(context)
+        return Class.forName(LINK_CLASS).getConstructor(Context::class.java, BeanAuth::class.java, BeanCaptureContract::class.java)
+            .newInstance(context, auth, contract) as BeanLink
     }
 }

@@ -29,6 +29,8 @@ import urllib.request
 from pathlib import Path
 
 FILES = ('scripts/local_backend.py', 'scripts/meeting_features.py', 'scripts/recordings.py', 'scripts/feishu_actions.py')
+ADDED_DEPENDENCIES = ('scripts/action_sources.py', 'scripts/task_board.py')
+FILES += ADDED_DEPENDENCIES
 APP = Path('/opt/oops/app')
 BASE = 'http://127.0.0.1:8787'
 PROTECTED = (Path('/var/lib/oops/backend/people.json'), Path('/var/lib/oops/backend/voiceprints.json'),
@@ -50,8 +52,12 @@ def build(out, rev):
         shutil.copyfile(root / name, target)
         compile(target.read_bytes(), str(target), 'exec')
         manifest['files'][name] = sha(target)
-        old = subprocess.check_output(['git', '-C', str(root), 'show', f'{rev}:{name}'])
-        manifest['baseline'][name] = hashlib.sha256(old).hexdigest()
+        present = subprocess.check_output(['git', '-C', str(root), 'ls-tree', '--name-only', rev, '--', name]).strip()
+        if not present and name in ADDED_DEPENDENCIES:
+            manifest['baseline'][name] = None  # explicitly require absence on the target; never ignore live drift
+        else:
+            old = subprocess.check_output(['git', '-C', str(root), 'show', f'{rev}:{name}'])
+            manifest['baseline'][name] = hashlib.sha256(old).hexdigest()
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     shutil.copyfile(Path(__file__).resolve(), out / 'review-queue-upgrade.py')
     print(json.dumps({'built': str(out), 'baseline_rev': rev, 'files': manifest['files']}, indent=1))
@@ -148,6 +154,8 @@ def apply(release, manifest, token, before, stamp):
                 original = backup / 'app' / name
                 if original.exists():
                     shutil.copy2(original, APP / name)
+                else:
+                    (APP / name).unlink(missing_ok=True)
             subprocess.run(['systemctl', 'restart', 'oops-backend'], check=True)
             assert strip(wait_healthy(token)) == strip(before)
             print('ROLLED BACK source; original environment/state retained', flush=True)
@@ -169,8 +177,12 @@ def main():
     for name in FILES:
         assert sha(release / name) == manifest['files'][name], 'Release checksum mismatch: ' + name
         compile((release / name).read_bytes(), str(release / name), 'exec')
+    assert set(manifest['baseline']) == set(FILES), 'Missing baseline source checks'
     for name, digest in manifest['baseline'].items():
-        assert sha(APP / name) == digest, 'Live source drifted; review before deploying: ' + name
+        if digest is None:
+            assert name in ADDED_DEPENDENCIES and not (APP / name).exists(), 'Expected absent dependency already exists: ' + name
+        else:
+            assert sha(APP / name) == digest, 'Live source drifted; review before deploying: ' + name
     assert subprocess.check_output(['systemctl', 'is-active', 'oops-backend'], text=True).strip() == 'active'
     token = service_token()
     before = request('/healthz', token=token)

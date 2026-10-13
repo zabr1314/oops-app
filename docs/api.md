@@ -105,6 +105,41 @@ Jev 适配建议（已核对 [官方 Choice 文档](https://docs.typesafe.ai/pri
 
 **幂等规则**：先持久化 op_id 与确认内容，再执行飞书写入；同一 op_id 的重试、连点、网络断开或进程重启都至多建一条任务。同 op_id 不同 payload 返回 409 `OP_PAYLOAD_CONFLICT`，不得静默使用新内容。飞书调用成功但客户端响应丢失时保留可查询结果。服务端实现应覆盖调用超时但飞书已写入的恢复路径，不能仅依靠内存字典或防连点。
 
+### 来源核对合同 version 1（2026-10-13）
+
+`GET /healthz.action_source_binding_version` 为1。带会话来源的草稿响应新增 `source_binding` 与 `source_error`；任务板每项同样提供这两项。合同来自服务端当前会议原文或独立确认短依据，客户端不得按本地文本自行补造。服务尚未保存对应来源、来源不同步或已撤回时返回 `source_binding:null` 和可读原因；仍可编辑草稿，但不能创建带来源的任务。日常临时处理没有服务端会议存档时不能以请求原话自证有效，也不能偷偷改成手工任务。
+
+```json
+{
+  "version": 1,
+  "proof": "<服务端HMAC签名，客户端原样冻结，不得自行生成>",
+  "session_id": "session-example",
+  "sources": [{
+    "id": "u2", "kind": "transcript",
+    "text_hash": "<服务端完整当前原话UTF-8的SHA-256小写64位hex>",
+    "source_revision": "<服务端原样返回的不透明非空版本字符串>",
+    "quote": "我周五前把方案发给你。",
+    "speaker": "林春源", "review": {}
+  }]
+}
+```
+
+`kind` 为 `transcript` 或 `saved_excerpt`，每条 `quote` 非空且最多280字；`speaker` 是核对后有效说话人或null，`review`仅包括已设置的 `speaker/owner/verdict`。起草会核对请求原话全文与显式说话人，且在模型工作前后各读取一次，途中改变则不签发合同。每条来源分别计版本，文本、身份、核对或既有独立短依据改写/删除会递增；改回旧内容不会复活旧合同，追加无关句和自然全文到期不会改变原版本。
+
+起草实际用到的 `context` 原话另放合同内可选的 `context_sources` 数组（与 `sources` 相同字段），防止预算/指代上下文变化后仍执行旧草稿；它不扩大主选 `evidence.utterance_ids` 或展示原话正文，客户端仍原样冻结整个合同。服务端对主选与这些上下文依赖共同核验。每组最多20条，重复或未保存上下文不签发合同。
+
+整个合同由服务端HMAC签名为 `proof`，防止客户端删除上下文或篡改核对范围；即使签名有效，执行前仍从当前受信来源重新核验。密钥位于服务私有 `<state-dir>/operations/.action-source-key`，32字节随机值、文件0600，重启沿用，不进入App、公开网站或日志；部署迁移须保留这个文件。它不包含全文，也不替代用户权限隔离。无有效签名的旧来源草稿需重新起草，已created历史不追溯补签。
+
+确认时将整个回包原样冻结在 `evidence.source_binding`；`evidence.utterance_ids`须按 `sources` 顺序完全一致，`evidence.quote`须严格等于各条 `quote` 用一个空格连接。任何带 `session_id` 或 `evidence` 的确认均视为带来源；缺合同返回409 `SOURCE_BINDING_REQUIRED`，格式不一致为 `ACTION_SOURCE_INVALID`，来源变化/撤回为 `ACTION_SOURCE_CHANGED`，会议不可用为 `ACTION_SOURCE_UNAVAILABLE`，不得降级成手工。上述409错误附 `no_external_write:true`，表示本操作尚未尝试外部创建，客户端可明确提示重新起草；普通HTTP错误或网络失败不能据此认定未创建。真正的无来源手工任务同时省略 `session_id` 和 `evidence`。
+
+服务端提交前、操作恢复后和实际飞书创建前都会重新读取受信来源，重算文本hash、核验版本与短原话；来源校验和飞书写入持有同一会议锁，修订/删除不能插入最后核验与创建之间。自然全文到期后，只能用已独立确认、仍有效且确实覆盖所引短原话的依据接续原合同；不会恢复全文。也可重新从独立短依据起草，此时 `kind:saved_excerpt`。
+
+已 `created` 的同payload操作保留历史回执，即使来源之后变化、删除或旧操作没有新合同，也不重新创建。尚未外部写入的失效操作为failed；若旧pending已经尝试过外部创建而结果不明，保留pending并返回 `source_blocked:true`、`error_code`和可读原因，停止自动再次写入，不把未知结果说成确定未创建。此类操作需核实原飞书结果；不能换操作编号绕过失效来源。
+
+worker恢复时发现来源失效且确定未尝试外部写入，failed回包同时提供 `source_invalidated:true`，客户端直接回到重新核对，不重试旧依据。真实任务板的清理先后顺序也遵循此边界：自然TTL保留的独立短依据带不可逆原来源hash，用于匹配原候选；只保留全部来源均有效保留的候选，当前合同重签为 `saved_excerpt`，重启不会丢失。没有独立依据、来源修订/撤回/删除仍移除；不会把旧全文放回任务板。上线前已到期且缺原来源hash的旧短依据不推测补造匹配。
+
+相关升级包须同时包含 `scripts/action_sources.py` 和本轮 `scripts/task_board.py`。review/live-speed构建器对旧基线中不存在的新依赖记录显式null并在目标要求确实不存在；旧模块仍逐个校验原hash，新增文件回滚时会删除。其他历史升级脚本的固定旧baseline门禁保留；模块清单修正不表示旧发布包可直接用于当前服务，更不表示本轮已部署真实后端。
+
 Android 在发请求前保存原操作及冻结的草稿。响应丢失／10 次轮询后仍 pending 时显示“查询创建结果”，继续 GET 原 op_id。不会因 HTTP 超时更换 op_id，也不会将结果未知宣称为创建失败。
 
 ## 4. GET /v1/actions/{op_id}

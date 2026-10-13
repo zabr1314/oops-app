@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 
 BASELINE = '18b241634e8e5063153c57b061fd53d8d6b702585b35da94f422958e572a7cf0'
-FILES = ('scripts/local_backend.py', 'scripts/voiceprint_registry.py')
+FILES = ('scripts/local_backend.py', 'scripts/voiceprint_registry.py', 'scripts/action_sources.py', 'scripts/task_board.py')
 APP = Path('/opt/oops/app')
 BASE = 'http://127.0.0.1:8787'
 

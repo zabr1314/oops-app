@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import threading
+from action_sources import board_source_hash
 
 PRIORITIES = ("P0", "P1", "P2", "P3")
 CONTEXT_LINES = 12
@@ -124,9 +125,7 @@ class Boards:
 
     def _hashes(self, sid):
         rows = self.source_rows(sid)
-        return None if rows is None else {u['id']: hashlib.sha256(json.dumps(
-            {k: u.get(k) for k in ('text', 'speaker', 'review')}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-            for u in rows}
+        return None if rows is None else {u['id']: u.get('_board_source_hash') or board_source_hash(u) for u in rows}
 
     def discard(self, sid):
         with self.lock:

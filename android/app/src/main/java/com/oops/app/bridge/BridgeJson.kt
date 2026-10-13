@@ -26,6 +26,7 @@ object BridgeJson {
         .put("sessionMs", s.sessionMs)
         .put("recordingMode", s.recordingMode).put("cloudSaveConfirmed", s.cloudSaveConfirmed)
         .put("audioRetentionDays", s.audioRetentionDays).put("transcriptRetentionDays", s.transcriptRetentionDays).put("audioExpired", s.audioExpired).put("transcriptExpired", s.transcriptExpired)
+        .put("boardSourceRevision", s.boardSourceRevision)
         .put("bufferedMs", s.bufferedMs)
         .put("retentionMs", OopsEngine.RETENTION_MS)
         .put("asr", s.asr)
@@ -122,6 +123,7 @@ object BridgeJson {
         .put("ownerCandidates", com.oops.app.backend.ApiJson.speakerCandidates(d.ownerCandidates))
         .put("modelRevision", d.modelRevision).put("reviewStatus", d.reviewStatus)
         .put("ownerSelectionSource", d.ownerSelectionSource)
+        .put("sourceError", d.sourceError ?: NULL)
         .put("taskContext", d.context?.let { c -> JSONObject().put("quote", c.quote)
             .put("resolutions", JSONArray(c.resolutions.map { JSONObject().put("phrase", it.phrase).put("meaning", it.meaning).put("evidence", it.evidence) }))
             .put("missing", JSONArray(c.missing)).put("ownerRole", c.ownerRole).put("clauseSpeaker", c.clauseSpeaker ?: NULL)
@@ -132,11 +134,13 @@ object BridgeJson {
                 .put("utteranceIds", JSONArray(d.evidence.utteranceIds))
                 .put("quote", d.evidence.quote)
                 .put("startMs", d.evidence.clipStartMs)
-                .put("endMs", d.evidence.clipEndMs),
+                .put("endMs", d.evidence.clipEndMs)
+                .put("sourceBinding", d.evidence.sourceBinding?.let(::JSONObject) ?: NULL),
         )
 
     fun actionResult(draftId: String, r: ActionResult): JSONObject = JSONObject()
         .put("draftId", draftId)
+        .put("sourceInvalidated", r.sourceInvalidated).put("sourceBlocked", r.sourceBlocked)
         .put("opId", r.opId)
         .put("status", r.status)
         .put("taskGuid", r.taskGuid ?: NULL)

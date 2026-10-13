@@ -144,7 +144,13 @@
         render();
         break;
       case 'state': setState(p); break;
-      case 'capture.assetsExpired': S.expiredBoardSession = S.state.sessionId; closeSheet(); resetTranscript(); S.card=null; if(S.draft && !S.draft.submitted) S.draft=null; toast('完整文字已按期限清理，独立确认的任务与短依据保留'); render(); break;
+      case 'capture.assetsExpired': {
+        S.expiredBoardSession = S.state.sessionId;
+        const retainedBoard = acceptedTaskBoard(S.board);
+        closeSheet(); resetTranscript(); S.board = retainedBoard; S.card=null;
+        if(S.draft && !S.draft.submitted) S.draft=null;
+        toast('完整文字已按期限清理，独立确认的任务与短依据保留'); render(); break;
+      }
       case 'capture.cleared': closeSheet(); resetTranscript(); S.card = null; S.draft = null; render(); break;
       case 'daily.candidates': S.dailyCandidates = p.items || []; openSheet({kind:'dailyCandidates'}); break;
       case 'backend.changed': {
@@ -200,7 +206,13 @@
       case 'session.summary': setSummary(p); break;
       case 'tasks.board':
         if (!taskBoardAllowed(p.session_id)) break;
-        S.board = acceptedTaskBoard(p);
+        if (typeof p.sourceRevision === 'number' && p.sourceRevision < (S.state.boardSourceRevision || 0)) break;
+        if (typeof p.sourceRevision === 'number') S.state.boardSourceRevision = p.sourceRevision;
+        if ('invalidatedSourceIds' in p) {
+          if (p.invalidatedSourceIds === null) invalidateDraftEvidence(p.session_id);
+          else if (Array.isArray(p.invalidatedSourceIds)) p.invalidatedSourceIds.forEach(id => invalidateDraftEvidence(p.session_id, id));
+        } else if (p.invalidated) invalidateDraftEvidence(p.session_id);
+        S.board = p.invalidated ? null : acceptedTaskBoard(p);
         if (S.route.name === 'live' && S.liveTab !== 'transcript') render();
         break;
       case 'transcript.pruned':
@@ -254,14 +266,14 @@
     // A new capture session starts an empty timeline; old lines and cards no longer apply.
     if (s.sessionId && s.sessionId !== S.state.sessionId) resetTranscript();
     const before = { capturing: S.state.capturing, sessionId: S.state.sessionId, selfName: S.state.selfName, recordingMode: S.state.recordingMode, transcriptExpired: S.state.transcriptExpired, voiceprint: JSON.stringify(S.state.voiceprint),
-      preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady };
+      preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady, boardSourceRevision: S.state.boardSourceRevision };
     const serverChanged = ('backend' in s && S.state.backend !== undefined && s.backend !== S.state.backend)
       || ('backendUrl' in s && S.state.backendUrl !== undefined && s.backendUrl !== S.state.backendUrl);
     if (serverChanged) { clearRemoteState(); S.remoteEpoch = null; }
     if ('selfName' in s && s.selfName !== S.state.selfName) clearTaskIdentity();
     S.state = { ...S.state, ...s };
     if (S.state.transcriptExpired) S.expiredBoardSession = S.state.sessionId;
-    if (!taskBoardAllowed(S.state.sessionId)) S.board = null;
+    S.board = acceptedTaskBoard(S.board);
     if (deviceState && S.state.capturing) deviceState = deviceDemo.reduce(deviceState, { type: 'occupied' },
       { activeSessionId: S.state.sessionId || 'native-pending' });
     if (serverChanged) enter();
@@ -750,14 +762,35 @@
   // The server's running task list (task_board): drafts merged and ranked P0–P3 as the meeting goes.
   // Only P0 asks for confirmation now; confirming still opens the sentence and goes through the usual draft.
   function taskBoardAllowed(sessionId) {
-    return !!sessionId && sessionId === S.state.sessionId && S.state.recordingMode === 'meeting'
-      && !S.state.transcriptExpired && S.expiredBoardSession !== sessionId;
+    return !!sessionId && sessionId === S.state.sessionId && S.state.recordingMode === 'meeting';
+  }
+  function sourceBindingValid(binding, ids, sessionId) {
+    if (!binding || binding.version !== 1 || binding.session_id !== sessionId || !Array.isArray(ids) || !ids.length
+      || new Set(ids).size !== ids.length || !Array.isArray(binding.sources) || binding.sources.length !== ids.length) return false;
+    const sources = binding.sources;
+    const valid = sources.every((s, i) => s && s.id === ids[i] && ['transcript', 'saved_excerpt'].includes(s.kind)
+      && typeof s.text_hash === 'string' && /^[a-f0-9]{64}$/.test(s.text_hash)
+      && typeof s.source_revision === 'string' && s.source_revision.length > 0
+      && typeof s.quote === 'string' && s.quote.length > 0 && Array.from(s.quote).length <= 280);
+    if (!valid || 'context_sources' in binding && !Array.isArray(binding.context_sources)) return false;
+    const context = binding.context_sources || [];
+    if (!context.length) return true;
+    const contextIds = context.map(source => source?.id);
+    return contextIds.every(id => !ids.includes(id)) && sourceBindingValid(
+      {version: binding.version, session_id: binding.session_id, sources: context}, contextIds, sessionId);
   }
   function acceptedTaskBoard(board) {
     if (!board || !taskBoardAllowed(board.session_id) || !Array.isArray(board.tasks)) return null;
+    if ('backendUrl' in board && board.backendUrl !== S.state.backendUrl
+      || board.serviceEpoch !== undefined && S.remoteEpoch !== null && board.serviceEpoch !== S.remoteEpoch
+      || typeof board.sourceRevision === 'number' && board.sourceRevision < (S.state.boardSourceRevision || 0)) return null;
+    const expired = S.state.transcriptExpired || S.expiredBoardSession === board.session_id;
     const tasks = board.tasks.filter(t => t && typeof t.what === 'string' && t.what.trim()
       && Array.isArray(t.sources) && t.sources.length && t.sources.every(id => typeof id === 'string' && id)
-      && ['P0', 'P1', 'P2', 'P3'].includes(t.priority) && ['open', 'done', 'dropped'].includes(t.status));
+      && ['P0', 'P1', 'P2', 'P3'].includes(t.priority) && ['open', 'done', 'dropped'].includes(t.status)
+      && (!expired || !t.source_error && sourceBindingValid(t.source_binding, t.sources, board.session_id)
+        && [...t.source_binding.sources, ...(t.source_binding.context_sources || [])].every(source => source.kind === 'saved_excerpt')));
+    if (expired && !tasks.length) return null;
     return { ...board, tasks };
   }
   const PRIORITY_TEXT = { P0: '会上确认', P1: '会后几天内', P2: '可以排期', P3: '琐事或待定' };
@@ -767,8 +800,9 @@
     const source = t.sources?.[t.sources.length - 1];
     const done = S.commitments.some((u) => (t.sources || []).includes(u.id) && u.taskStatus === 'created');
     const badge = done ? '<span class="badge green">已建飞书任务</span>' : `<span class="badge ${t.priority === 'P0' ? 'purple' : 'gray'}">${esc(t.priority)}</span>`;
-    return `<button class="card clickable board-task" data-act="commitment-open" data-id="${esc(source || '')}"><div class="session-task-top"><h3>${esc(t.what)}</h3>${badge}</div>
+    return `<button class="card clickable board-task" data-act="commitment-open" data-id="${esc(source || '')}" ${t.source_error ? 'disabled' : ''}><div class="session-task-top"><h3>${esc(t.what)}</h3>${badge}</div>
       <p class="meta">${esc(t.owner || '负责人待定')}${t.reason ? ` · ${esc(t.reason)}` : ''}</p>
+      ${t.source_error ? '<p class="error-text">原话依据已变化或暂不可核验，请重新读取会议后核对。</p>' : ''}
       ${t.priority === 'P0' && !done ? '<p class="meta">点开核对原话，确认后建飞书任务</p>' : ''}</button>`;
   }
 
@@ -1368,6 +1402,20 @@
     S.draft = window.OopsDraftState.create(d);
     openSheet({ kind: 'draft' });
   }
+  function draftSourceValid(d) {
+    const evidence = d?.evidence;
+    const binding = evidence?.sourceBinding || evidence?.source_binding;
+    return !d?.sourceError && !d?.source_error && !!binding
+      && sourceBindingValid(binding, evidence.utteranceIds, d.sessionId || binding.session_id);
+  }
+  function invalidateDraftEvidence(sessionId, utteranceId) {
+    if (!S.draft || S.draft.submitted) return;
+    const d = S.draft.data, binding = d.evidence?.sourceBinding || d.evidence?.source_binding;
+    const dependencies = [...(binding?.sources || []), ...(binding?.context_sources || [])].map(source => source.id);
+    if (binding?.session_id !== sessionId || utteranceId && !dependencies.includes(utteranceId)) return;
+    d.sourceError = 'source_changed';
+    if (S.sheet?.kind === 'draft') renderSheet();
+  }
   function editDraftField(field, value) {
     const previousOwner = S.draft?.data?.who || '';
     if (!window.OopsDraftState.edit(S.draft, field, value)) return false;
@@ -1394,6 +1442,8 @@
     const options = ['<option value="">请选择负责人</option>'].concat(names.map((n) => `<option ${n === d.who ? 'selected' : ''}>${esc(n)}</option>`)).join('');
     const sending = status === 'sending';
     const submitted = status === 'waiting' || status === 'failed' || sending;
+    const validSource = draftSourceValid(d);
+    const dailyUnavailable = !validSource && S.state.recordingMode === 'daily' && (d.sourceError || d.source_error);
     const tier = d.tier === 'A' ? ['A · 模型高可信', 'green'] : d.tier === 'B' ? ['B · 建议，请核对', 'amber'] : ['C · 模型未确认负责人', 'gray'];
     const suggestions = [...new Set([d.suggestedOwner, ...(d.ownerCandidates || []).map((c) => c.name)].filter(Boolean))].slice(0, 2);
     return frame('整理成飞书任务', `<div class="inline-actions"><span class="badge ${tier[1]}">${tier[0]}</span><span class="badge ${S.draft.reviewStatus === 'confirmed' ? 'green' : 'purple'}">${S.draft.reviewStatus === 'confirmed' ? '人工已确认' : '待你确认'}</span></div>
@@ -1406,11 +1456,14 @@
       <label class="form-field"><span>截止时间</span><input type="date" id="f-when" ${submitted ? 'disabled' : ''} value="${esc(d.whenIso || '')}">${d.whenRaw ? `<small>原话：${esc(d.whenRaw)}</small>` : ''}</label>
       <label class="form-field"><span>约束</span><input id="f-constraint" ${submitted ? 'disabled' : ''} value="${esc(d.constraint || '')}" placeholder="例如：预算不超过 10 万"></label>
       <p class="meta">只有你点确认后才会写入飞书；同一次确认只会建一条任务。</p>
+      ${!validSource && !S.draft.submitted ? `<p class="error-text">${dailyUnavailable ? '这段日常原话仅在本机临时保留，当前不能核验并创建飞书任务。可先保存私人候选，或在飞书手工记录。' : d.sourceError || d.source_error ? '原话依据已变化或不可用，请重新读取后核对。' : '原话依据尚未核验，请重新读取原话并整理任务。'}</p>` : ''}
       ${error ? `<p class="error-text">${esc(error)}</p>` : ''}
-      <button class="button primary" type="button" data-act="${status === 'waiting' ? 'query-action' : 'confirm'}" ${sending ? 'disabled' : ''}><span>${sending ? '正在查询…' : status === 'waiting' ? '查询创建结果' : status === 'failed' ? '重试同一操作' : '确认创建飞书任务'}</span></button>
+      ${!validSource && status !== 'waiting' && !sending ? dailyUnavailable ? '<button class="button secondary" type="button" data-act="daily-candidates"><span>查看私人候选</span></button>' : '<button class="button secondary" type="button" data-act="draft-source-reload"><span>重新核对原话</span></button>' : ''}
+      <button class="button primary" type="button" data-act="${status === 'waiting' ? 'query-action' : 'confirm'}" ${sending || status !== 'waiting' && !validSource ? 'disabled' : ''}><span>${sending ? '正在查询…' : status === 'waiting' ? '查询创建结果' : status === 'failed' ? '重试同一操作' : '确认创建飞书任务'}</span></button>
       <button class="button quiet" type="button" data-act="close"><span>取消</span></button>`);
   }
   function confirmDraft() {
+    if (!S.draft || !draftSourceValid(S.draft.data)) { toast('原话依据尚未核验或已经变化，请重新读取后核对', true); return; }
     const d = S.draft.data;
     const who = $('f-who').value.trim();
     const what = $('f-what').value.trim();
@@ -1427,6 +1480,7 @@
   }
   function onActionResult(p) {
     if (!S.draft || S.draft.data.draftId !== p.draftId) return;
+    if (p.sourceInvalidated === true) S.draft.data.sourceError = 'source_changed';
     S.draft.submitted = true;
     if (p.status === 'pending') {
       S.draft.status = p.polling ? 'sending' : 'waiting';
@@ -1702,6 +1756,7 @@
     closeSheet();
   }
   function onSpeakerCorrected(p) {
+    invalidateDraftEvidence(p.sessionId, p.utteranceId);
     if (p.sessionId === S.state.sessionId) {
       const u = S.records.get(p.utteranceId);
       if (u) { u.manualSpeaker = p.speaker; renderLine(p.utteranceId); renderLiveRecent(); }
@@ -1813,6 +1868,7 @@
     saveReview('review.set', { sessionId: r.sessionId, utteranceId: u.id, fields: { verdict: 'confirmed', owner: owner || null } });
   }
   function onReviewSaved(p) {
+    invalidateDraftEvidence(p.sessionId, p.utteranceId);
     if (S.history?.session_id !== p.sessionId) return;
     const u = (S.history.utterances || []).find((x) => x.id === p.utteranceId);
     if (u) u.review = p.review || undefined;
@@ -2104,6 +2160,11 @@
     'notice-wrong': (el) => noticeFeedback(el.dataset.id, false),
     'notice-dismiss': (el) => { send('notice.dismiss', { id: el.dataset.id }); const n = S.notices.get(el.dataset.id); if (n) n.dismissed = true; renderNoticeBanners(); },
     'commitment-open': (el) => send('digest.open', { utteranceId: el.dataset.id }),
+    'draft-source-reload': () => {
+      const sourceId = S.draft?.data?.evidence?.utteranceIds?.[0];
+      if (!sourceId) { closeSheet(); go('sessions'); return; }
+      closeSheet(); send('digest.open', { utteranceId: sourceId });
+    },
     'retry-recall': () => { closeSheet(); send('recall.trigger'); },
     cand: (el) => { S.card.sel = Number(el.dataset.i); S.card.before = 0; S.card.after = 0; renderSheet(); },
     prev: () => { S.card.before += 1; renderSheet(); },

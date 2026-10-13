@@ -20,6 +20,7 @@ data class EngineState(
     val transcriptRetentionDays: Int = 30,
     val audioExpired: Boolean = false,
     val transcriptExpired: Boolean = false,
+    val boardSourceRevision: Long = 0,
     val bufferedMs: Long = 0,
     /** off | unconfigured | connecting | live | reconnecting | error */
     val asr: String = "off",
