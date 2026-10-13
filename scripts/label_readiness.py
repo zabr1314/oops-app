@@ -45,14 +45,17 @@ def audit(data):
     for mid in sorted(data.meetings):
         rows = data.rows_with_claims(mid)
         labels = {name: data.load(mid, name) for name in PEOPLE}
-        truth = content_audit(rows, labels)
+        content_units = getattr(data, 'content_units', None)
+        truth = content_audit(rows, labels, content_units(mid) if callable(content_units) else None)
         complete_ids = set(truth['complete_ids'])
+        independent_ids = set(truth['independent_content_ids'])
         unresolved = set(truth['content_disputed_ids'])
         parents = {}
         for row in rows:
             if row.get('parent'):
                 parents.setdefault(row['parent'], set()).add(row['id'])
         complete_parents = [parent for parent, ids in parents.items() if ids <= complete_ids]
+        independent_parents = [parent for parent, ids in parents.items() if ids <= independent_ids]
         speakers = truth['speakers']
         meetings.append(dict(id=mid, total=len(rows), human_kind_labels=len(truth['kinds']),
             complete_human_rows=len(complete_ids), disputed_rows=len(unresolved),
@@ -65,7 +68,13 @@ def audit(data):
             ready_for_content=truth['ready_for_content'],
             final_count=len(parents), complete_content_finals=len(complete_parents),
             ready_for_cached_content_evaluation=bool(complete_parents),
+            independent_blind_content_finals=len(independent_parents),
+            ready_for_independent_blind_evaluation=bool(independent_parents),
             content_label_sources=truth['content_label_sources'],
+            content_review_sources=truth['content_review_sources'],
+            independent_content_rows=truth['independent_content_rows'],
+            ai_assisted_content_rows=truth['ai_assisted_content_rows'],
+            legacy_content_rows=truth['legacy_content_rows'], mixed_content_rows=truth['mixed_content_rows'],
             speaker_label_sources=truth['speaker_label_sources'],
             label_source_counter_unit='person_sentence_field',
             independent_speaker_rows=truth['independent_speaker_rows'],
@@ -83,11 +92,16 @@ def audit(data):
     return dict(meetings=meetings, roles=roles, **identity_audit(data),
         ready_for_content=bool(meetings) and all(m['ready_for_content'] for m in meetings),
         ready_for_cached_content_evaluation=any(m['ready_for_cached_content_evaluation'] for m in meetings),
+        ready_for_independent_blind_evaluation=any(m['ready_for_independent_blind_evaluation'] for m in meetings),
         ready_for_calibration=bool(meetings) and all(m['ready_for_calibration'] for m in meetings),
-        calibration_complete=False, real_meeting_accepted=False, model_calls=0, source_data_modified=False,
+        calibration_complete=False, real_meeting_accepted=False, blind_accuracy_established=False,
+        model_calls=0, source_data_modified=False,
         limits=['Content completeness requires kind and task owner, independently of speaker identity.',
                 'Unlabelled all-short context expressions do not block the content workflow and are not automatically noise.',
                 'Cached content evaluation requires complete, undisputed child content for each scored ASR final.',
+                'AI-assisted human review is development evidence, not independently blind content ground truth.',
+                'Independent-blind eligibility requires every child answer in a parent to have only blind provenance.',
+                'Legacy answers remain compatible human work; missing review provenance cannot establish independent blindness.',
                 'Voice-group confirmation, role claims and voiceprint prefill are not independent per-sentence speaker ground truth.',
                 'roles/self_confirmed describes legacy claims.json; current personal approvals are reported under voice_groups.',
                 'Source counters count person/sentence fields, not independent confirmation actions.',

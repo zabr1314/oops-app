@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from label_workflow import content_audit, current_label, expressions, row_fingerprint, speaker_audit
+from label_workflow import content_audit, current_label, digest, expressions, row_fingerprint, speaker_audit
 
 
 def row(uid="u1-1", text="这是需要完整核对的第一段话。", start=0, end=2000, **extra):
@@ -12,6 +12,15 @@ def expression_labels(rows, kind="info", **extra):
     unit = expressions(rows)[0]
     source = {"mode": "expression", "id": unit["id"], "fingerprint": unit["fingerprint"]}
     return {"人甲": {uid: dict(kind=kind, kind_source=source, **extra) for uid in unit["ids"]}}
+
+
+def sidecar(rows, groups):
+    return dict(schema=1, source_hash=digest([{key: item.get(key) for key in
+        ('id', 'parent', 'text', 'start_ms', 'end_ms', 'voice', 'role')} for item in rows]),
+        expressions=[dict(id='ai:' + group[0]['id'], ids=[item['id'] for item in group],
+            fingerprint=digest([{key: item.get(key) for key in
+                ('id', 'text', 'start_ms', 'end_ms', 'voice', 'role')} for item in group]),
+            row_fingerprints={item['id']:row_fingerprint(item) for item in group}) for group in groups])
 
 
 class ExpressionTest(unittest.TestCase):
@@ -52,8 +61,101 @@ class ExpressionTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             expressions([row(), row()])
 
+    def test_semantic_units_preserve_source_text_and_fall_back_for_uncovered_rows(self):
+        rows = [row(text='嗯。', end=300), row('u1-2', start=300),
+                row('u1-3', start=2000, end=4000)]
+        before = copy.deepcopy(rows)
+        semantic = sidecar(rows, [rows[1:]])
+        units = expressions(rows, semantic)
+        self.assertEqual(['expr:u1-1', 'ai:u1-2'], [unit['id'] for unit in units])
+        self.assertEqual(['u1-2','u1-3'], units[1]['ids'])
+        self.assertEqual(rows[1]['text'] + rows[2]['text'], units[1]['text'])
+        self.assertEqual(units, expressions(rows, units))
+        self.assertEqual(before, rows)
+        self.assertEqual(1, len(expressions(rows)))
+
+    def test_stale_overlap_reordered_and_unknown_semantic_members_are_rejected(self):
+        rows = [row(), row('u1-2', start=2000, end=4000)]
+        valid = sidecar(rows, [rows])
+        for change in ('hash', 'fingerprint', 'row_hash', 'overlap', 'reorder', 'unknown'):
+            candidate = copy.deepcopy(valid)
+            if change == 'hash': candidate['source_hash'] = 'old'
+            elif change == 'fingerprint': candidate['expressions'][0]['fingerprint'] = 'old'
+            elif change == 'row_hash': candidate['expressions'][0]['row_fingerprints']['u1-1'] = 'old'
+            elif change == 'overlap': candidate['expressions'].append(candidate['expressions'][0])
+            elif change == 'reorder': candidate['expressions'][0]['ids'].reverse()
+            else: candidate['expressions'][0]['ids'][0] = 'foreign'
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                expressions(rows, candidate)
+
 
 class ContentAuditTest(unittest.TestCase):
+    def test_fact_is_human_content_and_ai_review_is_separate_from_work_completion(self):
+        rows = [row()]
+        labels = expression_labels(rows, 'fact')
+        source = labels['人甲']['u1-1']['kind_source']
+        source.update(review_mode='ai_assisted', suggestion_fingerprint='model-output')
+        report = content_audit(rows, labels)
+        self.assertTrue(report['ready_for_content'])
+        self.assertEqual({'u1-1':'fact'}, report['kinds'])
+        self.assertEqual(['u1-1'], report['ai_assisted_content_ids'])
+        self.assertEqual([], report['independent_content_ids'])
+        self.assertEqual(1, report['content_review_sources']['ai_assisted'])
+
+    def test_blind_provenance_requires_all_answers_and_no_ai_metadata(self):
+        rows = [row()]
+        labels = expression_labels(rows)
+        source = labels['人甲']['u1-1']['kind_source']
+        report = content_audit(rows, labels)
+        self.assertEqual(['u1-1'], report['legacy_content_ids'])
+        source['review_mode'] = 'blind'
+        self.assertEqual(['u1-1'], content_audit(rows, labels)['independent_content_ids'])
+        labels['人乙'] = {'u1-1':{'kind':'info'}}
+        report = content_audit(rows, labels)
+        self.assertEqual(['u1-1'], report['mixed_content_ids'])
+        self.assertEqual([], report['independent_content_ids'])
+        del labels['人乙']
+        source['suggestion_fingerprint'] = 'seen-before'
+        self.assertEqual(['u1-1'], content_audit(rows, labels)['ai_assisted_content_ids'])
+
+    def test_old_expression_answers_survive_new_semantic_boundaries(self):
+        rows = [row(), row('u1-2', start=2000, end=4000)]
+        labels = expression_labels(rows, 'info')
+        semantic = sidecar(rows, [[rows[0]], [rows[1]]])
+        report = content_audit(rows, labels, semantic)
+        self.assertTrue(report['ready_for_content'])
+        self.assertEqual(2, len(report['expressions']))
+        self.assertEqual([], report['stale_kind_ids'])
+        unit = expressions(rows, semantic)[1]
+        labels['人甲']['u1-2'] = dict(kind='fact', kind_source={
+            'mode':'expression', 'id':unit['id'], 'fingerprint':unit['fingerprint'],
+            'review_mode':'ai_assisted'})
+        report = content_audit(rows, labels, expressions(rows, semantic))
+        self.assertTrue(report['ready_for_content'])
+        self.assertEqual(['u1-2'], report['ai_assisted_content_ids'])
+
+    def test_dynamic_claims_preserve_semantic_and_legacy_answers_independently(self):
+        original = [row(voice=None, role='A'), row('u1-2', start=2000, end=4000, voice=None, role='A')]
+        semantic = sidecar(original, [[original[0]], [original[1]]])
+        units = expressions(original, semantic)
+        claimed = [dict(item, machine_voice=item['voice'], machine_role=item['role'],
+            voice='人甲', role='另一个显示角色', claimed=True) for item in original]
+        self.assertEqual(units, expressions(claimed, semantic))
+        self.assertEqual(units, expressions(claimed, units))
+        labels = {'人甲':{original[0]['id']:dict(kind='fact', kind_source={
+            'mode':'expression', 'id':units[0]['id'], 'fingerprint':units[0]['fingerprint'],
+            'review_mode':'ai_assisted'})}}
+        # The old answer was recorded with the displayed claim, as legacy grouping always did.
+        old_unit = expressions(claimed)[0]
+        labels['人甲'][original[1]['id']] = dict(kind='info', kind_source={
+            'mode':'expression', 'id':old_unit['id'], 'fingerprint':old_unit['fingerprint']})
+        before = copy.deepcopy((claimed, labels))
+        report = content_audit(claimed, labels, units)
+        self.assertTrue(report['ready_for_content'])
+        self.assertEqual([], report['stale_kind_ids'])
+        self.assertEqual(['u1-1'], report['ai_assisted_content_ids'])
+        self.assertEqual(before, (claimed, labels))
+
     def test_content_work_does_not_require_speaker_and_short_context_remains_unlabelled(self):
         rows = [row(), dict(row("u2-1", "对。", 3000, 3300), parent="u2")]
         labels = {"人甲": {"u1-1": {"kind": "task", "owner": "人甲"}}}

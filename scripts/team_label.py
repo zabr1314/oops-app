@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Team labelling site for the discussion recordings: each person labels with a personal link, blind to the model
-and to each other.
+"""Private review workbench for discussion recordings: AI suggestions are separate
+from each person's answers, with a reserved independent, unassisted sample.
 
     team_label.py bundle 0235 0236 0238 --out build/label-data     # Mac: pack sentences + audio for the server
     team_label.py serve --data /var/lib/oops-label --port 8798     # server, behind nginx; LABEL_SECRET in the env
     team_label.py links --base https://giftedprofessor.xyz/oops-meeting/label/   # personal links (LABEL_SECRET)
     team_label.py merge --data <pulled data> 0236                   # → evidence/<session>/truth.json + disagreements
 
-A person confirms voice groups, labels continuous expressions, and corrects individual sentences.
+A person confirms voice groups, reviews continuous expressions, and corrects individual sentences.
 Identity linkage and content labels keep separate provenance and undo histories; tasks also need an owner. Labels are stored per person (labels/<meeting>/<name>.json) and merged into one
 truth file afterwards; sentences on which labellers disagree are listed instead of silently picking one.
 Listens on 127.0.0.1 only. Audio is served in single-sentence clips, only with a valid personal key.
@@ -34,9 +34,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PEOPLE = ["林春源", "洪玉麟", "江古月", "黄丽萍"]
 SPEAKER_OTHER = {"multi": "多人同时", "other": "其他人", "unclear": "听不清"}
 OWNER_OTHER = {"collective": "大家", "unknown": "不确定"}
-KINDS = ("task", "decision", "info", "noise")
+KINDS = ("task", "decision", "fact", "info", "noise")
 # How the live tags (local_backend.TAGS) line up with the labels, for scoring the sentence triage itself.
-LIVE_TAG = {"commitment": "task", "decision": "decision", "idea": "info", "constraint": "info", "chitchat": "noise"}
+LIVE_TAG = {"commitment": "task", "decision": "decision", "fact": "fact", "idea": "info", "constraint": "info", "chitchat": "noise"}
 DUPS = "ABCDEFGHJK"
 MEETING = re.compile(r"[0-9]{4}")
 SHORT_MS = 1200  # rows this short ("对。") may be left without a speaker
@@ -90,6 +90,16 @@ def clean(raw, rows):
                 if field in item and isinstance(source, dict) and source.get("mode") in (mode, 'single') \
                         and isinstance(source.get("id"), str) and isinstance(source.get("fingerprint"), str):
                     item[field + "_source"] = {k: source[k] for k in ("mode", "id", "fingerprint")}
+                    if field == 'kind':
+                        if source.get('review_mode') in ('blind', 'ai_assisted'):
+                            item['kind_source']['review_mode'] = source['review_mode']
+                            for key in ('suggestion_fingerprint', 'model', 'prompt_version'):
+                                if isinstance(source.get(key), str):
+                                    item['kind_source'][key] = source[key][:200]
+                        elif 'review_mode' in source:
+                            item.pop('kind', None)
+                            item.pop('owner', None)
+                            item.pop('dup', None)
                 elif field + '_source' in label:
                     item.pop(field, None)  # Malformed provenance must never turn into a legacy human answer.
                     if field == 'kind':
@@ -113,15 +123,16 @@ def complete(label, row):
         and (label.get("kind") != "task" or bool(label.get("owner")))
 
 
-def merge(rows, by_person):
+def merge(rows, by_person, semantic=None):
     """One truth from several labellers. A field counts when everyone who set it agrees; otherwise it is a dispute."""
-    units = {uid: unit for unit in expressions(rows) for uid in unit['ids']}
+    units = {uid: unit for unit in expressions(rows, semantic) for uid in unit['ids']}
+    legacy = {uid: unit for unit in expressions(rows) for uid in unit['ids']}
     linked = {}
     reviewed = {}
     for person, labels in by_person.items():
         reviewed[person] = {}
         for row in rows:
-            label = current_label(row, labels.get(row['id'], {}), units[row['id']])
+            label = current_label(row, labels.get(row['id'], {}), units[row['id']], legacy.get(row['id']))
             if label.get('speaker_source', {}).get('mode') == 'voice_group':
                 linked.setdefault(row['id'], {})[person] = label.pop('speaker')
                 label.pop('speaker_source')
@@ -153,7 +164,7 @@ def merge(rows, by_person):
                           **({"note": OWNER_OTHER[owner]} if owner in OWNER_OTHER else {})})
         elif "kind" not in row_disputes and kind == "decision":
             decisions.append({"utterance": u["id"], "phrase": u["text"][:40]})
-        elif "kind" not in row_disputes and kind in ("info", "noise"):  # hard negatives for task finding
+        elif "kind" not in row_disputes and kind in ("fact", "info", "noise"):  # hard negatives for task finding
             non_tasks.append({"utterance": u["id"], "phrase": u["text"][:40], "kind": kind})
         if "speaker" not in row_disputes and values.get("speaker"):
             speakers[u["id"]] = values["speaker"]
@@ -168,10 +179,15 @@ def merge(rows, by_person):
                  and not any(ls.get(u["id"], {}).get("speaker") for ls in by_person.values())}
     voice_overruled = {u["id"]: {"voice": u["voice"], "human": speakers[u["id"]]} for u in rows
                        if u.get("voice") and speakers.get(u["id"]) and speakers[u["id"]] != u["voice"]}
+    review = content_audit(rows, by_person, semantic)
     return {"tasks": tasks, "decisions": decisions, "non_tasks": non_tasks, "kinds": kinds, "speakers": speakers,
             "voice_prefill_unreviewed": voice_only, "role_claim_unreviewed": role_only, "voice_prefill_overruled": voice_overruled,
             "voice_group_linked": linked,
-            "duplicates": [list(g) for g in dup_sets], "disputes": disputes, "labelers": sorted(by_person)}
+            "duplicates": [list(g) for g in dup_sets], "disputes": disputes, "labelers": sorted(by_person),
+            "scope": "human_reviewed_development", "blind": False, "blind_accuracy_established": False,
+            "content_review_granularity": "sentence",
+            **{key: review[key] for key in ('content_review_modes', 'content_review_sources',
+                'independent_content_ids', 'ai_assisted_content_ids', 'legacy_content_ids', 'mixed_content_ids')}}
 
 
 # ---------- storage ----------
@@ -258,6 +274,18 @@ class Data:
             if label.get('speaker_source', {}).get('mode') == 'voice_group':
                 label.pop('speaker', None)
                 label.pop('speaker_source', None)
+        history = doc.get('history', [])
+        # Upgrade old full snapshots into deltas without changing the saved answers.
+        normalized = []
+        for index, entry in enumerate(history):
+            if entry.get('_label_review') is True:
+                normalized.append(entry)
+                continue
+            later = history[index + 1] if index + 1 < len(history) else doc['labels']
+            after = later.get('snapshot', {}) if later.get('_label_review') is True else later
+            normalized.append(dict(_label_review=True, review_mode='assisted', snapshot=entry,
+                changed_ids=sorted(uid for uid in set(entry) | set(after) if entry.get(uid) != after.get(uid))))
+        doc['history'] = normalized
         return {'revision': 0, 'history': [], 'seen': {}, **doc}
 
     def _identity_path(self, name):
@@ -294,13 +322,44 @@ class Data:
         if body.get('action') == 'undo':
             if not doc['history']:
                 raise ValueError('nothing to undo')
-            doc[field] = doc['history'].pop()
+            if field == 'labels':
+                mode = body.get('review_mode', 'assisted')
+                match = next((i for i in range(len(doc['history']) - 1, -1, -1)
+                    if doc['history'][i].get('review_mode') == mode), None)
+                if match is None:
+                    raise ValueError('nothing to undo in this mode')
+                # A stale blind plan may make its rows manually editable in assisted
+                # mode. Undo the earlier operation without deleting newer corrections.
+                later = doc['history'][match + 1:]
+                previous = doc['history'].pop(match)
+                for uid in previous['changed_ids']:
+                    successor = next((entry for entry in later if uid in entry['changed_ids']), None)
+                    # Rebase the next undo too, so it cannot resurrect this removed
+                    # operation after the newer correction is undone.
+                    target = successor['snapshot'] if successor else doc[field]
+                    if uid in previous['snapshot']:
+                        target[uid] = previous['snapshot'][uid]
+                    else:
+                        target.pop(uid, None)
+            else:
+                doc[field] = doc['history'].pop()
         else:
-            doc['history'] = (doc['history'] + [json.loads(json.dumps(doc[field]))])[-30:]
+            snapshot = json.loads(json.dumps(doc[field]))
+            entry = dict(_label_review=True, review_mode=body.get('review_mode', 'assisted'),
+                snapshot=snapshot, changed_ids=[]) if field == 'labels' else snapshot
+            doc['history'] = (doc['history'] + [entry])[-30:]
         doc['revision'] += 1
         doc['seen'][request] = fingerprint
         doc['seen'] = dict(list(doc['seen'].items())[-100:])
         return True
+
+    @staticmethod
+    def _finish_review(doc, body):
+        if body.get('action') != 'undo':
+            entry = doc['history'][-1]
+            before, after = entry['snapshot'], doc['labels']
+            entry['changed_ids'] = sorted(uid for uid in set(before) | set(after)
+                if before.get(uid) != after.get(uid))
 
     def review_identity(self, name, body):
         with self.lock:
@@ -322,28 +381,99 @@ class Data:
             self._write(self._identity_path(name), doc)
             return self.identity_payload(name)
 
-    def meeting_payload(self, mid, name):
-        rows = self.rows_with_claims(mid)
+    def annotation_state(self, mid):
+        """Only validated, source-bound sidecars can supply suggestions. GET never calls a model."""
+        from label_ai import load_sidecar
+        path = os.path.join(self.folder, 'meetings', mid, 'suggestions.json')
+        try:
+            doc = load_sidecar(path, self.meetings[mid]['rows'], mid)
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return None, 'stale'
+        if doc is None:
+            return None, 'unavailable'
+        return doc, 'pending' if doc.get('status') == 'planned' else doc.get('status', 'pending')
+
+    def content_units(self, mid):
+        doc, _ = self.annotation_state(mid)
+        # Grouping uses immutable machine hints, never another person's role claim.
+        return expressions(self.meetings[mid]['rows'], doc)
+
+    def _exposure_path(self, mid, name):
+        return os.path.join(self.folder, 'exposures', mid, name + '.json')
+
+    def _exposed(self, mid, name):
+        return set(self._read(self._exposure_path(mid, name), {}).get('ids', []))
+
+    def _mark_exposed(self, mid, name, ids):
+        with self.lock:
+            old = self._exposed(mid, name)
+            current = old | set(ids)
+            if old != current:
+                self._write(self._exposure_path(mid, name), dict(ids=sorted(current),
+                    at=time.strftime('%Y-%m-%dT%H:%M:%S'), source='suggestions_delivered'))
+
+    def meeting_payload(self, mid, name, review_mode='assisted'):
+        if review_mode not in ('assisted', 'blind'):
+            raise ValueError('unknown review mode')
+        all_rows = self.rows_with_claims(mid)
+        ai, status = self.annotation_state(mid)
+        reserved = set((ai or {}).get('blind', {}).get('ids', []))
+        units = self.content_units(mid)
+        selected = [e for e in units if (set(e['ids']) <= reserved) == (review_mode == 'blind')]
+        ids = {uid for e in selected for uid in e['ids']}
+        rows = [r for r in all_rows if r['id'] in ids]
         doc = self._document(mid, name)
         labels = self.load(mid, name)
-        audit = content_audit(rows, {name: labels})
-        units = expressions(rows)
-        by_id = {uid: e for e in units for uid in e['ids']}
-        current = {u['id']: current_label(u, labels.get(u['id'], {}), by_id[u['id']]) for u in rows}
+        audit = content_audit(rows, {name: labels}, selected)
+        by_id = {uid: e for e in selected for uid in e['ids']}
+        legacy = {uid: e for e in expressions(all_rows) for uid in e['ids']}
+        current = {u['id']: current_label(u, labels.get(u['id'], {}), by_id[u['id']], legacy.get(u['id'])) for u in rows}
         current = {uid: label for uid, label in current.items() if label}
+        predictions = {e['id']: e for e in (ai or {}).get('expressions', [])}
+        for e in audit['expressions']:
+            prediction = predictions.get(e['id']) if review_mode == 'assisted' else None
+            e['suggestion'] = dict(kind=prediction['kind'], reason=prediction['reason'], source=dict(
+                fingerprint=prediction['suggestion_fingerprint'], model=prediction['model'],
+                prompt_version=ai['prompt_version'])) if prediction else None
+        if review_mode == 'assisted':
+            self._mark_exposed(mid, name, [uid for e in audit['expressions'] if e['suggestion'] for uid in e['ids']])
+        blind_units = [e for e in units if set(e['ids']) <= reserved]
+        exposed = self._exposed(mid, name)
+        row_by_id = {row['id']: row for row in all_rows}
+        blind_labels = {uid: current_label(row_by_id[uid], labels.get(uid, {}), e, legacy.get(uid))
+            for e in blind_units for uid in e['ids']}
+        complete_blind = sum(all(uid not in exposed and blind_labels.get(uid, {}).get('kind')
+            and blind_labels[uid].get('kind_source', {}).get('review_mode') == 'blind'
+            and (blind_labels[uid]['kind'] != 'task' or blind_labels[uid].get('owner')) for uid in e['ids']) for e in blind_units)
         return dict(id=mid, rows=[dict(u, chars=chars(u), fingerprint=row_fingerprint(u)) for u in rows], labels=current,
             stale_ids=list(set(audit['stale_kind_ids'] + audit['stale_speaker_ids'])),
-            expressions=audit['expressions'], revision=doc['revision'], can_undo=bool(doc['history']),
+            expressions=audit['expressions'], revision=doc['revision'],
+            can_undo=any(entry.get('review_mode') == review_mode for entry in doc['history']),
+            review_mode=review_mode,
+            blind=dict(total=len(blind_units), completed=complete_blind, remaining=len(blind_units)-complete_blind),
+            assistance=dict(status=status, model=(ai or {}).get('model'), generated_at=(ai or {}).get('updated_at')) if review_mode == 'assisted' else None,
             content_progress={k: audit[k] for k in ('required_expression_count', 'complete_required_expressions',
                 'context_expression_count', 'ready_for_content')})
 
     def review(self, mid, name, body):
         with self.lock:
+            review_mode = body.get('review_mode', 'assisted')
+            if review_mode not in ('assisted', 'blind'):
+                raise ValueError('unknown review mode')
             doc = self._document(mid, name)
             if not self._begin(doc, body, 'labels'):
-                return self.meeting_payload(mid, name)
+                return self.meeting_payload(mid, name, review_mode)
+            if body.get('action') in ('confirm_suggestion', 'confirm_suggestions'):
+                self._confirm_suggestions(mid, name, body, doc)
+                self._finish_review(doc, body)
+                doc.update(meeting=mid, labeler=name)
+                self._write(self.labels_path(mid, name), doc)
+                return self.meeting_payload(mid, name, review_mode)
             if body.get('action') != 'undo':
+                if body.get('action') != 'set':
+                    raise ValueError('unknown action')
                 rows = self.rows_with_claims(mid)
+                legacy = {uid: e for e in expressions(rows) for uid in e['ids']}
                 field, value = body.get('field'), body.get('value')
                 if field not in ('kind', 'speaker', 'owner', 'dup'):
                     raise ValueError('unknown field')
@@ -351,7 +481,7 @@ class Data:
                 if body.get('scope') == 'expression':
                     if field == 'speaker':
                         raise ValueError('expression cannot establish speaker identity')
-                    expression = next((e for e in expressions(rows) if e['id'] == body.get('expression')), None)
+                    expression = next((e for e in self.content_units(mid) if e['id'] == body.get('expression')), None)
                     if not expression or expression['fingerprint'] != body.get('fingerprint'):
                         raise RevisionConflict('Expression changed')
                     ids = expression['ids']
@@ -362,6 +492,11 @@ class Data:
                         raise RevisionConflict('Sentence changed')
                 else:
                     raise ValueError('unknown scope')
+                ai, _ = self.annotation_state(mid)
+                reserved = set((ai or {}).get('blind', {}).get('ids', []))
+                if (review_mode == 'blind' and (not set(ids) <= reserved or set(ids) & self._exposed(mid, name))) \
+                        or (review_mode == 'assisted' and set(ids) & reserved):
+                    raise RevisionConflict('Review scope changed')
                 allowed = {'kind': KINDS, 'speaker': PEOPLE + list(SPEAKER_OTHER),
                     'owner': PEOPLE + list(OWNER_OTHER), 'dup': list(DUPS)}
                 if value is not None and value not in allowed[field]:
@@ -370,7 +505,7 @@ class Data:
                     label = doc['labels'].setdefault(uid, {})
                     # Whole-expression changes preserve deliberate single-row exceptions.
                     row = next(u for u in rows if u['id'] == uid)
-                    if expression and current_label(row, label, expression).get('kind') \
+                    if expression and current_label(row, label, expression, legacy.get(uid)).get('kind') \
                             and label.get('kind_source', {}).get('mode') != 'expression':
                         continue
                     if value is None:
@@ -383,6 +518,12 @@ class Data:
                             label['kind_source'] = dict(mode='expression', id=expression['id'], fingerprint=expression['fingerprint'])
                         elif value:
                             label['kind_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row))
+                        if value and ('review_mode' in body or ai):
+                            label['kind_source']['review_mode'] = 'blind' if review_mode == 'blind' else 'ai_assisted'
+                            prediction = next((p for p in (ai or {}).get('expressions', []) if uid in p['ids']), None)
+                            if review_mode == 'assisted' and prediction:
+                                label['kind_source'].update(suggestion_fingerprint=prediction['suggestion_fingerprint'],
+                                    model=prediction['model'], prompt_version=ai['prompt_version'])
                         if value != 'task':
                             label.pop('owner', None)
                         if value not in ('task', 'decision'):
@@ -394,17 +535,73 @@ class Data:
                             label['speaker_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row))
                     if not expression and field in ('owner', 'dup') and label.get('kind'):
                         # Correcting a dependent content field makes this row an explicit exception too.
-                        label['kind_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row))
+                        provenance = {k: v for k, v in label.get('kind_source', {}).items()
+                            if k in ('review_mode', 'suggestion_fingerprint', 'model', 'prompt_version')}
+                        label['kind_source'] = dict(mode='single', id=uid, fingerprint=row_fingerprint(row), **provenance)
                 doc['labels'] = clean(doc['labels'], rows)
+            self._finish_review(doc, body)
             doc.update(meeting=mid, labeler=name)
             self._write(self.labels_path(mid, name), doc)
-            return self.meeting_payload(mid, name)
+            return self.meeting_payload(mid, name, review_mode)
+
+    def _confirm_suggestions(self, mid, name, body, doc):
+        if body.get('review_mode') != 'assisted':
+            raise ValueError('suggestions are unavailable in blind review')
+        ai, _ = self.annotation_state(mid)
+        if not ai:
+            raise RevisionConflict('Suggestions unavailable')
+        batch = body['action'] == 'confirm_suggestions'
+        items = body.get('items') if batch else [body]
+        if not isinstance(items, list) or not 1 <= len(items) <= 100 or any(not isinstance(i, dict) for i in items):
+            raise ValueError('invalid confirmation range')
+        units = {e['id']: e for e in self.content_units(mid)}
+        predictions = {e['id']: e for e in ai.get('expressions', [])}
+        rows = self.rows_with_claims(mid)
+        legacy = {uid: e for e in expressions(rows) for uid in e['ids']}
+        checked, seen = [], set()
+        for item in items:
+            eid = item.get('expression')
+            unit, prediction = units.get(eid), predictions.get(eid)
+            if eid in seen or not unit or not prediction or unit['fingerprint'] != item.get('fingerprint') \
+                    or prediction['suggestion_fingerprint'] != item.get('suggestion_fingerprint'):
+                raise RevisionConflict('Suggestion changed')
+            seen.add(eid)
+            if prediction['kind'] not in KINDS or batch and prediction['kind'] in ('task', 'decision'):
+                raise ValueError('this suggestion requires individual review')
+            if batch:
+                for uid in unit['ids']:
+                    row = next(r for r in rows if r['id'] == uid)
+                    label = current_label(row, doc['labels'].get(uid, {}), unit, legacy.get(uid))
+                    if label.get('kind'):
+                        raise RevisionConflict('Batch includes an existing answer or single correction')
+            checked.append((unit, prediction))
+        for unit, prediction in checked:
+            for uid in unit['ids']:
+                row = next(r for r in rows if r['id'] == uid)
+                label = doc['labels'].setdefault(uid, {})
+                current = current_label(row, label, unit, legacy.get(uid))
+                if current.get('kind') and label.get('kind_source', {}).get('mode') != 'expression':
+                    continue
+                label.update(kind=prediction['kind'], kind_source=dict(mode='expression', id=unit['id'],
+                    fingerprint=unit['fingerprint'], review_mode='ai_assisted',
+                    suggestion_fingerprint=prediction['suggestion_fingerprint'], model=prediction['model'],
+                    prompt_version=ai['prompt_version']))
+                if prediction['kind'] != 'task':
+                    label.pop('owner', None)
+                if prediction['kind'] not in ('task', 'decision'):
+                    label.pop('dup', None)
+        self._mark_exposed(mid, name, [uid for unit, _ in checked for uid in unit['ids']])
+        doc['labels'] = clean(doc['labels'], rows)
 
     def labels_path(self, mid, name):
         return os.path.join(self.folder, "labels", mid, name + ".json")
 
     def load(self, mid, name):
         labels = self._document(mid, name)['labels']
+        exposed = self._exposed(mid, name)
+        for uid in exposed:
+            if labels.get(uid, {}).get('kind_source', {}).get('review_mode') == 'blind':
+                labels[uid]['kind_source']['review_mode'] = 'ai_assisted'
         approvals = self._identities(name)['approvals']
         for row in self.rows_with_claims(mid):
             gid = row.get('voice_group_id')
@@ -418,6 +615,10 @@ class Data:
 
     def save(self, mid, name, raw, revision=None):
         labels = clean(raw, self.meetings[mid]["rows"])
+        # Legacy whole-document clients cannot assert a server-controlled blind/AI origin.
+        for label in labels.values():
+            for key in ('review_mode', 'suggestion_fingerprint', 'model', 'prompt_version'):
+                label.get('kind_source', {}).pop(key, None)
         path = self.labels_path(mid, name)
         with self.lock:
             doc = self._document(mid, name)
@@ -461,6 +662,7 @@ class Data:
             row = dict(u, **dict(voice=person, claimed=True)) if not u.get('voice') and person in PEOPLE else dict(u)
             # Strip any archived predictions before returning a blind annotation page.
             row = {k: row[k] for k in ('id', 'parent', 'text', 'start_ms', 'end_ms', 'voice', 'role', 'claimed') if k in row}
+            row.update(machine_voice=u.get('voice'), machine_role=u.get('role'))
             if gid:
                 row.update(voice_group_id=gid, voice_group_fingerprint=self.groups[gid]['fingerprint'])
             out.append(row)
@@ -532,7 +734,10 @@ def make_handler(data, secret):
                 return self.send(400, b'{"error":"who"}')
             if m and m.group(1) in data.meetings:
                 mid = m.group(1)
-                return self.send(200, json.dumps(data.meeting_payload(mid, name), ensure_ascii=False).encode())
+                mode = (query.get('mode') or ['assisted'])[0]
+                if mode not in ('assisted', 'blind'):
+                    return self.send(400, b'{}')
+                return self.send(200, json.dumps(data.meeting_payload(mid, name, mode), ensure_ascii=False).encode())
             m = re.fullmatch(r"/clip/([0-9]{4})/([A-Za-z0-9_-]{1,40})\.wav", url.path)
             if m and m.group(2) in index.get(m.group(1), {}):
                 u = index[m.group(1)][m.group(2)]
@@ -540,7 +745,7 @@ def make_handler(data, secret):
                 end_ms = u['end_ms']
                 through = (query.get('through') or [''])[0]
                 if through:
-                    expr = next((e for e in expressions(data.rows_with_claims(m.group(1)))
+                    expr = next((e for e in data.content_units(m.group(1))
                         if e['ids'][0] == u['id'] and e['ids'][-1] == through), None)
                     if not expr:
                         return self.send(400, b'{}')
@@ -556,7 +761,7 @@ def make_handler(data, secret):
             size = int(self.headers.get("Content-Length") or 0)
             review = re.fullmatch(r'/api/meeting/([0-9]{4})/review', url.path)
             if url.path == '/api/identity' or review and review.group(1) in data.meetings:
-                if not 0 < size <= 10000:
+                if not 0 < size <= 65536:
                     return self.send(400, b'{}')
                 try:
                     body = json.loads(self.rfile.read(size))
@@ -581,6 +786,8 @@ def make_handler(data, secret):
             if not 0 < size <= 1_500_000:
                 return self.send(400, b"{}")
             if self.headers.get('X-Label-Revision') is None:
+                return self.send(409, b'{"error":"upgrade_required"}')
+            if os.path.exists(os.path.join(data.folder, 'meetings', m.group(1), 'suggestions.json')):
                 return self.send(409, b'{"error":"upgrade_required"}')
             try:
                 labels = data.save(m.group(1), name, json.loads(self.rfile.read(size)), int(self.headers['X-Label-Revision']))
@@ -643,7 +850,7 @@ def merge_cmd(args):
             labels = data.load(short, name)
             if labels:
                 by_person[name] = labels
-        truth = {"meeting": meeting["session"], "source": "team_label", **merge(rows, by_person)}
+        truth = {"meeting": meeting["session"], "source": "team_label", **merge(rows, by_person, data.content_units(short))}
         out = os.path.join(ROOT, "evidence", meeting["session"], "truth.json")
         with open(out, "w", encoding="utf-8") as f:
             json.dump(truth, f, ensure_ascii=False, indent=1)

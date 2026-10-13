@@ -14,6 +14,46 @@ REPLAY = {'utterances':[{'id':'u1','text':'嗯。周五提交。','tag':'commitm
 
 
 class CachedLabelsTest(unittest.TestCase):
+    def test_assisted_and_legacy_answers_only_support_development_metrics(self):
+        labels = copy.deepcopy(LABELS)
+        for row in ROWS:
+            labels['洪玉麟'][row['id']]['kind_source'] = dict(mode='single', id=row['id'],
+                fingerprint=row_fingerprint(row), review_mode='ai_assisted')
+        report = evaluate(ROWS, labels, REPLAY)
+        self.assertEqual('scored_cached_replay', report['status'])
+        self.assertEqual('human_reviewed_cached_development', report['metrics_scope'])
+        self.assertEqual(3, report['ai_assisted_content_rows'])
+        self.assertEqual([], report['independent_blind_final_ids'])
+        self.assertFalse(report['blind_accuracy_established'])
+        report = evaluate(ROWS, labels, REPLAY, evaluation_mode='independent_blind')
+        self.assertEqual('waiting_for_human_labels', report['status'])
+        self.assertNotIn('effective_confusion', report)
+        self.assertEqual(['not_independent_blind'], report['excluded_finals'][0]['reasons'])
+        self.assertEqual(['u1-1','u1-2'], report['excluded_finals'][0]['non_blind_sentence_ids'])
+
+    def test_blind_parent_requires_every_child_and_every_reviewer_to_be_blind(self):
+        labels = copy.deepcopy(LABELS)
+        for row in ROWS:
+            labels['洪玉麟'][row['id']]['kind_source'] = dict(mode='single', id=row['id'],
+                fingerprint=row_fingerprint(row), review_mode='blind')
+        report = evaluate(ROWS, labels, REPLAY, evaluation_mode='independent_blind')
+        self.assertEqual(['u1','u2'], report['scored_final_ids'])
+        self.assertEqual('independent_blind_cached_development', report['metrics_scope'])
+        self.assertFalse(report['blind_accuracy_established'])
+        labels['洪玉麟']['u1-1']['kind_source']['review_mode'] = 'ai_assisted'
+        self.assertEqual(['u2'], evaluate(ROWS, labels, REPLAY,
+            evaluation_mode='independent_blind')['scored_final_ids'])
+        labels['江古月'] = {'u2-1': {'kind':'noise'}}
+        self.assertEqual([], evaluate(ROWS, labels, REPLAY,
+            evaluation_mode='independent_blind')['scored_final_ids'])
+
+    def test_fact_prediction_and_human_fact_are_effective_content(self):
+        labels = copy.deepcopy(LABELS)
+        labels['洪玉麟']['u1-2'] = {'kind':'fact'}
+        replay = copy.deepcopy(REPLAY)
+        replay['utterances'][0]['tag'] = 'fact'
+        self.assertEqual(1, evaluate(ROWS, labels, replay)['effective_confusion']['effective']['effective'])
+
     def test_folds_mixed_sentence_labels_without_claiming_sentence_predictions(self):
         before = copy.deepcopy((ROWS, LABELS, REPLAY))
         report = evaluate(ROWS, LABELS, REPLAY)
