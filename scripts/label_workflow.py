@@ -15,7 +15,7 @@ import math
 import re
 from collections import Counter
 
-KINDS = frozenset(("task", "decision", "info", "noise"))
+KINDS = frozenset(("task", "decision", "fact", "info", "noise"))
 SHORT_CHARS = 10
 MAX_GAP_MS = 1000
 MAX_EXPRESSION_MS = 25000
@@ -37,6 +37,15 @@ def _evidence(row):
     return {key: row.get(key) for key in ("id", "text", "start_ms", "end_ms", "voice", "role")}
 
 
+def _semantic_evidence(row):
+    """Machine-source evidence does not change when shared role claims change."""
+    evidence = _evidence(row)
+    for field in ("voice", "role"):
+        if "machine_" + field in row:
+            evidence[field] = row["machine_" + field]
+    return evidence
+
+
 def row_fingerprint(row):
     """Version the original sentence independently of suggested voice/role data."""
     return digest({key: row.get(key) for key in ("id", "text", "start_ms", "end_ms", "parent")})
@@ -51,7 +60,7 @@ def _times(row):
     return None
 
 
-def expressions(rows):
+def expressions(rows, semantic=None):
     """Conservatively join adjacent pieces of the same ASR final.
 
     Input order is transcript order. Missing parent, missing/invalid time,
@@ -63,6 +72,8 @@ def expressions(rows):
     ids = [row["id"] for row in rows]
     if len(ids) != len(set(ids)):
         raise ValueError("Sentence IDs must be unique")
+    if semantic is not None:
+        return _semantic_expressions(rows, semantic)
     groups = []
     for row in rows:
         previous = groups[-1][-1] if groups else None
@@ -89,6 +100,67 @@ def expressions(rows):
             for group in groups]
 
 
+def _semantic_expressions(rows, semantic):
+    """Use verified suggestions as selection units; leave uncovered rows legacy.
+
+    The sidecar loader owns model/schema/holdout validation. These additional
+    checks prevent stale, overlapping or noncontiguous units from changing the
+    source evidence even when a caller passes a document directly. A final
+    unit list from Data.content_units is also accepted by the audit tools.
+    """
+    if isinstance(semantic, dict):
+        expected_hash = digest([dict(_semantic_evidence(row), parent=row.get("parent")) for row in rows])
+        if semantic.get("schema") != 1 or semantic.get("source_hash") != expected_hash:
+            raise ValueError("Semantic sidecar does not match the current source")
+        proposals = semantic.get("expressions")
+    else:
+        proposals = semantic
+    if not isinstance(proposals, list):
+        raise ValueError("Semantic expression list is missing")
+    indexed = {row["id"]: (i, row) for i, row in enumerate(rows)}
+    starts, used, unit_ids = {}, set(), set()
+    for proposal in proposals:
+        if not isinstance(proposal, dict):
+            raise ValueError("Malformed semantic expression")
+        ids = proposal.get("ids")
+        if (not isinstance(ids, list) or not ids or any(not isinstance(uid, str) or uid not in indexed for uid in ids)
+                or len(ids) != len(set(ids)) or used.intersection(ids)
+                or not isinstance(proposal.get("id"), str) or not proposal["id"]
+                or proposal["id"] in unit_ids):
+            raise ValueError("Semantic expressions must have unique current members")
+        positions = [indexed[uid][0] for uid in ids]
+        if positions != list(range(positions[0], positions[0] + len(positions))):
+            raise ValueError("Semantic expression members must be contiguous and ordered")
+        group = [indexed[uid][1] for uid in ids]
+        fingerprint = digest([_semantic_evidence(row) for row in group])
+        if proposal.get("fingerprint") != fingerprint:
+            raise ValueError("Semantic expression evidence has changed")
+        row_hashes = proposal.get("row_fingerprints")
+        if row_hashes is not None and row_hashes != {row["id"]: row_fingerprint(row) for row in group}:
+            raise ValueError("Semantic expression sentence evidence has changed")
+        starts[positions[0]] = dict(id=proposal["id"], ids=ids[:],
+            text="".join(str(row.get("text", "")) for row in group),
+            start_ms=group[0].get("start_ms"), end_ms=group[-1].get("end_ms"),
+            fingerprint=fingerprint, required=sum(chars(row) for row in group) >= SHORT_CHARS)
+        used.update(ids)
+        unit_ids.add(proposal["id"])
+    result, index = [], 0
+    while index < len(rows):
+        if index in starts:
+            unit = starts[index]
+            result.append(unit)
+            index += len(unit["ids"])
+        else:
+            end = index + 1
+            while end < len(rows) and end not in starts:
+                end += 1
+            result.extend(expressions(rows[index:end]))
+            index = end
+    if len({unit["id"] for unit in result}) != len(result):
+        raise ValueError("Semantic and legacy expression IDs collide")
+    return result
+
+
 def _source_current(row, label, field, expression):
     key = field + "_source"
     if key not in label:
@@ -99,9 +171,10 @@ def _source_current(row, label, field, expression):
     if source.get("mode") == "single":
         return source.get("id") == row["id"] and source.get("fingerprint") == row_fingerprint(row)
     if field == "kind":
-        return bool(expression and source.get("mode") == "expression"
-                    and source.get("id") == expression["id"]
-                    and source.get("fingerprint") == expression["fingerprint"])
+        choices = expression if isinstance(expression, (tuple, list)) else [expression]
+        return source.get("mode") == "expression" and any(
+            unit and source.get("id") == unit["id"] and source.get("fingerprint") == unit["fingerprint"]
+            for unit in choices)
     if field == "speaker":
         return bool(not label.get("speaker_excluded") and source.get("mode") == "voice_group"
                     and row.get("voice_group_id") and row.get("voice_group_fingerprint")
@@ -110,7 +183,7 @@ def _source_current(row, label, field, expression):
     return False
 
 
-def current_label(row, label, expression=None):
+def current_label(row, label, expression=None, legacy_expression=None):
     """Copy a label, withdrawing fields linked to changed expression/group data.
 
     kind_source versions the content operation (kind and its owner/duplicate
@@ -119,7 +192,8 @@ def current_label(row, label, expression=None):
     kept as legacy human answers. Unknown/malformed source markers fail closed.
     """
     label = dict(label) if isinstance(label, dict) else {}
-    if label.get("kind") not in KINDS or not _source_current(row, label, "kind", expression):
+    source_units = [expression, legacy_expression] if legacy_expression is not None else expression
+    if label.get("kind") not in KINDS or not _source_current(row, label, "kind", source_units):
         for key in ("kind", "owner", "dup", "kind_source"):
             label.pop(key, None)
     elif label.get("kind") != "task":
@@ -131,7 +205,23 @@ def current_label(row, label, expression=None):
     return label
 
 
-def content_audit(rows, labels_by_person):
+def content_review_mode(label):
+    """Annotation exposure, separate from source validity or label agreement.
+
+    Old answers are usable human work, but lack evidence of blind collection.
+    AI metadata is conservatively treated as exposure even with a blind marker.
+    The server, rather than an untrusted client, must issue new markers.
+    """
+    source = label.get("kind_source")
+    if not isinstance(source, dict):
+        return "legacy_unknown"
+    if source.get("review_mode") == "ai_assisted" or any(source.get(key) for key in
+            ("suggestion_id", "suggestion_fingerprint", "model", "prompt_version")):
+        return "ai_assisted"
+    return "blind" if source.get("review_mode") == "blind" else "legacy_unknown"
+
+
+def content_audit(rows, labels_by_person, semantic=None):
     """Audit explicit human content and identity separately, without mutations.
 
     Complete content requires an agreed kind and, for tasks, an agreed owner.
@@ -144,13 +234,17 @@ def content_audit(rows, labels_by_person):
     parents whose every original sentence is complete may be scored.
     """
     rows = list(rows)
-    units = expressions(rows)
+    units = expressions(rows, semantic)
     by_id = {uid: unit for unit in units for uid in unit["ids"]}
+    legacy_by_id = {uid: unit for unit in expressions(rows) for uid in unit["ids"]}
     kinds, owners, speakers = {}, {}, {}
     complete_ids, content_disputes, speaker_disputes = [], [], []
     stale_kind, stale_speaker = [], []
     stale_kind_count = stale_speaker_count = 0
     content_sources, speaker_sources = Counter(), Counter()
+    review_sources = Counter()
+    review_modes = {}
+    independent_content, assisted_content, legacy_content, mixed_content = [], [], [], []
     independent_speakers, grouped_speakers = [], []
     active_ids = set()
     for row in rows:
@@ -162,16 +256,17 @@ def content_audit(rows, labels_by_person):
                 continue
             if raw.get("kind") in KINDS:
                 active_ids.add(uid)
-                if not _source_current(row, raw, "kind", by_id[uid]):
+                if not _source_current(row, raw, "kind", [by_id[uid], legacy_by_id[uid]]):
                     stale_kind.append(uid)
                     stale_kind_count += 1
             if raw.get("speaker") and not _source_current(row, raw, "speaker", by_id[uid]):
                 stale_speaker.append(uid)
                 stale_speaker_count += 1
-            item = current_label(row, raw, by_id[uid])
+            item = current_label(row, raw, by_id[uid], legacy_by_id[uid])
             current[person] = item
             if item.get("kind"):
                 content_sources[item.get("kind_source", {}).get("mode", "legacy")] += 1
+                review_sources[content_review_mode(item)] += 1
             if item.get("speaker"):
                 speaker_sources[item.get("speaker_source", {}).get("mode", "legacy")] += 1
 
@@ -194,6 +289,16 @@ def content_audit(rows, labels_by_person):
                 owners[uid] = values["owner"]
             if "owner" not in dispute and (values["kind"] != "task" or uid in owners):
                 complete_ids.append(uid)
+                modes = {content_review_mode(item) for item in current.values() if item.get("kind")}
+                review_modes[uid] = next(iter(modes)) if len(modes) == 1 else "mixed"
+                if modes == {"blind"}:
+                    independent_content.append(uid)
+                elif len(modes) > 1:
+                    mixed_content.append(uid)
+                elif modes == {"ai_assisted"}:
+                    assisted_content.append(uid)
+                else:
+                    legacy_content.append(uid)
         if "speaker" not in dispute and values.get("speaker"):
             speakers[uid] = values["speaker"]
             # A real sentence-level check is kept distinct from linked group coverage.
@@ -220,6 +325,12 @@ def content_audit(rows, labels_by_person):
         context_expression_count=len(units) - len(required_units),
         ready_for_content=bool(rows) and all(unit["complete"] and not unit["disputed"] for unit in required_units),
         content_label_sources={key: content_sources[key] for key in ("single", "legacy", "expression")},
+        content_review_sources={key: review_sources[key] for key in ("blind", "ai_assisted", "legacy_unknown")},
+        content_review_modes=review_modes, independent_content_ids=independent_content,
+        ai_assisted_content_ids=assisted_content, legacy_content_ids=legacy_content,
+        mixed_content_ids=mixed_content,
+        independent_content_rows=len(independent_content), ai_assisted_content_rows=len(assisted_content),
+        legacy_content_rows=len(legacy_content), mixed_content_rows=len(mixed_content),
         speaker_label_sources={key: speaker_sources[key] for key in ("single", "legacy", "voice_group")},
         independent_speaker_rows=len(independent_speakers), grouped_speaker_rows=len(grouped_speakers),
         speaker_confirmed_rows=len(speakers), stale_kind_labels=stale_kind_count, stale_speaker_labels=stale_speaker_count,

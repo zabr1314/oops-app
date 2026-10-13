@@ -126,8 +126,10 @@ def prepare(short, purpose):
 def fold_truth(short):
     sid = session_id(recording(short))
     folder = os.path.join(ROOT, "evidence", sid)
-    parent = {u["id"]: u["parent"] for u in json.load(open(os.path.join(folder, "meeting.json"), encoding="utf-8"))["utterances"]}
-    truth = json.load(open(os.path.join(folder, "truth.json"), encoding="utf-8"))
+    with open(os.path.join(folder, "meeting.json"), encoding="utf-8") as stream:
+        parent = {u["id"]: u["parent"] for u in json.load(stream)["utterances"]}
+    with open(os.path.join(folder, "truth.json"), encoding="utf-8") as stream:
+        truth = json.load(stream)
     tasks, seen = [], set()
     for t in truth["tasks"]:
         p = parent[t["utterance"]]

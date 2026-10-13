@@ -28,6 +28,31 @@ class ReadinessTest(unittest.TestCase):
         self.assertFalse(report['calibration_complete'])
         self.assertFalse(report['real_meeting_accepted'])
 
+    def test_ai_assisted_completion_is_not_independent_blind_readiness(self):
+        data = Data()
+        data.labels = {'林春源':{'u1':{'kind':'fact','kind_source':dict(mode='single', id='u1',
+            fingerprint=row_fingerprint(data.rows[0]), review_mode='ai_assisted')}}}
+        report = audit(data)
+        self.assertTrue(report['ready_for_content'])
+        self.assertTrue(report['ready_for_cached_content_evaluation'])
+        self.assertFalse(report['ready_for_independent_blind_evaluation'])
+        self.assertEqual(1, report['meetings'][0]['ai_assisted_content_rows'])
+        self.assertFalse(report['blind_accuracy_established'])
+        data.labels['林春源']['u1']['kind_source']['review_mode'] = 'blind'
+        self.assertTrue(audit(data)['ready_for_independent_blind_evaluation'])
+
+    def test_readiness_uses_data_content_units(self):
+        class SemanticData(Data):
+            def content_units(self, mid):
+                units = expressions(self.rows)
+                units[0]['id'] = 'ai:u1'
+                return units
+        data = SemanticData()
+        unit = data.content_units('0235')[0]
+        data.labels = {'林春源':{'u1':{'kind':'fact','kind_source':dict(mode='expression',
+            id=unit['id'], fingerprint=unit['fingerprint'], review_mode='ai_assisted')}}}
+        self.assertTrue(audit(data)['ready_for_content'])
+
     def test_kind_or_owner_disagreement_blocks_content_but_speaker_dispute_does_not(self):
         data = Data()
         data.labels = {'林春源': {'u1': {'kind':'task', 'owner':'林春源', 'speaker':'林春源'}}}
