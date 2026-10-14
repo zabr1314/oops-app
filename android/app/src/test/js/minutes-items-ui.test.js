@@ -128,3 +128,29 @@ test('incomplete ASR is visible after meeting sync even if item queue is empty',
   assert.match(u.screen(), /转写可能不完整/);
   assert.doesNotMatch(u.screen(), /已保存 · 已核对/);
 });
+test('meeting focus hides noise while the original toggle restores every source sentence', () => {
+  const u = ui();
+  u.click('meeting-open', {id: 's1'});
+  u.receive('history.open', {...meeting([]), utterances: [
+    {id:'noise',text:'这段是闲聊原文',start_ms:0,end_ms:900,tag:'chitchat'},
+    {id:'useful',text:'明天提交接口说明',start_ms:1000,end_ms:1900,tag:'commitment'}
+  ], transcript_view:{folded_ids:['noise']}});
+  u.click('tab',{tab:'transcript'});
+  assert.match(u.screen(), /明天提交接口说明/);
+  assert.doesNotMatch(u.screen(), /这段是闲聊原文/);
+  assert.match(u.screen(), /查看全部原文/);
+  u.click('transcript-mode');
+  assert.match(u.screen(), /这段是闲聊原文/);
+  assert.match(u.screen(), /明天提交接口说明/);
+});
+
+test('archived acceptance records are accessible without inflating business task counts', () => {
+  const u=ui();u.click('go',{route:'tasks'});u.click('tasks-scope',{value:'mine'});u.click('tasks-status-cycle');
+  u.receive('tasks.list',{mine:true,status:'open',selfName:'Alice',items:[],archived_items:[
+    {op_id:'test-only',what:'服务器连接验收测试',who:'Alice',feishu:{state:'open'},curation:{archived:true}}
+  ]});
+  assert.match(u.screen(), /飞书正式任务 <span class="meta">0<\/span>/);
+  assert.match(u.screen(), /已收起的验收记录 1 条/);
+  assert.match(u.screen(), /服务器连接验收测试/);
+  assert.doesNotMatch(u.screen(), /进行中/);
+});

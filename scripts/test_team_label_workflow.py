@@ -107,6 +107,8 @@ class IdentityWorkflowTest(WorkflowFixture):
     def test_group_confirmation_links_across_meetings_without_persisting_row_truth(self):
         self.set_expression()
         before = self.read_json(self.data.labels_path("0235", ALICE))
+        original_identity = dict(revision=2, approvals={}, history=[{"old": "personal identity answer"}], seen={})
+        self.data._write(self.data._identity_path(ALICE), original_identity)
         result = self.data.review_identity(ALICE, self.identity_body())
         group = next(item for item in result["groups"] if item["id"] == "role:A")
         self.assertEqual(5, group["count"])
@@ -120,19 +122,21 @@ class IdentityWorkflowTest(WorkflowFixture):
         self.assertFalse(self.labels("0236").get("c2", {}).get("speaker"))
         self.assertEqual(before, self.read_json(self.data.labels_path("0235", ALICE)))
         self.assertFalse(os.path.exists(self.data.labels_path("0236", ALICE)))
-        self.assertTrue(os.path.isfile(os.path.join(self.folder, "identities", ALICE + ".json")))
+        self.assertTrue(os.path.isfile(os.path.join(self.folder, "identities", "shared.json")))
+        self.assertEqual(original_identity, self.read_json(self.data._identity_path(ALICE)))
         audit = content_audit(self.data.rows_with_claims("0235"), {ALICE: self.data.load("0235", ALICE)})
         self.assertEqual((0, 4), (audit["independent_speaker_rows"], audit["grouped_speaker_rows"]))
 
-    def test_identity_approval_and_undo_are_personal(self):
+    def test_identity_approval_and_undo_are_shared_across_the_team(self):
         self.data.review_identity(ALICE, self.identity_body())
-        self.assertEqual({}, {uid: label for uid, label in self.labels(name=BOB).items() if label})
-        self.assertTrue(all(not group["current"] for group in self.data.identity_payload(BOB)["groups"]))
+        self.assertEqual(ALICE, self.labels(name=BOB)["a1"]["speaker"])
+        self.assertTrue(next(group for group in self.data.identity_payload(BOB)["groups"]
+                             if group["id"] == "role:A")["current"])
         self.data.review_identity(BOB, self.identity_body(speaker=BOB, name=BOB))
-        self.assertEqual((ALICE, BOB), (self.labels()["a1"]["speaker"], self.labels(name=BOB)["a1"]["speaker"]))
+        self.assertEqual((BOB, BOB), (self.labels()["a1"]["speaker"], self.labels(name=BOB)["a1"]["speaker"]))
         self.undo(identity=True, name=BOB)
         self.assertEqual(ALICE, self.labels()["a1"]["speaker"])
-        self.assertFalse(self.labels(name=BOB).get("a1", {}).get("speaker"))
+        self.assertEqual(ALICE, self.labels(name=BOB)["a1"]["speaker"])
 
     def test_single_correction_and_exclusion_survive_revoke_and_identity_undo(self):
         self.data.review_identity(ALICE, self.identity_body())
@@ -325,7 +329,7 @@ class WorkflowHttpTest(WorkflowFixture):
         personal = tl.make_key(SECRET, ALICE)
         self.assertEqual(ALICE, json.loads(self.call("/api/meeting/0236", personal)[1])["labels"]["c1"]["speaker"])
         other = tl.make_key(SECRET, BOB)
-        self.assertFalse(json.loads(self.call("/api/meeting/0236", other)[1])["labels"].get("c1", {}).get("speaker"))
+        self.assertEqual(ALICE, json.loads(self.call("/api/meeting/0236", other)[1])["labels"]["c1"]["speaker"])
 
     def test_review_endpoints_report_revision_and_fingerprint_conflicts(self):
         key = tl.make_key(SECRET, ALICE)

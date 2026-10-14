@@ -39,7 +39,7 @@
     route: { name: 'home' },
     liveTab: 'live', meetingTab: 'overview', memoryTab: 'projects',
     history: null, historyItems: null, historyFilter: '', transcriptFilter: { speaker: null, query: '' },
-    tasks: { scope: 'review', mine: false, status: 'all', items: null, parsedItems: null, meetingItems: null, parsedStatus: null, parsedSerial: 0, reviewFilter: 'all', query: '', cache: new Map(), expanded: new Set(), requests: new Map(), pending: new Set(), serial: 0, refreshedAt: null }, openTaskCount: 0,
+    tasks: { scope: 'review', mine: false, status: 'all', items: null, parsedItems: null, meetingItems: null, parsedStatus: null, parsedSerial: 0, reviewFilter: 'all', query: '', cache: new Map(), expanded: new Set(), requests: new Map(), pending: new Set(), serial: 0, refreshedAt: null, archived: [] }, openTaskCount: 0,
     homeTasks: null, homeTasksState: { loading: false, error: null },
     requests: { history: {}, projects: {}, project: {}, tasks: {} }, pendingMeetingId: null, meetingRequest: null,
     minutes: new Map(), minutesRequest: 0, remoteEpoch: null, pendingRetention: null, retentionRequest: 0,
@@ -916,10 +916,12 @@
     const who = (u) => u.review?.speaker || u.speaker;
     const names = [...new Set(rows.map(who).filter(Boolean))];
     const q = S.transcriptFilter.query.trim();
-    const shown = rows.filter((u) => (!S.transcriptFilter.speaker || who(u) === S.transcriptFilter.speaker) && (!q || u.text.includes(q)));
+    const folded = new Set(h.transcript_view?.folded_ids || []);
+    const shown = rows.filter((u) => (S.transcriptFilter.showAll || q || S.transcriptFilter.speaker || !folded.has(u.id)) && (!S.transcriptFilter.speaker || who(u) === S.transcriptFilter.speaker) && (!q || u.text.includes(q)));
     return `<div class="stack sessions-feature">${heading}${stage}
       <div class="search-input">${icon('magnifying-glass', 18)}<input id="meeting-search" aria-label="搜索这次原文" placeholder="搜索这次原文" value="${esc(S.transcriptFilter.query)}"></div>
       ${names.length ? speakerChips(names, S.transcriptFilter.speaker) : ''}
+      ${folded.size ? `<button class="chip" data-act="transcript-mode">${S.transcriptFilter.showAll ? '只看重点原话' : '查看全部原文（含收起 '+folded.size+' 段）'}</button>` : ''}
       <p class="meta">点一句可以改说话人，▶ 从服务器回听原声（会后录音上传完才有）。</p>
       ${shown.map((u) => {
         const manual = u.review?.speaker;
@@ -961,7 +963,7 @@
   const taskKey = (mine, status) => `${mine ? S.state.selfName || '' : '*'}:${status}`;
   function clearTaskIdentity() {
     S.tasks.cache.clear(); S.tasks.requests.clear(); S.tasks.pending.clear(); S.tasks.expanded.clear();
-    S.tasks.items = null; S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = null; S.tasks.parsedSerial = 0; S.tasks.refreshedAt = null; S.homeTasks = null; S.openTaskCount = 0;
+    S.tasks.items = null; S.tasks.archived = []; S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = null; S.tasks.parsedSerial = 0; S.tasks.refreshedAt = null; S.homeTasks = null; S.openTaskCount = 0;
     S.homeTasksState = {}; S.requests.tasks = {};
   }
   function clearRemoteState() {
@@ -1016,7 +1018,7 @@
   }
   function openTasks() {
     const saved = S.tasks.cache.get(taskKey(S.tasks.mine, S.tasks.status));
-    S.tasks.items = saved?.items || null;
+    S.tasks.items = saved?.items || null; S.tasks.archived = saved?.archived || [];
     S.requests.tasks = { loading: true };
     if (!S.tasks.mine || S.state.selfName) requestTasks(S.tasks.mine, S.tasks.status);
   }
@@ -1025,6 +1027,7 @@
     if (!currentTaskReply(p)) return;
     S.tasks.pending.delete(taskKey(!!p.mine, p.status || 'open'));
     const items = (p.items || []).map(visibleTaskSource);
+    const archived = (p.archived_items || []).map(visibleTaskSource);
     const serial = Number(String(p.requestId || '').replace(/^tasks-/, '')) || 0;
     // Candidate reads are independent of Feishu filters. A newly observed withdrawal must clear every cached scope.
     if (!p.requestId || serial >= S.tasks.parsedSerial) {
@@ -1035,12 +1038,12 @@
       S.tasks.refreshedAt = new Date().toISOString();
       for (const saved of S.tasks.cache.values()) { saved.parsedItems = S.tasks.parsedItems; saved.meetingItems = S.tasks.meetingItems; saved.parsedStatus = S.tasks.parsedStatus; }
     }
-    S.tasks.cache.set(taskKey(!!p.mine, p.status || 'open'), { items, parsedItems: S.tasks.parsedItems, meetingItems: S.tasks.meetingItems, parsedStatus: S.tasks.parsedStatus });
+    S.tasks.cache.set(taskKey(!!p.mine, p.status || 'open'), { items, archived, parsedItems: S.tasks.parsedItems, meetingItems: S.tasks.meetingItems, parsedStatus: S.tasks.parsedStatus });
     if (p.mine && p.status === 'open') {
       S.homeTasks = items; S.homeTasksState = {}; S.openTaskCount = items.length;
     }
     if (!!p.mine === S.tasks.mine && p.status === S.tasks.status) {
-      S.tasks.items = items; S.requests.tasks = {};
+      S.tasks.items = items; S.tasks.archived = archived; S.requests.tasks = {};
     }
     renderNav();
     if (['tasks', 'home', 'memory'].includes(S.route.name)) render();
@@ -1128,6 +1131,7 @@
     const q = t.query.trim().toLocaleLowerCase();
     const matches = value => !q || String(value || '').toLocaleLowerCase().includes(q);
     const items = (t.items || []).filter(x => matches([x.what, x.who, x.quote, x.meeting?.title, x.meeting?.goal].join(' ')));
+    const archived = (t.archived || []).filter(x => matches([x.what, x.who, x.quote, x.meeting?.title, x.meeting?.goal].join(' ')));
     const available = [...(t.parsedItems || []), ...(t.meetingItems || []).filter(x => !x.linked_created)].filter(x => !t.mine || parsedOwner(x) === S.state.selfName);
     const parsed = available.filter(x => (t.reviewFilter === 'all' || parsedReviewState(x) === t.reviewFilter)
       && matches([x.title, x.what, x.detail, x.source_meeting?.title, ...(x.evidence || []).map(e => e.text), ...(x.reviews || []).flatMap(r => [r.by, r.owner, r.title])].join(' ')));
@@ -1148,7 +1152,8 @@
           <section class="stack task-group formal-task-group"><div class="section-title"><h2>飞书正式任务 <span class="meta">${items.length}</span></h2><button class="chip" type="button" data-act="tasks-status-cycle" aria-label="筛选飞书业务状态">${{ open: '未完成', done: '已完成', all: '全部状态' }[t.status]}</button></div>
           <p class="meta">${t.mine ? `${esc(S.state.selfName)}负责` : '团队全部负责人'} · 已创建的飞书任务，业务状态单独读取</p>
           ${group('需要跟进', overdue)}${group('进行中', open)}${group('已完成', done)}${group('飞书里已删除', gone)}
-          ${!items.length ? '<p class="meta">没有符合条件的飞书正式任务。上方候选尚不等于已创建任务。</p>' : ''}</section>`}
+          ${!items.length ? '<p class="meta">没有符合条件的飞书正式任务。上方候选尚不等于已创建任务。</p>' : ''}
+          ${archived.length ? `<details><summary>已收起的验收记录 ${archived.length} 条</summary><p class="meta">保留原记录，已移出业务待办，不计入正式任务数量。</p>${archived.map(taskCard).join('')}</details>` : ''}</section>`}
         `}
     </div>`;
   }
@@ -1832,11 +1837,11 @@
     if (S.draft && !S.draft.submitted && S.draft.sourceSessionId === sid) S.draft = null;
     if (sid === S.state.sessionId) { resetTranscript(); S.expiredBoardSession = sid; S.board = null; }
     if (S.playingKey || S.loadingKey) { send('clip.stop'); S.playingKey = null; S.loadingKey = null; }
-    S.tasks.items = S.tasks.items?.map(visibleTaskSource) || null; S.homeTasks = S.homeTasks?.map(visibleTaskSource) || null;
+    S.tasks.items = S.tasks.items?.map(visibleTaskSource) || null; S.tasks.archived = (S.tasks.archived || []).map(visibleTaskSource); S.homeTasks = S.homeTasks?.map(visibleTaskSource) || null;
     S.tasks.parsedItems = S.tasks.parsedItems?.filter(candidateSourceVisible) || null;
     S.tasks.meetingItems = S.tasks.meetingItems?.filter(candidateSourceVisible) || null;
     for (const cached of S.tasks.cache.values()) {
-      cached.items = cached.items.map(visibleTaskSource);
+      cached.items = cached.items.map(visibleTaskSource); cached.archived = (cached.archived || []).map(visibleTaskSource);
       cached.parsedItems = cached.parsedItems?.filter(candidateSourceVisible) || null;
       cached.meetingItems = cached.meetingItems?.filter(candidateSourceVisible) || null;
     }
@@ -2442,6 +2447,7 @@
     'agenda-clear': () => { send('agenda.clear'); closeSheet(); },
     'commitments-open': () => openSheet({ kind: 'commitments' }),
     'ideas-all': () => { S.showAllIdeas = true; renderSheet(); },
+    'transcript-mode': () => { S.transcriptFilter.showAll = !S.transcriptFilter.showAll; render(); },
     'notices-open': () => openSheet({ kind: 'notices' }),
     'meeting-notices': () => openSheet({ kind: 'notices', rows: S.history?.notices || [] }),
     'live-tools': () => openSheet({ kind: 'tools', live: true }),

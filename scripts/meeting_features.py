@@ -11,6 +11,7 @@ import tempfile
 import threading
 from zoneinfo import ZoneInfo
 import minutes_items
+from meeting_curation import transcript_view
 from archive_policy import ArchivePolicyError, policy_from_request, expired, require_live
 
 def read_json(path):
@@ -24,7 +25,7 @@ DIGEST = ('decision', 'commitment', 'constraint', 'idea')
 REVIEW_SPEAKERS = ('other', 'multi', 'unclear')
 VERDICTS = ('confirmed', 'rejected')
 DERIVED = ('owner_hint', 'when_raw', 'task_status', 'task_url', 'review')
-MEETING_DERIVED = ('digest', 'tasks', 'items', 'review_queue', 'display_title', 'title_source')
+MEETING_DERIVED = ('digest', 'tasks', 'items', 'review_queue', 'display_title', 'title_source', 'transcript_view')
 
 
 def identifier(value):
@@ -452,6 +453,7 @@ class Meetings:
                 row['review_queue'] = review_queue(row['utterances'], minutes)
             row['display_title'], row['title_source'] = meeting_title(row,
                 (minutes or {}).get('theme') if row['transcript_status'] != 'expired' else None)
+            row['transcript_view'] = transcript_view(row['utterances'])  # presentation only; originals stay
             return row
 
     def sync(self, req):

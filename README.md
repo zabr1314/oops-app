@@ -19,6 +19,10 @@
 
 本轮同步纳入同伴截至`024df7a`的录音豆音源、实时任务清单、纪要优先展示与团队标注工作台。相关已部署服务、APK安装及待人工会议验收由[同伴集成记录](docs/integration-acceptance-20261012.md)说明；下方旧轮次“未部署/未安装”是当时记录。本轮P1页面更新不重新部署真实服务或安装APK，设备自动聆听页仍为独立示例。
 
+## 实时漏斗回放（2026-10-14）
+
+体验中心新增[实时漏斗](public/funnel.html)：一场会议逐句回放，每句话变成几个带类型的问题，标出由规则、Jev、DeepSeek 还是由你来定，并旁路比较「规则先判」能省多少模型调用。公开页只用标明的示例数据；真实回放用 `python3 scripts/funnel_replay.py build/replay-0238.json` 生成到 `build/`，再在页面里「打开回放文件」本机查看，不要提交或发布。
+
 ## Android 原生 App
 
 仓库同时包含 Oops Android 原生 App（`android/`）及其后端、飞书机器人和 Mac 助手（`deploy/`、`scripts/`），负责实际收音、豆包流式 ASR、本场纪要和飞书任务。构建、部署和真机运行说明见 [ANDROID.md](ANDROID.md)。

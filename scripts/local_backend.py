@@ -43,6 +43,7 @@ from urllib.parse import urlsplit, parse_qs, unquote
 from meeting_features import Meetings, judge_notice
 import minutes_items
 from action_sources import DailyReceipts, SourceChanged, fingerprint
+import meeting_curation
 from item_quality import assess_item
 from voiceprint_registry import VoiceprintRegistry, audio_quality, person_profiles
 from voiceprint_invites import invite_person
@@ -2215,7 +2216,15 @@ class Backend:
                           "url": op["feishu_task"].get("url"), "feishu": state,
                           "overdue": state["state"] == "open" and due_ms is not None and due_ms < now_ms})
         items.sort(key=lambda i: i["created_at"] or "", reverse=True)
-        return {"items": items, "meeting_items": self.meeting_tasks()}
+        # Content cleanup (2026-10-13): only explicitly listed, unchanged test operations leave the business list;
+        # the original operation and its Feishu record stay intact.
+        try:
+            with open(os.path.join(os.path.dirname(self.ops.dir), 'task-visibility.json'), encoding='utf-8') as source:
+                policy = json.load(source)
+        except (OSError, ValueError):
+            policy = None
+        active, archived = meeting_curation.split_tasks(items, ops, policy)
+        return {"items": active, "archived_items": archived, "meeting_items": self.meeting_tasks()}
 
     def feishu_task_state(self, guid):
         cache = self._state("feishu_task_states")
@@ -2402,7 +2411,7 @@ class Handler(BaseHTTPRequestHandler):
                          "self_owner_enabled": getattr(self.backend, "self_owner_enabled", False),
                          "named_owner_enabled": getattr(self.backend, "named_owner_enabled", False),
                          "notices": True, "meetings": True, "recordings": True, "archive_policy_version": 1, "action_source_binding_version": 1,
-                         "item_quality_version": 1, "asr_closure_version": 1,
+                         "item_quality_version": 1, "asr_closure_version": 1, "content_curation_version": 1,
                          "feishu_bot": getattr(self.backend, "feishu", None) is not None,
                          "mac_agent_online": bool(getattr(self.backend, "feishu", None) and self.backend.feishu.jobs.online())}
                 summary = "health"

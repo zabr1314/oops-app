@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0e1116">
+  <meta name="description" content="一场会议逐句回放：每句话依次经过规则、Jev、DeepSeek 和你四层判断，能早定的早定。">
+  <title>Oops · 实时漏斗</title>
+  <link rel="stylesheet" href="./funnel.css">
+  <script src="./funnel.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <header class="bar">
+      <div class="ident">
+        <a class="back" href="./showcase.html?view=app#home">← 体验中心</a>
+        <h1>Oops 实时漏斗</h1>
+        <p>会议原话逐句进来，四层依次判断。越往后越贵、越慢，能早定的就在前面定掉。</p>
+      </div>
+      <div class="controls" aria-label="回放控制">
+        <button id="play" type="button" class="btn primary" aria-label="播放">▶ 播放</button>
+        <button id="restart" type="button" class="btn">从头</button>
+        <label class="speed" for="speed">速度</label>
+        <select id="speed" aria-label="回放速度">
+          <option value="1">×1 实时</option><option value="2">×2</option><option value="5">×5</option>
+          <option value="10">×10</option><option value="30">×30</option><option value="60">×60</option>
+        </select>
+        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="回放进度">
+        <span id="clock" class="clock">00:00 / 00:00</span>
+        <label class="btn file">打开回放文件<input id="file" type="file" accept=".json,application/json"></label>
+      </div>
+    </header>
+    <p class="source"><span id="source-badge" class="badge">载入中</span><span id="source-label" class="source-label"></span><span id="source-note" class="source-note"></span></p>
+
+    <section class="funnel" aria-label="四层漏斗">
+      <div class="input-col">
+        <div class="head">
+          <span class="step">输入</span>
+          <strong>会议原话</strong>
+          <span class="spec">语音识别定稿 · 逐句进入</span>
+          <div class="nums"><b id="n-heard">0</b><span>/ <i id="n-total">0</i> 句</span></div>
+        </div>
+        <ol id="transcript" class="ticker"></ol>
+      </div>
+
+      <div id="stages" class="stages">
+        <canvas id="canvas" aria-hidden="true"></canvas>
+        <div class="stage s-code" data-layer="code">
+          <div class="head">
+            <span class="step">第 1 层</span><strong>规则</strong><span class="spec">本地代码 · 不到 1 ms · 不花钱</span>
+            <div class="nums"><b id="reach-code">0</b><span>句经过 · <i id="pct-code">0%</i></span></div>
+            <div class="reach" aria-hidden="true"><i id="bar-code"></i></div>
+            <p class="last" id="last-code">等第一句话</p>
+          </div>
+          <div class="lane"></div>
+          <div class="bins"><h3>在这层结束 <b id="exit-code">0</b></h3><ul id="bins-code"></ul></div>
+        </div>
+        <div class="stage s-jev" data-layer="jev">
+          <div class="head">
+            <span class="step">第 2 层</span><strong>Jev</strong><span class="spec">分类模型 · 约 0.5 s · 每句都问</span>
+            <div class="nums"><b id="reach-jev">0</b><span>句经过 · <i id="pct-jev">0%</i></span></div>
+            <div class="reach" aria-hidden="true"><i id="bar-jev"></i></div>
+            <p class="last" id="last-jev">—</p>
+          </div>
+          <div class="lane"></div>
+          <div class="bins"><h3>在这层结束 <b id="exit-jev">0</b></h3><ul id="bins-jev"></ul></div>
+        </div>
+        <div class="stage s-model" data-layer="model">
+          <div class="head">
+            <span class="step">第 3 层</span><strong>DeepSeek</strong><span class="spec">生成模型 · 约 1 s · 只问难的</span>
+            <div class="nums"><b id="reach-model">0</b><span>句经过 · <i id="pct-model">0%</i></span></div>
+            <div class="reach" aria-hidden="true"><i id="bar-model"></i></div>
+            <p class="last" id="last-model">—</p>
+          </div>
+          <div class="lane"></div>
+          <div class="bins"><h3>在这层结束 <b id="exit-model">0</b></h3><ul id="bins-model"></ul></div>
+        </div>
+        <div class="stage s-you" data-layer="you">
+          <div class="head">
+            <span class="step">第 4 层</span><strong>你</strong><span class="spec">人来拍板 · 只问需要你的</span>
+            <div class="nums"><b id="reach-you">0</b><span>句经过 · <i id="pct-you">0%</i></span></div>
+            <div class="reach" aria-hidden="true"><i id="bar-you"></i></div>
+            <p class="last" id="last-you">—</p>
+          </div>
+          <div class="lane"></div>
+          <div class="bins"><h3>在这层结束 <b id="exit-you">0</b></h3><ul id="bins-you"></ul></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="detail">
+      <div class="panel trace">
+        <div class="panel-head"><h2>单句追踪</h2><span id="trace-meta" class="muted"></span><button id="follow" type="button" class="link" hidden>跟随最新一句</button></div>
+        <div id="trace" class="trace-body"><p class="muted">回放开始后，这里按时间展开最新一句经过的每个问题。点左侧任意一句可单独查看。</p></div>
+      </div>
+      <div class="panel log">
+        <div class="panel-head"><h2>决策日志</h2><span class="muted">最新在上</span></div>
+        <ol id="log" class="log-body"></ol>
+      </div>
+    </section>
+
+    <section class="facts">
+      <div class="panel">
+        <div class="panel-head"><h2>每层的开销</h2><span class="muted">本场累计</span></div>
+        <table class="cost">
+          <thead><tr><th scope="col">层</th><th scope="col">问题数</th><th scope="col">累计耗时</th><th scope="col">平均</th></tr></thead>
+          <tbody id="cost"></tbody>
+        </table>
+        <p class="foot" id="cost-foot"></p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Jev 有多确定</h2><span class="muted">本场每个带概率的回答</span></div>
+        <svg id="hist" class="hist" viewBox="0 0 320 150" role="img" aria-label="Jev 置信度分布"></svg>
+        <p class="foot" id="hist-foot"></p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>能不能让规则先判？</h2><span class="muted">全场 · 只比较，不改线上</span></div>
+        <div id="lens" class="lens"></div>
+      </div>
+    </section>
+  </div>
+  <div id="drop" class="drop" hidden>松开以打开回放文件（只在本机浏览器读取，不上传）</div>
+  <noscript><p class="noscript">请开启 JavaScript 查看漏斗回放。</p></noscript>
+</body>
+</html>
