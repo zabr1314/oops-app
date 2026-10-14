@@ -37,6 +37,10 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
         optional("/v1/notices", request)?.let { NoticeJson.validate(it, request) }
     override suspend fun syncMeeting(request: JSONObject): JSONObject? {
         val result = optional("/v1/meetings/sync", request)
+        if (result != null) {
+            require(result.optString("session_id") == request.getString("session_id")) { "服务返回的会话编号不一致" }
+            require(result.optString("transcript_status") != "expired") { "服务完整文字已到期，不能确认恢复" }
+        }
         if (request.has("recording_mode") && result != null) {
             val accepted = result.optJSONObject("storage_policy") ?: throw IOException("服务未确认本次保存期限")
             for (key in listOf("recording_mode", "cloud_save_confirmed", "audio_retention_days", "transcript_retention_days"))
@@ -62,6 +66,7 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
     override suspend fun historyDelete(id: String) = optional("/v1/meetings/delete", JSONObject().put("session_id", id).put("confirm", true))
     override suspend fun historySearch(query: String) = optional("/v1/meetings/search", JSONObject().put("query", query))
     override suspend fun reviewMeeting(request: JSONObject) = optional("/v1/meetings/review", request)
+    override suspend fun reviewMeetingItem(request: JSONObject) = optional("/v1/meetings/items", request)
     override suspend fun projects() = optionalGet("/v1/projects")
     override suspend fun project(name: String): JSONObject? {
         require(name.isNotBlank() && name.length <= 30)
@@ -188,7 +193,8 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
                 val detail = error?.optString("message")?.take(160)?.takeIf { it.isNotBlank() }
                     ?: "服务暂时不可用"
                 ActionSourceRejected.fromHttp(response.code, text)?.let { throw it }
-                throw IOException("后端返回 ${response.code}：$detail")
+                val code = error?.optString("code")?.takeIf { it.matches(Regex("[A-Z_]{1,50}")) }
+                throw HttpFailure(response.code, "后端返回 ${response.code}：$detail", code)
             }
             JSONObject(text)
         }

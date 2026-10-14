@@ -33,6 +33,7 @@ python3 scripts/test_latency_report.py
 python3 scripts/test_task_eval.py
 python3 scripts/test_archive_to_eval.py
 python3 scripts/test_filler_report.py
+python3 scripts/test_funnel_replay.py
 python3 scripts/test_jev_budget.py
 python3 scripts/test_meetings_overview.py
 python3 scripts/test_label_meeting.py

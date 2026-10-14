@@ -181,6 +181,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::webView.isInitialized) webView.evaluateJavascript("window.OopsResume && window.OopsResume()", null)
+    }
+
     private fun onBridgeMessage(type: String, p: JSONObject) {
         try {
             when (type) {
@@ -214,16 +219,17 @@ class MainActivity : ComponentActivity() {
                 "notice.dismiss" -> OopsEngine.dismissNotice(p.getString("id"))
                 "notice.feedback" -> OopsEngine.noticeFeedback(p.getString("id"), p.getBoolean("useful"))
                 "digest.openMany" -> OopsEngine.openDigestItems(p.getJSONArray("ids").strings())
-                "history.list" -> OopsEngine.history("list")
-                "history.open" -> OopsEngine.history("open", p.getString("sessionId"))
+                "history.list" -> OopsEngine.history("list", requestId = p.optString("requestId"))
+                "history.open" -> OopsEngine.history("open", p.getString("sessionId"), requestId = p.optString("requestId"))
                 "meeting.retain" -> OopsEngine.retainMeeting(p)
                 "history.minutes" -> OopsEngine.minutes(p.getString("sessionId"), p.optString("requestId"))
-                "history.delete" -> OopsEngine.history("delete", p.getString("sessionId"), p.optBoolean("confirm"))
+                "history.delete" -> OopsEngine.history("delete", p.getString("sessionId"), p.optBoolean("confirm"), p.optString("requestId"))
                 "projects.list" -> OopsEngine.projects()
                 "project.open" -> OopsEngine.projects(p.getString("name"))
                 "meeting.project" -> OopsEngine.setMeetingProject(p.getString("sessionId"), p.getString("project"))
                 "history.rename" -> OopsEngine.renameMeeting(p.getString("sessionId"), p.getString("title"))
-                "history.search" -> OopsEngine.history("search", p.getString("query"))
+                "history.search" -> OopsEngine.history("search", p.getString("query"), requestId = p.optString("requestId"))
+                "archive.retry" -> OopsEngine.retryArchives()
                 "digest.open", "commitment.open" -> OopsEngine.openCommitment(p.getString("utteranceId"))
                 "clip.play" -> OopsEngine.playClip(p.getString("key"), p.getLong("startMs"), p.getLong("endMs"),
                     p.optString("sessionId").ifBlank { null })
@@ -232,7 +238,8 @@ class MainActivity : ComponentActivity() {
                 "speaker.correct" -> OopsEngine.correctSpeaker(p.getString("sessionId"), p.getString("utteranceId"),
                     if (p.isNull("speaker")) null else p.getString("speaker"))
                 "review.set" -> OopsEngine.review(p.getString("sessionId"), p.getString("utteranceId"), p.getJSONObject("fields"))
-                "tasks.list" -> OopsEngine.tasks(p.optBoolean("mine"), p.optString("status").ifBlank { "open" })
+                "items.review" -> OopsEngine.reviewItem(p.getString("sessionId"), p)
+                "tasks.list" -> OopsEngine.tasks(p.optBoolean("mine"), p.optString("status").ifBlank { "open" }, p.optString("requestId"))
                 "recall.save" -> OopsEngine.saveRecall(
                     p.getString("cardId"), p.getJSONArray("utteranceIds").strings(), p.getLong("startMs"), p.getLong("endMs"),
                 )
@@ -267,14 +274,18 @@ class MainActivity : ComponentActivity() {
                     require(p.optBoolean("confirm")) { "请确认删除声纹" }
                     OopsEngine.deleteVoiceprint(p.getString("name"))
                 }
-                "settings.set" -> OopsEngine.applySettings(p)
+                "settings.set" -> {
+                    OopsEngine.applySettings(p)
+                    bridge.send("settings.saved", JSONObject().put("requestId", p.optString("requestId")))
+                }
                 "open.url" -> openExternal(p.getString("url"))
                 "log" -> Log.d("OopsWeb", p.optString("message"))
                 else -> Log.w(TAG, "unknown bridge message: $type")
             }
         } catch (e: Exception) {
             Log.w(TAG, "bridge message $type failed", e)
-            bridge.send("error", JSONObject().put("scope", type).put("message", e.message ?: e.javaClass.simpleName))
+            bridge.send("error", JSONObject().put("scope", type).put("message", e.message ?: e.javaClass.simpleName)
+                .put("requestId", p.optString("requestId")))
         }
     }
 

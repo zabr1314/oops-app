@@ -40,6 +40,7 @@ object BridgeJson {
         .put("speakerInfo", s.speakerInfo)
         .put("speakerPreviewEnabled", s.speakerPreviewEnabled).put("recordSession", s.recordSession)
         .put("recordingsPending", s.recordingsPending).put("recordingUpload", s.recordingUpload).put("recordingCapped", s.recordingCapped).put("micBusy", s.micBusy).put("liveSpeakerStatus", s.liveSpeakerStatus ?: NULL)
+        .put("recordingsBlocked", s.recordingsBlocked).put("recordingArchiveMessage", s.recordingArchiveMessage ?: NULL)
         .put("liveSpeakers", JSONArray(s.liveSpeakers)).put("liveOverlap", s.liveOverlap)
         .put("testWavName", s.testWavName)
         .put("sourceDetail", s.sourceDetail ?: NULL)
@@ -148,6 +149,7 @@ object BridgeJson {
         .put("message", r.message ?: NULL)
         .put("readBackConfirmed", r.readBackConfirmed)
         .put("polling", r.polling)
+        .put("errorCode", r.errorCode ?: NULL)
         .put("mock", r.mock)
 
     fun saved(items: List<JSONObject>): JSONObject = JSONObject().put("items", JSONArray(items))

@@ -174,3 +174,150 @@ def validate_binding(row, request):
     if evidence.get('quote') != ' '.join(s['quote'] for s in sources):
         raise ActionSourceError('ACTION_SOURCE_INVALID', '提交原话与本次核对的短依据不一致')
     return binding
+
+
+# Explicit daily drafts extend the same signed source contract without archiving text.
+import secrets
+import math
+import threading
+import time
+
+class SourceChanged(ValueError):
+    def __init__(self, reason, message):
+        self.reason = reason
+        super().__init__(message)
+
+
+def receipt_fingerprint(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                    separators=(',', ':')).encode()).hexdigest()
+
+
+def text_hash(value):
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+def normalized(value):
+    return re.sub(r'\s+', ' ', value).strip()
+
+
+def evidence_request(body):
+    sid, evidence = body.get('session_id'), body.get('evidence')
+    if not isinstance(sid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', sid) or not isinstance(evidence, dict):
+        raise SourceChanged('source_missing', '请从当前原话重新起草，不能提交没有来源的行动')
+    ids, quote = evidence.get('utterance_ids'), evidence.get('quote')
+    start, end = evidence.get('clip_start_ms'), evidence.get('clip_end_ms')
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= 60
+            or any(not isinstance(uid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', uid) for uid in ids)
+            or len(set(ids)) != len(ids)
+            or not isinstance(quote, str) or not quote.strip() or len(quote) > 12000
+            or type(start) not in (int, float) or type(end) not in (int, float)
+            or not 0 <= start < end):
+        raise SourceChanged('source_missing', '请重新选择有效的原话、句子编号和时间范围')
+    return sid, ids, normalized(quote), start, end
+
+
+class DailyReceipts:
+    TTL_SECONDS, LIMIT = 300, 512
+
+    def __init__(self):
+        self.lock, self.values = threading.RLock(), {}
+
+    def _prune(self, now):
+        self.values = {key: value for key, value in self.values.items() if value['expires'] > now}
+        while len(self.values) >= self.LIMIT:
+            self.values.pop(next(iter(self.values)))
+
+    def binding(self, req):
+        rows = req.get('utterances') or []
+        if not isinstance(rows, list) or not rows or any(not isinstance(row, dict) for row in rows):
+            raise SourceChanged('source_missing', '请先选择本次日常记录中的短原话')
+        ids = [row.get('id') for row in rows]
+        context = [row for row in req.get('context') or [] if isinstance(row, dict) and row.get('id') not in ids]
+        all_rows = rows + context
+        if (len(all_rows) > 20 or any(not isinstance(row.get('id'), str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', row['id']) or not isinstance(row.get('text'), str)
+                                     or not row['text'].strip() for row in all_rows)
+                or len({row['id'] for row in all_rows}) != len(all_rows)
+                or sum(len(row['text']) for row in all_rows) + max(0, len(all_rows) - 1) > 280):
+            raise SourceChanged('daily_evidence_too_long', '日常行动含上下文的必要短依据须不超过280字，请重新选择')
+        if (any(type(row.get('start_ms')) not in (int, float) or type(row.get('end_ms')) not in (int, float)
+                or not math.isfinite(row['start_ms']) or not math.isfinite(row['end_ms'])
+                or not 0 <= row['start_ms'] < row['end_ms'] for row in all_rows)
+                or max(row['end_ms'] for row in all_rows) - min(row['start_ms'] for row in all_rows) > 300000):
+            raise SourceChanged('daily_evidence_outside_buffer', '日常短依据及上下文须在同一五分钟范围内')
+        def source(row):
+            return dict(id=row['id'], kind='daily_excerpt', text_hash=digest(row['text']),
+                        source_revision='v1d:' + fingerprint({key: row.get(key) for key in
+                            ('id', 'text', 'start_ms', 'end_ms', 'speaker')}), quote=row['text'],
+                        speaker=row.get('speaker'), review={})
+        return dict(version=1, session_id=req.get('session_id'), scope='daily',
+                    sources=[source(row) for row in rows], context_sources=[source(row) for row in context])
+
+    def issue(self, req):
+        if req.get('recording_mode') != 'daily':
+            return None
+        rows = req.get('utterances')
+        if not isinstance(rows, list) or not rows or len(rows) > 60:
+            raise SourceChanged('source_missing', '请先选择本次日常记录中的短原话')
+        if any(not isinstance(row, dict) or not isinstance(row.get('text'), str) for row in rows):
+            raise SourceChanged('source_missing', '日常行动的原话正文无效')
+        quote = ' '.join(row['text'] for row in rows)
+        if not quote.strip() or len(quote) > 280:
+            raise SourceChanged('daily_evidence_too_long', '日常行动请选择不超过280字的必要短原话后重新起草')
+        body = dict(session_id=req.get('session_id'), evidence=dict(
+            utterance_ids=[row.get('id') for row in rows], quote=quote,
+            clip_start_ms=rows[0].get('start_ms'), clip_end_ms=rows[-1].get('end_ms')))
+        sid, ids, quote, start, end = evidence_request(body)
+        if end - start > 300000:
+            raise SourceChanged('daily_evidence_outside_buffer', '日常行动的依据须在最近五分钟范围内')
+        hashes = {}
+        for row in rows:
+            if (not isinstance(row.get('text'), str) or not row['text'].strip()
+                    or type(row.get('start_ms')) not in (int, float) or type(row.get('end_ms')) not in (int, float)
+                    or not start <= row['start_ms'] < row['end_ms'] <= end):
+                raise SourceChanged('source_missing', '日常行动的原话时间或正文无效')
+            hashes[row['id']] = text_hash(row['text'])
+        source = dict(session_id=sid, ids=ids, quote_hash=text_hash(quote), start_ms=start,
+                      end_ms=end, text_hashes=hashes)
+        binding = self.binding(req)
+        source['binding_hash'] = fingerprint(binding)
+        source['source_revisions'] = {row['id']: row['source_revision']
+                                      for row in binding['sources'] + binding['context_sources']}
+        for row in req.get('context') or []:
+            if isinstance(row, dict) and row.get('id') not in hashes:
+                hashes[row['id']] = text_hash(row['text'])
+        source['fingerprint'] = receipt_fingerprint(source)
+        now, token = time.monotonic(), secrets.token_urlsafe(32)
+        with self.lock:
+            self._prune(now)
+            # A new version of a previously cited daily sentence withdraws its
+            # old receipts; no original sentence text is retained here.
+            for key, value in list(self.values.items()):
+                old = value['source']
+                if old['session_id'] == sid and any(uid in old.get('source_revisions', {})
+                        and old['source_revisions'][uid] != revision
+                        for uid, revision in source['source_revisions'].items()):
+                    self.values.pop(key)
+            self.values[token] = dict(source=source, expires=now + self.TTL_SECONDS)
+        return token
+
+    def validate(self, body, expected=None):
+        sid, ids, quote, start, end = evidence_request(body)
+        token = body.get('source_receipt')
+        binding = body.get('evidence', {}).get('source_binding')
+        if not isinstance(binding, dict) or binding.get('scope') != 'daily':
+            raise SourceChanged('source_binding_required', '日常行动须携带完整的短依据来源合同')
+        if body['evidence'].get('quote') != ' '.join(row['quote'] for row in binding.get('sources', [])):
+            raise SourceChanged('source_changed', '引用与本次短依据合同不一致，请重新起草')
+        binding_hash = fingerprint({key: value for key, value in binding.items() if key != 'proof'})
+        with self.lock:
+            self._prune(time.monotonic())
+            value = self.values.get(token) if isinstance(token, str) else None
+            if not value:
+                raise SourceChanged('daily_receipt_expired', '日常原话许可已失效，请从当前原话重新起草并确认')
+            source = dict(value['source'])
+        if (source.get('binding_hash') != binding_hash or source['session_id'] != sid or source['ids'] != ids or source['quote_hash'] != text_hash(quote)
+                or source['start_ms'] != start or source['end_ms'] != end
+                or expected and expected.get('fingerprint') != source['fingerprint']):
+            raise SourceChanged('source_changed', '日常行动的原话已变化，请重新起草并核对')
+        return dict(source, kind='daily_receipt', status='current')

@@ -107,8 +107,10 @@ class ReadRoutesTest(unittest.TestCase):
             json.dump({"tasks": [{"id": "t1", "what": "列出 P0 功能点", "priority": "P0", "status": "open", "sources": ["u1"]}],
                        "updated_at": "2026-10-12T12:00:00+00:00"}, f, ensure_ascii=False)
         status, board = self.get("/v1/meetings/meeting-safe/board?refresh=1")
-        self.assertEqual((status, board["session_id"], board["tasks"][0]["priority"]), (200, "meeting-safe", "P0"))
-        self.assertEqual('u1', board['tasks'][0]['source_binding']['sources'][0]['id'])
+        self.assertEqual((status, board["session_id"], board["tasks"]), (200, "meeting-safe", []))
+        self.assertEqual(board['review_queue'][0]['quality']['reason'], 'evidence_missing')
+        self.assertEqual(board['review_queue'][0]['priority'], 'P0')
+        self.assertEqual('u1', board['review_queue'][0]['source_binding']['sources'][0]['id'])
         self.assertEqual(self.get("/v1/meetings/meeting-safe/board", authenticated=False)[0], 401)
         self.assertEqual(self.get("/v1/meetings/bad.id/board")[0], 400)
         self.assertEqual(self.minutes.reads, [])

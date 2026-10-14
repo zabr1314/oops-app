@@ -107,7 +107,7 @@ Jev 适配建议（已核对 [官方 Choice 文档](https://docs.typesafe.ai/pri
 
 ### 来源核对合同 version 1（2026-10-13）
 
-`GET /healthz.action_source_binding_version` 为1。带会话来源的草稿响应新增 `source_binding` 与 `source_error`；任务板每项同样提供这两项。合同来自服务端当前会议原文或独立确认短依据，客户端不得按本地文本自行补造。服务尚未保存对应来源、来源不同步或已撤回时返回 `source_binding:null` 和可读原因；仍可编辑草稿，但不能创建带来源的任务。日常临时处理没有服务端会议存档时不能以请求原话自证有效，也不能偷偷改成手工任务。
+`GET /healthz.action_source_binding_version` 为1。带会话来源的草稿响应新增 `source_binding` 与 `source_error`；任务板每项同样提供这两项。会议合同来自服务端当前原文或独立确认短依据，客户端不得按本地文本自行补造。来源不同步或已撤回时返回 `source_binding:null` 和可读原因；仍可编辑草稿，但不能创建带来源的任务。日常无整场存档时仅使用下述经认证提交的必要短依据限时合同，receipt或本地哈希不能单独代替合同，也不能偷偷改成手工任务。
 
 ```json
 {
@@ -141,6 +141,12 @@ worker恢复时发现来源失效且确定未尝试外部写入，failed回包�
 相关升级包须同时包含 `scripts/action_sources.py` 和本轮 `scripts/task_board.py`。review/live-speed构建器对旧基线中不存在的新依赖记录显式null并在目标要求确实不存在；旧模块仍逐个校验原hash，新增文件回滚时会删除。其他历史升级脚本的固定旧baseline门禁保留；模块清单修正不表示旧发布包可直接用于当前服务，更不表示本轮已部署真实后端。
 
 Android 在发请求前保存原操作及冻结的草稿。响应丢失／10 次轮询后仍 pending 时显示“查询创建结果”，继续 GET 原 op_id。不会因 HTTP 超时更换 op_id，也不会将结果未知宣称为创建失败。
+
+2026-10-14：首次确认及实际外部写入前校验当前来源。保留version1会议合同与上下文校验；删除、主动修订、排除或撤回共享后旧许可失效，按上述来源错误返回409，并仅在明确未尝试外部创建时附 `no_external_write:true`。全文自然到期仅可继续引用已经独立确认保留的短依据。既有 `created` 回执优先返回，不据此重新创建。
+
+日常记录的草稿请求须明确 `recording_mode=daily`；所选原句及必要上下文合计不超过280字/20句，位于同一五分钟窗口，引用保持完整句。服务端同时签发 `source_binding{version:1,scope:daily,session_id,sources,context_sources,proof}` 和opaque `source_receipt`；各行kind为 `daily_excerpt`，仍有text_hash/source_revision/quote/speaker/review。确认冻结合同到 `evidence.source_binding`，receipt放请求顶层；两者必须一起有效。凭据只在服务器有界内存保存哈希/ID及合同哈希，最长5分钟，不保存完整日常原文，也不证明原话是独立核验真值；停止、到期、来源变化或服务切换后App撤回未提交草稿。进程重启后未提交草稿需重新起草；日常合同不能代替已归档会议的合同。签名无效仍用 `ACTION_SOURCE_INVALID`，日常receipt失效为409 `SOURCE_CHANGED`，附明确未外写标记。
+
+已经尝试外部写入但结果未知的操作继续为 `pending`，可带 `source_blocked` 及具体提示；来源失效不证明飞书创建失败。GET查询不会重新启动创建；有原GUID时只回读原任务，没有可靠查询键则保留待人工核实状态。不得因此换op_id重复创建。
 
 ## 4. GET /v1/actions/{op_id}
 
@@ -353,7 +359,7 @@ App 每场队列绑定开始时的后端；20 秒或累积 30 句发送，同一
 `healthz` 新增 `notices:true/meetings:true`，只表示接口存在，不表示 Jev 中文判断已验收。
 
 
-## 任务列表 `GET /v1/tasks?assignee=<名>&status=open|done|all`（2026-10-09）
+## 任务列表 `GET /v1/tasks?assignee=<名>&status=open|done|all`（2026-10-09；2026-10-13扩展）
 
 列出经确认已在飞书创建的任务，按创建时间倒序。仅 App 全权限凭据。每条含 `op_id、what、who`（飞书里的实际负责人，读不到时用草稿负责人）、`who_drafted、when、quote、utterance_ids、session_id、meeting{started_at,goal}、created_at、url、overdue`，以及 `feishu`：
 
@@ -362,6 +368,18 @@ App 每场队列绑定开始时的后端；20 秒或累积 30 句发送，同一
 - `status=open` 也包含 `unknown`，避免读不到时任务被悄悄藏起来；dry-run 创建的任务一律 `unknown`。
 
 2026-10-09 在香港服务器实测：Oops 授权账号能回读它创建、指派给他人的任务（创建者不在成员里也可以），删除后返回 `not_found`（1470404）。
+
+2026-10-13 增加独立的 `parsed_items` 与 `parsed_status`，原 `items` 仍只表示已创建的飞书任务。核对站三场 `0235/0236/0238` 的16个原始待办候选由服务端私有 `label-app-tasks.json` 显式授权并绑定事项指纹；不复制原会议、不生成模型结果、不写人工答案。已归档的操作回执不列入 `items`，原 `op_id` 防重记录保留。
+
+- `parsed_items[]`：`id=label:<meeting>:<item_id>`、`item_id`、`source=label_review`、`kind=task`、`title/what/detail/due`、`source_meeting{id,title}`、`fingerprint`、`evidence[]`、`reviews[]`、`source_status=current`、`owner=null`、`owner_conflict/review_conflict`、`read_only=true`、`review_url`。`evidence` 带原句ID、文字、时间、当前一致姓名及各人的 `speaker_reviews`；说话人不转为负责人。
+- `reviews[]`：每人一条，`by/verdict/updated_at/revision`；当前人工核对另有 `kind/title/detail/due/owner/into`。`verdict` 为 `unreviewed/confirmed/rejected/merged/source_changed`。确认可改类别；`owner=collective/unknown` 对应大家／尚未确定，不归入某个本人。核对确认不表示业务完成或飞书创建。
+- `parsed_status`：`state=ready/partial/unavailable/disabled`、各场 `meetings{id,status,count,reason_code?}`、`counts.total` 及按人次计数的 `review_counts`。来源、盲测集合、授权指纹变化或读取不一致时，不返回该场旧正文；候选不受飞书业务 `status/assignee` 筛选，App 单独按明确人工负责人筛本人。
+
+适配只访问固定 loopback 核对站，禁代理与重定向，全服务最多3个并行读取，单次4秒、整份快照6秒期限。App 请求的 `requestId` 在原生桥成功与失败事件中回传，用于隔离迟到响应；刷新失败清除候选缓存，正式飞书任务缓存仍按既有错误提示展示。
+
+2026-10-14增加独立 `meeting_items`：读取App真实会议中当前有效、已人工确认的纪要待办，沿用原 `item_reviews`，不复制核对站答案、不调用模型。每条使用 `source=meeting_review`、真实 `session_id`、原话依据和人工负责人；归入本人仍须明确负责人，不从说话人推断。已经按同一依据创建正式任务时保留关联回执，避免在候选里重复展示。人工确认的纪要决定同样进入项目历史决定；无人工确认不以AI候选填充。
+
+首页和记忆独立显示核对站候选与App会后已确认待办数量；从外部核对站返回会刷新当前状态。读取期间撤下旧候选正文，失败不能把旧缓存继续当当前依据。正式任务保留历史回执，来源失效会另带状态，不继续提供已失效引用作为当前原话。
 
 ## 原始录音与转写存档 `/v1/recordings/{session_id}`
 
@@ -411,3 +429,33 @@ Mac沿用 `deploy/mac/oops-archive-pull.sh` 的既有03:30双向链路，默认�
 `POST /v1/actions/draft` 可带 `"board": true`（App 只在后台取负责人提示时这样做）。服务器把这句补全出的任务交给 `scripts/task_board.py`：和本场已有任务合并、排 P0–P3，或丢弃举例、当场做完的事和空话；随后续对话调整优先级或作废。更新在后台进行，响应里的 `board` 是这句之前的清单，`pending: true` 表示还在整理，App 稍后读 `GET /v1/meetings/{id}/board`。清单存在 `<state>/boards/<session>.json`，重启不丢。
 
 清单只用于展示和排序：建飞书任务仍要从原话生成草稿并由人确认（op_id 规则不变）。会上只请大家确认 P0，其余会后处理。每条任务带原话编号 `sources`；没有出处的任务、不是团队成员的负责人都会被丢掉。
+
+## 会后事项核对 `items` 与 `POST /v1/meetings/items`（2026-10-13）
+
+有纪要的会议，会后核对的对象从“句子”改为**纪要事项**。`GET /v1/meetings/{id}` 在纪要存在时多返回 `items`，`review_queue` 只列待核对事项 `{kind:"item", id, item_kind}`，不再列逐句的待办/决定/说话人；列表的 `review_pending` 按 `task/decision/open` 计数。没有纪要（会议进行中、机器人未启用）时保持原来的逐句队列。
+
+`items[]`：`{id, kind: task|decision|open, title, ids, due?, owner_hint?, priority?, detail?, evidence:[{id,text,start_ms,end_ms,speaker}], fingerprint, review, stale_review, stale, task_status, task_url}`
+- 由已存纪要即时派生（`scripts/minutes_items.py`），不调用模型：`actions`→待办（主线在前），`decisions`→决定，`undecided` 与 `open_questions`→待定。
+- `owner_hint` 只是“原话里有人认领”的提示，App 不预选；负责人由人选（团队成员或“大家”）。
+- `stale:true`：纪要依据已变化（与 `/minutes` 的 `source_changed` 同一判断），事项只读、不进队列。
+- `review` 只在事项内容与依据原句未变时有效（`fingerprint`）；改写过的事项会以新事项出现，旧核对不沿用。
+
+`POST /v1/meetings/items`：`{session_id, item_id, fingerprint, action, by?, kind?, title?, due?, owner?, into?}`
+- `action`：`confirm`（待办必须带 `owner`；可同时改类别/标题/截止）、`reject`（不是事项）、`merge`（`into` 另一事项）、`reopen`（撤回）。
+- 返回 `{session_id, items, review_queue}`。事项或依据已变化 409 `ITEM_CHANGED`；纪要已失效、负责人不在名单、缺负责人 400；会议不存在 404。
+- 核对存于会议的 `item_reviews`，**不写句子核对**，因此不会让纪要失效。
+
+纪要提示（`MINUTES_VERSION=5`）：有人反对、仍在争论或只是倾向的不算决定，写入新增的 `undecided:[{topic, views, ids}]`；`owner` 只在原话里本人认领或被点名时填写。已有纪要不重写。
+
+Android：H5 发 `items.review`（`sessionId,itemId,fingerprint,action,…`），原生转发到上面的接口并回 `items.saved`；错误走 `error`，`scope:"items"`，409 带 `changed:true` 并重新打开会议。
+
+
+## 2026-10-13 转写收尾与事项质量
+
+`GET /healthz` 增加 `item_quality_version: 1`、`asr_closure_version: 1`。
+
+末次 `POST /v1/meetings/sync` 可携带 `asr_closure`（`acknowledged` / `incomplete` / `cancelled`），只允许同时提供 `ended_at`；可选 `asr_error_code`（80字内）与已去凭据 `asr_error`（500字内）。状态随详情及列表回传，同场已保存的终止状态不能被不同状态的迟到同步覆盖。录音元数据恢复只补缺失状态，不覆盖已有结果。`acknowledged` 仅表示服务终止回执已收到。
+
+任务板 `tasks` 只含通过来源检查的待办及已完成/作废历史；`review_queue` 保存待核对候选，状态为 `needs_review`，含 `quality: {status, reason, ids, issues?}`。待核对内容不计入可执行待办。草稿数字含混时 `what` 留空并通过 `task_context.missing` 请求核对，不能直接预填确定任务。
+
+会后纪要与已有缓存共用质量检查：被拒动作保留在派生 `quality_rejected` 审计，含混动作转入 `undecided`；不修改原缓存、不触发模型重生成、不确认负责人。引用或来源变化继续遵循原有失效与人工核对规则。

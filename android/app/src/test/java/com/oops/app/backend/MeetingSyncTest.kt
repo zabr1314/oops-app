@@ -56,4 +56,24 @@ class MeetingSyncTest {
         q.stop("2026-10-07T01:00:00Z")
         assertNotNull(q.batch(1000, true))
     }
+    @Test fun closureQualityIsSentWithTheFinalBatchAndIdenticalStopIsIdempotent() {
+        val q = queue(); q.upsert(u(1))
+        q.stop("2026-10-07T01:00:00Z", "incomplete", "finish_timeout", "已收到片段保留")
+        val last = q.batch(0, true)!!
+        assertEquals("incomplete", last.body.getString("asr_closure"))
+        assertEquals("finish_timeout", last.body.getString("asr_error_code"))
+        assertEquals("已收到片段保留", last.body.getString("asr_error"))
+        q.complete(last, 10, true)
+        q.stop("2026-10-07T01:00:00Z", "incomplete", "finish_timeout", "已收到片段保留")
+        assertEquals(0, q.pendingCount())
+        assertNull(q.batch(100, true))
+    }
+    @Test fun failedSentenceBatchStillTransportsClosureQualityWithEndOnly() {
+        val q = queue(); q.upsert(u(1)); q.halt()
+        q.stop("2026-10-07T01:00:00Z", "acknowledged")
+        val end = q.batch(0, true)!!.body
+        assertEquals("acknowledged", end.getString("asr_closure"))
+        assertTrue(end.isNull("asr_error")); assertTrue(end.isNull("asr_error_code"))
+        assertEquals(0, end.getJSONArray("utterances").length())
+    }
 }

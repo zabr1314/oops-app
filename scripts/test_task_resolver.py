@@ -2,6 +2,7 @@
 import unittest
 
 from task_resolver import grade, owner_for, quote_found, verify
+from test_item_quality import CLOUD, VERSION
 
 TRANSCRIPT = [{"id": "u53", "text": "先先做吉果的那个。吉果加豆包。"},
               {"id": "u54", "text": "诶，那你把那个顺便发我吧，我感觉我可以一起。跑一下那个，你说运营那个。"}]
@@ -40,6 +41,37 @@ class ResolverTest(unittest.TestCase):
         self.assertIsNone(result["due_raw"])
         self.assertFalse(quote_found("吉果", TRANSCRIPT[0]["text"]))
         self.assertTrue(quote_found("吉果加豆包", TRANSCRIPT[0]["text"]))
+
+    def test_example_quote_cannot_be_lifted_out_of_its_original_scope(self):
+        result = verify(self.raw(what='购买 cloud 资源', resolutions=[], task_quote='我们立马买'),
+                        [dict(id='u15', text=CLOUD)], 'u15')
+        self.assertFalse(result['is_task'])
+        self.assertEqual('example_or_hypothesis', result['quality']['reason'])
+
+    def test_punctuation_normalized_quote_still_inherits_example_scope(self):
+        result = verify(self.raw(what='购买 cloud 资源', resolutions=[], task_quote='如果缺了如果他那边有我们立马买'),
+                        [dict(id='u15', text=CLOUD)], 'u15')
+        self.assertFalse(result['is_task'])
+        self.assertEqual('rejected', result['quality']['status'])
+
+    def test_version_ambiguity_is_a_candidate_question_not_a_complete_draft(self):
+        result = verify(self.raw(what='将 OOPS 代码叠出一百版', resolutions=[], task_quote='把这两个就叠成一百就好了'),
+                        VERSION, 'u000032')
+        self.assertTrue(result['is_task'])
+        self.assertEqual('needs_review', grade(result, '林春源'))
+        self.assertEqual('quantity_ambiguity', result['quality']['reason'])
+        self.assertTrue(result['missing'])
+
+    def test_literal_quantity_from_verified_resolution_is_supported(self):
+        lines = [dict(id='u1', text='客户需要两份报告'), dict(id='u2', text='明天我来提交这些报告')]
+        result = verify(self.raw(what='提交两份报告', task_quote='明天我来提交这些报告', resolutions=[
+            dict(phrase='这些', meaning='两份报告', evidence=[dict(id='u1', quote='客户需要两份报告')])]), lines, 'u2')
+        self.assertEqual('accepted', result['quality']['status'])
+        self.assertEqual('complete', grade(result, '林春源'))
+
+    def test_explicit_clause_argument_still_has_to_exist_in_source(self):
+        result = verify(self.raw(what='采购服务器', resolutions=[]), TRANSCRIPT, 'u54', '明天采购服务器')
+        self.assertFalse(result['is_task'])
 
 
 if __name__ == "__main__":

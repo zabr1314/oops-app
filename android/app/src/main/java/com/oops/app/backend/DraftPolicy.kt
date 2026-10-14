@@ -15,7 +15,7 @@ object DraftPolicy {
             suggestedOwner = response.suggestedOwner ?: response.who, ownerSource = response.ownerSource,
             ownerConfidence = response.ownerConfidence, tier = response.tier, reason = response.reason,
             ownerCandidates = response.ownerCandidates, modelRevision = revision,
-            context = response.context ?: draft.context)
+            context = response.context ?: draft.context, sourceReceipt = response.sourceReceipt)
     }
 
     fun confirm(draft: ActionDraft, who: String, what: String, whenIso: String?, whenRaw: String?,

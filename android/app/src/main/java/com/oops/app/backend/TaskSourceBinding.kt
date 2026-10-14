@@ -20,7 +20,8 @@ object TaskSourceBinding {
             Source(row.getString("id"), row.getString("kind"), row.getString("text_hash"),
                 row.getString("source_revision"), row.getString("quote"), if (row.isNull("speaker")) null else row.getString("speaker"),
                 review.keys().asSequence().associateWith { review.getString(it) }).also {
-                require(it.id.isNotBlank() && it.kind in setOf("transcript", "saved_excerpt"))
+                require(it.id.isNotBlank() && (it.kind in setOf("transcript", "saved_excerpt") ||
+                    it.kind == "daily_excerpt" && json.optString("scope") == "daily"))
                 require(it.textHash.matches(Regex("[0-9a-f]{64}")) && it.revision.isNotBlank())
                 require(it.quote.isNotBlank() && it.quote.codePointCount(0, it.quote.length) <= 280)
             }
@@ -46,6 +47,8 @@ object TaskSourceBinding {
               retainedOnly: Boolean = false): Boolean {
         val sources = sources(value, session, ids) ?: return false
         val all = allSources(value, session, ids) ?: return false
+        val daily = runCatching { JSONObject(value!!).optString("scope") == "daily" }.getOrDefault(false)
+        if (daily && (all.size > 20 || all.any { it.kind != "daily_excerpt" } || all.joinToString(" ") { it.quote }.length > 280)) return false
         return (!retainedOnly || all.all { it.kind == "saved_excerpt" }) &&
             (quote == null || quote == sources.joinToString(" ") { it.quote })
     }

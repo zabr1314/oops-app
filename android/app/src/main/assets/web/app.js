@@ -18,6 +18,7 @@
     connecting: ['识别连接中…', 'warn'],
     live: ['实时识别中', 'live'],
     reconnecting: ['识别重连中…', 'warn'],
+    finishing: ['等待最后转写与结束确认…', 'warn'],
     error: ['识别出错', 'bad'],
   };
   const SOURCE_TEXT = { mic: '手机麦克风', wav: '测试音频', remote: 'Mac 收音', bean: '录音豆', bean_sim: '录音豆模拟' };
@@ -38,12 +39,13 @@
     route: { name: 'home' },
     liveTab: 'live', meetingTab: 'overview', memoryTab: 'projects',
     history: null, historyItems: null, historyFilter: '', transcriptFilter: { speaker: null, query: '' },
-    tasks: { mine: true, status: 'open', items: null, query: '', cache: new Map() }, openTaskCount: 0,
+    tasks: { scope: 'review', mine: false, status: 'all', items: null, parsedItems: null, meetingItems: null, parsedStatus: null, parsedSerial: 0, reviewFilter: 'all', query: '', cache: new Map(), expanded: new Set(), requests: new Map(), pending: new Set(), serial: 0, refreshedAt: null, archived: [] }, openTaskCount: 0,
     homeTasks: null, homeTasksState: { loading: false, error: null },
     requests: { history: {}, projects: {}, project: {}, tasks: {} }, pendingMeetingId: null, meetingRequest: null,
     minutes: new Map(), minutesRequest: 0, remoteEpoch: null, pendingRetention: null, retentionRequest: 0,
     projects: { items: null, open: null, section: 'decisions' }, liveProject: null,
-    review: null, pendingReview: null, sessionsQuery: '',
+    review: null, pendingReview: null, sessionsQuery: '', homeQuery: '',
+    historySerial: 0, historyRequestId: null, searchRequestId: null, pendingDelete: null, deletedSessions: new Set(), pendingReviewReturn: false, externalReviewHidden: false, settingsSave: null,
   };
 
   // ---- helpers --------------------------------------------------------------------------
@@ -72,11 +74,16 @@
   };
   const manualLabel = (v) => MANUAL_OTHER[v] || speakerLabel(v);
   const initial = (name) => (name ? [...String(name)][0] : '?');
+  const hasTimeZone = value => typeof value === 'string' && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  const originalDate = value => /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(String(value))
+    ? `原记录时间 ${String(value).replace('T', ' ')} · 时区未记录` : '原记录时间无效 · 时区未记录';
   const formatDate = (iso) => {
+    if (iso && !hasTimeZone(iso)) return originalDate(iso);
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
   const shortDate = (iso) => {
+    if (iso && !hasTimeZone(iso)) return originalDate(iso);
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
@@ -85,7 +92,7 @@
   const reviewPending = (i) => Object.values(i.review_pending || {}).reduce((a, b) => a + b, 0);
   // Meetings over an hour read 1:23:04, shorter ones 18:24, as in the prototype.
   const duration = (m) => {
-    if (!m.ended_at) return '';
+    if (!m.ended_at || !hasTimeZone(m.started_at) || !hasTimeZone(m.ended_at)) return '';
     const ms = new Date(m.ended_at) - new Date(m.started_at);
     return ms >= 3600000 ? `${Math.floor(ms / 3600000)}:${mmss(ms % 3600000)}` : mmss(ms);
   };
@@ -119,12 +126,13 @@
   };
 
   function handle(type, p) {
-    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'tasks.list', 'tasks.board'].includes(type)
-      || type === 'error' && ['history', 'minutes', 'projects', 'review', 'tasks', 'retention'].includes(p.scope);
+    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'items.saved', 'tasks.list', 'tasks.board'].includes(type)
+      || type === 'error' && ['history', 'minutes', 'projects', 'review', 'items', 'tasks', 'retention'].includes(p.scope);
     if (remote) {
       if ('backendUrl' in p && S.state.backendUrl !== undefined && p.backendUrl !== S.state.backendUrl) return;
       if (p.serviceEpoch !== undefined && S.remoteEpoch !== null && p.serviceEpoch !== S.remoteEpoch) return;
       if (p.serviceEpoch !== undefined && S.remoteEpoch === null) S.remoteEpoch = p.serviceEpoch;
+      if (type !== 'history.delete' && S.deletedSessions.has(p.sessionId || p.session_id)) return;
     }
     switch (type) {
       case 'snapshot':
@@ -162,7 +170,9 @@
         break;
       }
       case 'notice': showNotice(p); break;
-      case 'history.list': S.historyItems = p.items || []; S.requests.history = {}; if (['home', 'sessions'].includes(S.route.name)) render(); if (S.sheet?.kind === 'history') renderSheet(); break;
+      case 'history.list':
+        if (p.requestId && p.requestId !== S.historyRequestId) break;
+        S.historyItems = (p.items || []).filter(x => !S.deletedSessions.has(x.session_id)); S.requests.history = {}; if (['home', 'sessions'].includes(S.route.name)) render(); if (S.sheet?.kind === 'history') renderSheet(); break;
       case 'history.open': historyOpen(p); break;
       case 'history.minutes': onMinutes(p); break;
       case 'meeting.retained': {
@@ -173,17 +183,21 @@
         if (S.sheet?.kind==='retain') closeSheet();
         toast('已单独保留本人确认的内容');render();break;
       }
-      case 'history.delete': toast('会议文字已删除'); closeSheet(); go('sessions'); break;
-      case 'history.search': historySearch(p); break;
+      case 'history.delete': onHistoryDeleted(p); break;
+      case 'history.search': if (!p.requestId || p.requestId === S.searchRequestId) historySearch(p); break;
       case 'history.renamed': onRenamed(p); break;
       case 'projects.list': S.projects.items = p.items || []; S.requests.projects = {}; if (S.route.name === 'memory') render(); if (S.sheet?.kind === 'projectPick') renderSheet(); break;
       case 'project.open':
         if (p.name !== S.route.name_) break;
-        S.projects.open = p; S.requests.project = {}; if (S.route.name === 'project') render(); break;
+        S.projects.open = visibleProject(p); S.requests.project = {}; if (S.route.name === 'project') render(); break;
       case 'meeting.project': onMeetingProject(p); break;
       case 'speaker.corrected': onSpeakerCorrected(p); break;
       case 'review.saved': onReviewSaved(p); break;
+      case 'items.saved': onItemsSaved(p); break;
       case 'tasks.list': onTasks(p); break;
+      case 'settings.saved':
+        if (S.settingsSave?.requestId !== p.requestId) break;
+        S.settingsSave = { ...S.settingsSave, status: 'saved' }; updateSettingsSaveStatus(); break;
       case 'voiceprint.open': openSheet({ kind: 'voiceprint' }); break;
       case 'insets': if (params.get('frame') !== 'ios') applyInsets(p); break;
       case 'asr.partial':
@@ -266,7 +280,8 @@
     // A new capture session starts an empty timeline; old lines and cards no longer apply.
     if (s.sessionId && s.sessionId !== S.state.sessionId) resetTranscript();
     const before = { capturing: S.state.capturing, sessionId: S.state.sessionId, selfName: S.state.selfName, recordingMode: S.state.recordingMode, transcriptExpired: S.state.transcriptExpired, voiceprint: JSON.stringify(S.state.voiceprint),
-      preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady, boardSourceRevision: S.state.boardSourceRevision };
+      preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady, boardSourceRevision: S.state.boardSourceRevision,
+      recordingArchiveMessage: S.state.recordingArchiveMessage, recordingsBlocked: S.state.recordingsBlocked };
     const serverChanged = ('backend' in s && S.state.backend !== undefined && s.backend !== S.state.backend)
       || ('backendUrl' in s && S.state.backendUrl !== undefined && s.backendUrl !== S.state.backendUrl);
     if (serverChanged) { clearRemoteState(); S.remoteEpoch = null; }
@@ -286,7 +301,7 @@
     if (S.sheet?.kind === 'voiceprint' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) renderSheet();
     if (S.route.name === 'memory' && S.memoryTab === 'people' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) render();
     // Starting or stopping changes which controls a page shows; level and time only update text in place.
-    if (serverChanged || before.recordingMode !== S.state.recordingMode || before.transcriptExpired !== S.state.transcriptExpired || before.capturing !== S.state.capturing || before.sessionId !== S.state.sessionId || before.ready !== S.state.sourceReady || before.selfName !== S.state.selfName) {
+    if (serverChanged || before.recordingMode !== S.state.recordingMode || before.transcriptExpired !== S.state.transcriptExpired || before.capturing !== S.state.capturing || before.sessionId !== S.state.sessionId || before.ready !== S.state.sourceReady || before.selfName !== S.state.selfName || before.boardSourceRevision !== S.state.boardSourceRevision || S.route.name === 'settings' && (before.recordingArchiveMessage !== S.state.recordingArchiveMessage || before.recordingsBlocked !== S.state.recordingsBlocked)) {
       if (S.state.capturing && !before.capturing && S.route.name !== 'live') go('live');
       else render();
     } else renderStatus();
@@ -343,7 +358,8 @@
 
   function liveStatus() {
     const s = S.state;
-    if (!s.capturing) return ['已停止收音', ''];
+    if (!s.capturing) return s.asr === 'finishing' ? ASR_TEXT.finishing
+      : s.asr === 'error' ? ['已停止收音 · 转写结束未确认', 'bad'] : ['已停止收音', ''];
     const [text, cls] = !s.sourceReady && !['error', 'unconfigured'].includes(s.asr) ? ['等待音源', ''] : (ASR_TEXT[s.asr] || [s.asr, '']);
     return [`正在收音 · ${text}`, cls];
   }
@@ -497,10 +513,10 @@
   /** What a page needs from native or the server each time it is opened. */
   function enter() {
     const r = S.route.name;
-    if (r === 'home') { loadHistory(); if (S.state.selfName) loadHomeTasks(); }
+    if (r === 'home') { loadHistory(); if (S.state.selfName) loadHomeTasks(); else requestTasks(false, 'all'); }
     if (r === 'sessions') loadHistory();
     if (r === 'tasks') openTasks();
-    if (r === 'memory') { if (S.memoryTab === 'projects') loadProjects(); else send('voiceprint.list'); }
+    if (r === 'memory') { if (S.memoryTab === 'projects') { loadProjects(); requestTasks(false, 'all'); } else send('voiceprint.list'); }
     if (r === 'live') { S.transcriptFilter = { speaker: null, query: '' }; S.autoScroll = true; }
   }
 
@@ -615,7 +631,7 @@
       </section>
       ${sectionTitle('问 Oops')}
       <div class="ask-card">
-        <textarea id="home-ask" aria-label="想问 Oops 的问题" placeholder="问问刚才或往期会议里说过什么…" rows="2" maxlength="500"></textarea>
+        <textarea id="home-ask" aria-label="想问 Oops 的问题" placeholder="问问刚才或往期会议里说过什么…" rows="2" maxlength="500">${esc(S.homeQuery)}</textarea>
         <div class="ask-footer"><small>${icon('lock-key', 13)}${S.homeAskHistory ? '已存会议原话' : S.state.recordingMode === 'meeting' ? '本场会议原话' : '本场临时原话'}</small>
           <button class="input-text" data-act="home-ask-scope">${S.homeAskHistory ? '查往期会议' : '查本场'}</button>
           <button class="mic-button" data-act="home-ask" aria-label="提问">${icon('paper-plane-tilt', 23)}</button></div></div>
@@ -633,8 +649,9 @@
       ${tasks.map((t) => listRow({ act: 'task-open', data: `data-url="${esc(t.url || '')}"`, ic: 'check-square', title: t.what,
         sub: t.overdue ? '期限已到，核对进度' : t.feishu?.due_ms ? `截止 ${shortDate(new Date(t.feishu.due_ms).toISOString()).split(' ')[0]}` : '在飞书里推进' })).join('')}
       ${pendingMeeting ? listRow({ act: 'review-start', data: `data-id="${esc(pendingMeeting.session_id)}"`, ic: 'check-circle', title: `会后核对 · ${meetingName(pendingMeeting)}`,
-        sub: `${reviewPending(pendingMeeting)}项待核对（待办、决定、说话人）` }) : ''}
-      ${!tasks.length && !pendingMeeting ? `<p class="meta">${S.state.selfName ? S.homeTasks == null ? S.homeTasksState.error ? '暂时无法确认你的待处理事项。' : '正在读取你的任务…' : '没有待处理的事。' : '在「设置」里选择本人后，这里会列出你负责的飞书任务。'}</p>` : ''}
+        sub: `${reviewPending(pendingMeeting)}项待核对` }) : ''}
+      ${!tasks.length && !pendingMeeting ? `<p class="meta">${S.state.selfName ? S.homeTasks == null ? S.homeTasksState.error ? '暂时无法确认你的正式任务。' : '正在读取你的正式任务…' : '没有待处理的本人飞书正式任务。' : '在「设置」里选择本人后，这里会列出你负责的飞书任务。'}</p>` : ''}
+      ${meetingWorkEntryHtml()}
       ${sectionTitle('刚才说过什么？', '问已有记录', 'ask-open')}
       <button class="card clickable recall-entry" data-act="recall">${icon('clock-counter-clockwise')}<div><strong>找回最近5分钟</strong><p>选择重要的片段，再决定是否留下</p></div>${icon('caret-right', 17)}</button>
       ${pendingTotal ? listRow({ act: 'go', data: 'data-route="sessions"', ic: 'bookmark-simple', title: '核对会后结果', sub: `${pendingTotal}项待核对 · 确认后才会用于冲突提醒` }) : ''}
@@ -676,7 +693,7 @@
       ${requestNotice(S.requests.history, 'history-retry', !!all)}
       ${all == null ? S.requests.history.error ? '' : spinnerHtml('正在读取会议…', '团队服务器') : `
         ${pending.length ? `<section class="session-list-group">${sectionTitle('待核对')}${pending.map(sessionCard).join('')}</section>` : ''}
-        ${done.length ? `<section class="session-list-group">${sectionTitle('已完成')}${done.map(sessionCard).join('')}</section>` : ''}
+        ${done.length ? `<section class="session-list-group">${sectionTitle('已保存')}${done.map(sessionCard).join('')}</section>` : ''}
         ${!items.length ? `<div class="empty-state"><span>${icon('chat-circle-text', 28)}</span><strong>${q ? '没有找到' : '还没有会议'}</strong><p>${q ? '换个名称或项目再试试。' : '明确选择云端保存的正式会议会出现在这里；日常临时聆听不归档整场。'}</p></div>` : ''}`}
       <p class="meta">新正式会议经本次确认后云端保存，原音与全文分别保留所选7、30或90天；已确认摘要、任务和短依据单独保留。历史会议沿用原保存规则。</p>
     </div>`;
@@ -768,16 +785,21 @@
     if (!binding || binding.version !== 1 || binding.session_id !== sessionId || !Array.isArray(ids) || !ids.length
       || new Set(ids).size !== ids.length || !Array.isArray(binding.sources) || binding.sources.length !== ids.length) return false;
     const sources = binding.sources;
-    const valid = sources.every((s, i) => s && s.id === ids[i] && ['transcript', 'saved_excerpt'].includes(s.kind)
+    const daily = binding.scope === 'daily';
+    if (daily && (typeof binding.proof !== 'string' || !/^[a-f0-9]{64}$/.test(binding.proof))) return false;
+    const valid = sources.every((s, i) => s && s.id === ids[i] && (daily ? s.kind === 'daily_excerpt' : ['transcript', 'saved_excerpt'].includes(s.kind))
       && typeof s.text_hash === 'string' && /^[a-f0-9]{64}$/.test(s.text_hash)
       && typeof s.source_revision === 'string' && s.source_revision.length > 0
       && typeof s.quote === 'string' && s.quote.length > 0 && Array.from(s.quote).length <= 280);
     if (!valid || 'context_sources' in binding && !Array.isArray(binding.context_sources)) return false;
     const context = binding.context_sources || [];
+    const all = [...sources, ...context];
+    if (daily && (all.length > 20 || all.some(s => !s || typeof s.quote !== 'string')
+      || all.reduce((length, s) => length + Array.from(s.quote).length, Math.max(0, all.length - 1)) > 280)) return false;
     if (!context.length) return true;
     const contextIds = context.map(source => source?.id);
     return contextIds.every(id => !ids.includes(id)) && sourceBindingValid(
-      {version: binding.version, session_id: binding.session_id, sources: context}, contextIds, sessionId);
+      {...binding, sources: context, context_sources: []}, contextIds, sessionId);
   }
   function acceptedTaskBoard(board) {
     if (!board || !taskBoardAllowed(board.session_id) || !Array.isArray(board.tasks)) return null;
@@ -790,8 +812,11 @@
       && ['P0', 'P1', 'P2', 'P3'].includes(t.priority) && ['open', 'done', 'dropped'].includes(t.status)
       && (!expired || !t.source_error && sourceBindingValid(t.source_binding, t.sources, board.session_id)
         && [...t.source_binding.sources, ...(t.source_binding.context_sources || [])].every(source => source.kind === 'saved_excerpt')));
+    const review_queue = expired ? [] : (Array.isArray(board.review_queue) ? board.review_queue : []).filter(t => t
+      && typeof t.what === 'string' && t.what.trim() && Array.isArray(t.sources) && t.sources.length
+      && t.sources.every(id => typeof id === 'string' && id) && t.status === 'needs_review');
     if (expired && !tasks.length) return null;
-    return { ...board, tasks };
+    return { ...board, tasks, review_queue };
   }
   const PRIORITY_TEXT = { P0: '会上确认', P1: '会后几天内', P2: '可以排期', P3: '琐事或待定' };
   const boardOpen = () => (S.board?.tasks || []).filter((t) => t.status === 'open');
@@ -808,12 +833,15 @@
 
   function boardHtml() {
     const tasks = S.board?.tasks || [];
+    const review = S.board?.review_queue || [];
     const open = boardOpen(), closed = tasks.filter((t) => t.status !== 'open');
     const groups = ['P0', 'P1', 'P2', 'P3'].map((p) => [p, open.filter((t) => t.priority === p)]).filter(([, xs]) => xs.length);
     return `<section class="session-list-group">${sectionTitle(`本场任务清单 ${open.length}`)}
       <p class="meta">Oops 边听边合并重复的说法，按影响排出优先级；会上只请大家确认 P0，其余会后统一处理。${S.board.pending ? '正在整理刚才的话…' : ''}</p>
       ${groups.map(([p, xs]) => `<div class="stack"><p class="meta"><strong>${p}</strong> · ${PRIORITY_TEXT[p]}</p>${xs.map(boardTaskCard).join('')}</div>`).join('')
         || '<p class="meta">还没有需要跟进的任务。</p>'}
+      ${review.length ? `<details><summary class="meta">原话待核对 ${review.length} 条</summary><p class="meta">以下内容尚未作为任务，需回听确认具体安排。</p>${review.map(t =>
+        `<button class="card clickable" data-act="commitment-open" data-id="${esc(t.sources[t.sources.length - 1])}"><h3>${esc(t.what)}</h3><p class="warn-text">${esc((t.quality?.issues || []).join('；') || (t.quality?.reason === 'example_or_hypothesis' ? '举例或假设，未列为待办' : t.quality?.reason === 'generic_principle' ? '沟通原则，未列为待办' : '回听原话后再核对'))}</p></button>`).join('')}</details>` : ''}
       ${closed.length ? `<details><summary class="meta">已合并、作废或完成 ${closed.length} 条</summary>${closed.map((t) =>
         `<p class="meta">${esc(t.what)}${t.reason ? ` · ${esc(t.reason)}` : ''}</p>`).join('')}</details>` : ''}</section>`;
   }
@@ -821,7 +849,7 @@
   function liveActionsHtml(heading, stage) {
     const rows = S.commitments;
     const created = rows.filter((u) => u.taskStatus === 'created'), open = rows.filter((u) => u.taskStatus !== 'created');
-    const board = S.board?.tasks?.length;
+    const board = S.board?.tasks?.length || S.board?.review_queue?.length;
     return `<div class="stack sessions-feature">${heading}${stage}
       ${board ? boardHtml() : listRow({ act: 'commitments-open', ic: 'sparkle', title: '识别到的任务建议', sub: '按原话核对负责人、期限，确认后才建飞书任务' })}
       ${open.length ? (board ? `<details class="session-list-group"><summary class="meta">逐句识别的原始建议 ${open.length} 条</summary>${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</details>`
@@ -840,7 +868,7 @@
     if (!h) return spinnerHtml('正在打开会议…', '团队服务器');
     const pending = (h.review_queue || []).length;
     const heading = sessionHeading(meetingName(h), `会议 · ${esc(h.project || '未归项目')} · ${formatDate(h.started_at)}${duration(h) ? ` · ${duration(h)}` : ''}`, 'meeting-tools');
-    const stage = `<div class="session-stage"><span class="badge ${pending ? 'gray' : 'green'}">${h.transcript_status === 'expired' ? '完整文字已到期' : pending ? '已保存 · 待核对' : '已保存 · 已核对'}</span></div>`;
+    const stage = `<div class="session-stage"><span class="badge gray">${h.transcript_status === 'expired' ? '完整文字已到期' : ['incomplete', 'cancelled'].includes(h.asr_closure) ? '已保存 · 转写结束未确认' : pending ? '已保存 · 待核对' : '已保存'}</span></div>${['incomplete', 'cancelled'].includes(h.asr_closure) ? '<p class="warn-text">已保留收到的文字，转写可能不完整。请结合原声核对会后结果。</p>' : ''}`;
     if (S.meetingTab === 'transcript') return meetingTranscriptHtml(heading, stage);
     if (S.meetingTab === 'actions') return meetingActionsHtml(heading, stage);
     if (h.transcript_status === 'expired') {
@@ -862,9 +890,10 @@
       ${p0Grid([['sparkle', pending ? `会后核对 ${pending}` : '会后核对', 'review-start', `data-id="${esc(h.session_id)}"`], ['bell', `会议提醒 ${(h.notices || []).length}`, 'meeting-notices'],
         ['quotes', '全文与说话人', 'tab', 'data-tab="transcript"'], ['folder-simple', h.project ? `项目：${h.project}` : '所属项目', 'history-project']])}
       <div class="stack session-overview">
+        ${itemsOverviewHtml(h)}
         ${minutesHtml(h.session_id)}
         ${h.transcript_status !== 'expired' ? `<section class="card"><h3>独立保留的确认结果</h3><p class="meta">原音和全文到期后，仅保留你在这里明确核对的摘要和短依据。</p>${retained.map(x=>`<p>${esc(x.text)}</p>`).join('') || '<p class="meta">还没有独立确认的内容。</p>'}<button class="button secondary" data-act="retain-open">选择短依据 / 编辑摘要</button></section>` : ''}
-        ${rawCount ? `<details class="card raw-tags"><summary><strong>Oops 整理出的候选 ${rawCount} 条</strong><span class="meta">逐句识别，逐条核对后才成为确认的结论。${minutesReady ? '纪要已从中挑出有用的内容。' : '还没有会议纪要。'}</span></summary>
+        ${rawCount && !Array.isArray(h.items) ? `<details class="card raw-tags"><summary><strong>Oops 整理出的候选 ${rawCount} 条</strong><span class="meta">逐句识别，逐条核对后才成为确认的结论。${minutesReady ? '纪要已从中挑出有用的内容。' : '还没有会议纪要。'}</span></summary>
           ${unconfirmed.length ? `<h3>决定与约束候选</h3>${unconfirmed.map(u => listRow({act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: u.tag === 'constraint' ? 'flag' : 'check-circle', title: u.text, sub: `${hms(u.start_ms)} · ${u.review?.speaker || speakerLabel(u.speaker) || '说话人待确认'} · 待核对`})).join('')}` : ''}
           ${open.length ? `<h3>待办候选</h3>${open.map((u) => listRow({ act: 'history-quote', data: `data-id="${esc(u.id)}"`, ic: 'check-square', title: u.text,
             sub: `${u.review?.owner || u.owner_hint || '负责人待定'} · ${u.when_raw || '期限待定'} · ${u.review?.verdict === 'confirmed' ? '人工已确认' : '待核对'}` })).join('')}` : ''}
@@ -887,10 +916,12 @@
     const who = (u) => u.review?.speaker || u.speaker;
     const names = [...new Set(rows.map(who).filter(Boolean))];
     const q = S.transcriptFilter.query.trim();
-    const shown = rows.filter((u) => (!S.transcriptFilter.speaker || who(u) === S.transcriptFilter.speaker) && (!q || u.text.includes(q)));
+    const folded = new Set(h.transcript_view?.folded_ids || []);
+    const shown = rows.filter((u) => (S.transcriptFilter.showAll || q || S.transcriptFilter.speaker || !folded.has(u.id)) && (!S.transcriptFilter.speaker || who(u) === S.transcriptFilter.speaker) && (!q || u.text.includes(q)));
     return `<div class="stack sessions-feature">${heading}${stage}
       <div class="search-input">${icon('magnifying-glass', 18)}<input id="meeting-search" aria-label="搜索这次原文" placeholder="搜索这次原文" value="${esc(S.transcriptFilter.query)}"></div>
       ${names.length ? speakerChips(names, S.transcriptFilter.speaker) : ''}
+      ${folded.size ? `<button class="chip" data-act="transcript-mode">${S.transcriptFilter.showAll ? '只看重点原话' : '查看全部原文（含收起 '+folded.size+' 段）'}</button>` : ''}
       <p class="meta">点一句可以改说话人，▶ 从服务器回听原声（会后录音上传完才有）。</p>
       ${shown.map((u) => {
         const manual = u.review?.speaker;
@@ -905,6 +936,16 @@
 
   function meetingActionsHtml(heading, stage) {
     const h = S.history;
+    if (Array.isArray(h.items)) {
+      const tasks = h.items.filter((it) => itemView(it).kind === 'task' && itemState(it) !== 'out');
+      const row = (it) => { const v = itemView(it); return listRow({ act: 'item-open', data: `data-id="${esc(it.id)}"`, ic: 'check-square', title: v.title,
+        sub: `${itemState(it) === 'todo' ? '待核对' : '负责人 ' + (v.owner || '未定')}${v.due ? ' · ' + v.due : ''}${it.task_status === 'created' ? ' · 已建飞书任务' : ''}` }); };
+      return `<div class="stack sessions-feature">${heading}${stage}
+        ${tasks.length ? `<section class="session-list-group">${sectionTitle('待核对')}${tasks.filter((it) => itemState(it) === 'todo').map(row).join('')}</section>
+          <section class="session-list-group">${sectionTitle('已确认')}${tasks.filter((it) => itemState(it) === 'done').map(row).join('') || '<p class="meta">还没有确认的待办。</p>'}</section>`
+          : `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>纪要里没有待办</strong></div>`}
+        <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button></div>`;
+    }
     const todos = h.digest?.commitment || [];
     const created = todos.filter((u) => u.task_status === 'created'), open = todos.filter((u) => u.task_status !== 'created');
     return `<div class="stack sessions-feature">${heading}${stage}
@@ -921,7 +962,8 @@
   const TASK_STATE = { done: ['已完成', 'green'], deleted: ['飞书里已删除', 'gray'], unknown: ['状态未知', 'gray'], open: ['未完成', 'purple'] };
   const taskKey = (mine, status) => `${mine ? S.state.selfName || '' : '*'}:${status}`;
   function clearTaskIdentity() {
-    S.tasks.cache.clear(); S.tasks.items = null; S.homeTasks = null; S.openTaskCount = 0;
+    S.tasks.cache.clear(); S.tasks.requests.clear(); S.tasks.pending.clear(); S.tasks.expanded.clear();
+    S.tasks.items = null; S.tasks.archived = []; S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = null; S.tasks.parsedSerial = 0; S.tasks.refreshedAt = null; S.homeTasks = null; S.openTaskCount = 0;
     S.homeTasksState = {}; S.requests.tasks = {};
   }
   function clearRemoteState() {
@@ -932,6 +974,8 @@
     S.minutes.clear(); S.board = null; clearTaskIdentity();
     S.requests = { history: {}, projects: {}, project: {}, tasks: {} };
     S.pendingMeetingId = null; S.pendingReview = null; S.pendingTools = null; S.review = null; S.pendingRetention=null;
+    S.itemReview = null; S.pendingDelete = null; S.deletedSessions.clear(); S.pendingReviewReturn = false;
+    S.historyRequestId = null; S.searchRequestId = null;
     // A cancelled intent prevents an old response from opening the same session on the new server.
     S.meetingRequest = { active: false };
     S.draft = null;
@@ -941,32 +985,80 @@
     if (S.route.name === 'project') S.route = { name: 'memory' };
     renderNav();
   }
-  function loadHistory() { S.requests.history = { loading: true }; send('history.list'); }
+  function loadHistory() { S.historyRequestId = `history-${++S.historySerial}`; S.requests.history = { loading: true }; send('history.list', { requestId: S.historyRequestId }); }
   function loadProjects() { S.requests.projects = { loading: true }; send('projects.list'); }
   function loadProject() {
     S.requests.project = { loading: true }; send('project.open', { name: S.route.name_ });
   }
   function loadHomeTasks() {
-    S.homeTasksState = { loading: true }; send('tasks.list', { mine: true, status: 'open' });
+    S.homeTasksState = { loading: true }; requestTasks(true, 'open');
+  }
+  function requestTasks(mine, status) {
+    const key = taskKey(mine, status);
+    if (S.tasks.pending.has(key)) return;
+    const requestId = `tasks-${++S.tasks.serial}`;
+    S.tasks.parsedSerial = S.tasks.serial;
+    S.tasks.requests.set(key, requestId); S.tasks.pending.add(key);
+    S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = { state: 'loading', meetings: [] };
+    S.tasks.refreshedAt = null;
+    for (const saved of S.tasks.cache.values()) { saved.parsedItems = null; saved.meetingItems = null; saved.parsedStatus = S.tasks.parsedStatus; }
+    send('tasks.list', { mine, status, requestId });
+  }
+  function currentTaskReply(p) {
+    if (p.mine && p.selfName !== S.state.selfName) return false;
+    return !p.requestId || S.tasks.requests.get(taskKey(!!p.mine, p.status || 'open')) === p.requestId;
+  }
+  function resumeReviewReturn(force = false) {
+    if (!S.pendingReviewReturn || !force && (document.hidden || !S.externalReviewHidden)) return;
+    S.pendingReviewReturn = false; S.externalReviewHidden = false;
+    if (S.route.name === 'tasks') openTasks();
+    else if (S.route.name === 'home' && S.state.selfName) loadHomeTasks();
+    else requestTasks(false, 'all');
+    render();
   }
   function openTasks() {
-    S.tasks.items = S.tasks.cache.get(taskKey(S.tasks.mine, S.tasks.status)) || null;
+    const saved = S.tasks.cache.get(taskKey(S.tasks.mine, S.tasks.status));
+    S.tasks.items = saved?.items || null; S.tasks.archived = saved?.archived || [];
     S.requests.tasks = { loading: true };
-    if (!S.tasks.mine || S.state.selfName) send('tasks.list', { mine: S.tasks.mine, status: S.tasks.status });
+    if (!S.tasks.mine || S.state.selfName) requestTasks(S.tasks.mine, S.tasks.status);
   }
   function onTasks(p) {
     // A delayed reply for another filter or another selected person never becomes the visible list.
-    if (p.mine && p.selfName && p.selfName !== S.state.selfName) return;
-    const items = p.items || [];
-    S.tasks.cache.set(taskKey(!!p.mine, p.status || 'open'), items);
+    if (!currentTaskReply(p)) return;
+    S.tasks.pending.delete(taskKey(!!p.mine, p.status || 'open'));
+    const items = (p.items || []).map(visibleTaskSource);
+    const archived = (p.archived_items || []).map(visibleTaskSource);
+    const serial = Number(String(p.requestId || '').replace(/^tasks-/, '')) || 0;
+    // Candidate reads are independent of Feishu filters. A newly observed withdrawal must clear every cached scope.
+    if (!p.requestId || serial >= S.tasks.parsedSerial) {
+      S.tasks.parsedSerial = serial;
+      S.tasks.parsedItems = Array.isArray(p.parsed_items) ? p.parsed_items.filter(candidateCurrent) : [];
+      S.tasks.meetingItems = Array.isArray(p.meeting_items) ? p.meeting_items.filter(candidateCurrent) : [];
+      S.tasks.parsedStatus = p.parsed_status || { state: 'unsupported', meetings: [] };
+      S.tasks.refreshedAt = new Date().toISOString();
+      for (const saved of S.tasks.cache.values()) { saved.parsedItems = S.tasks.parsedItems; saved.meetingItems = S.tasks.meetingItems; saved.parsedStatus = S.tasks.parsedStatus; }
+    }
+    S.tasks.cache.set(taskKey(!!p.mine, p.status || 'open'), { items, archived, parsedItems: S.tasks.parsedItems, meetingItems: S.tasks.meetingItems, parsedStatus: S.tasks.parsedStatus });
     if (p.mine && p.status === 'open') {
       S.homeTasks = items; S.homeTasksState = {}; S.openTaskCount = items.length;
     }
     if (!!p.mine === S.tasks.mine && p.status === S.tasks.status) {
-      S.tasks.items = items; S.requests.tasks = {};
+      S.tasks.items = items; S.tasks.archived = archived; S.requests.tasks = {};
     }
     renderNav();
-    if (['tasks', 'home'].includes(S.route.name)) render();
+    if (['tasks', 'home', 'memory'].includes(S.route.name)) render();
+  }
+  const candidateSession = item => item.session_id || item.source_meeting?.session_id || (item.source === 'meeting_review' ? item.source_meeting?.id : null);
+  const candidateSourceVisible = item => !S.deletedSessions.has(candidateSession(item));
+  const candidateCurrent = item => candidateSourceVisible(item) && (item.source_status === 'current' || item.source === 'meeting_review' && item.source_status === 'retained');
+  const visibleTaskSource = item => S.deletedSessions.has(item.session_id) ? { ...item, quote: null, meeting: null, source_status: 'unavailable', source_reason: 'source_deleted' } : item;
+  function meetingWorkEntryHtml() {
+    const t = S.tasks, loading = t.parsedItems === null || t.meetingItems === null;
+    const labelCount = (t.parsedItems || []).length, meetingCount = (t.meetingItems || []).filter(x => !x.linked_created).length;
+    const title = loading ? '正在读取会议待办…' : `核对站候选 ${labelCount} · 会后已确认待办 ${meetingCount}`;
+    const sub = loading ? '读取期间不使用上次候选作为当前结果' : ['unavailable', 'disabled', 'unsupported'].includes(t.parsedStatus?.state)
+      ? '核对站暂不可读取，点击查看具体状态并重试' : '与本人飞书正式任务分别记录 · 未分配也可查看';
+    return `<section class="meeting-work-entry">${listRow({ act: 'meeting-work-open', ic: 'check-circle', title, sub })}</section>`;
   }
   function taskCard(t) {
     const [label, tone] = t.overdue ? ['逾期', 'rose'] : TASK_STATE[t.feishu?.state] || TASK_STATE.open;
@@ -976,27 +1068,92 @@
       <h3>${esc(t.what)}</h3>
       <p class="meta">${esc(t.who || '负责人待定')}负责 · ${esc(due)}${t.meeting ? ` · ${esc(t.meeting.title || t.meeting.goal || formatDate(t.meeting.started_at))}` : ''}</p>
       ${t.quote ? `<p class="meta">“${esc(t.quote)}”</p>` : ''}
+      ${['changed', 'unavailable'].includes(t.source_status) ? '<p class="warn-text">会议来源已变化或不可读取；正式任务状态保留，旧依据不再展示。</p>' : ''}
       <div class="task-card-next">${icon('flag', 18)}<span>${t.feishu?.state === 'done' ? '在飞书里查看' : t.overdue ? '期限已到，核对进度' : '在飞书里推进'}</span></div></button>`;
+  }
+  const PARSED_REVIEW = { unreviewed: '待核对', confirmed: '已确认内容', rejected: '已排除', merged: '已合并', source_changed: '依据已变更' };
+  const PARSED_FILTER = { all: '全部候选', pending: '待核对', confirmed: '内容已确认', disputed: '有分歧', excluded: '已排除 / 合并', changed: '来源已失效' };
+  function parsedReviewState(item) {
+    if (!candidateCurrent(item)) return 'changed';
+    const reviews = item.reviews || [], confirmed = reviews.filter(r => r.verdict === 'confirmed');
+    const owners = new Set(confirmed.filter(r => r.kind === 'task' && r.owner).map(r => r.owner));
+    const forms = new Set(confirmed.map(r => JSON.stringify([r.kind, r.title || item.title, r.owner || '', r.due || ''])));
+    if (item.review_conflict || item.owner_conflict || forms.size > 1 || owners.size > 1 || confirmed.length && reviews.some(r => ['rejected', 'merged'].includes(r.verdict))) return 'disputed';
+    if (confirmed.some(r => r.kind === 'task')) return 'confirmed';
+    if (confirmed.length || reviews.length && reviews.every(r => ['rejected', 'merged'].includes(r.verdict))) return 'excluded';
+    return 'pending';
+  }
+  function parsedOwner(item) {
+    if (!candidateCurrent(item) || parsedReviewState(item) === 'disputed') return null;
+    const confirmed = (item.reviews || []).filter(r => r.verdict === 'confirmed' && r.kind === 'task' && r.owner && r.owner !== 'unknown');
+    const owners = [...new Set(confirmed.map(r => r.owner))];
+    return owners.length === 1 ? owners[0] : null;
+  }
+  const parsedOwnerLabel = owner => owner === 'collective' ? '大家' : owner === 'unknown' ? '待人工确认' : owner;
+  function parsedCard(item) {
+    const state = parsedReviewState(item), owner = parsedOwner(item), expanded = S.tasks.expanded.has(item.id);
+    const current = candidateCurrent(item), meetingSource = item.source === 'meeting_review';
+    const evidence = current && Array.isArray(item.evidence) ? item.evidence : [];
+    const reviews = item.reviews || [];
+    const reviewRows = reviews.map(r => {
+      const label = PARSED_REVIEW[r.verdict] || '待核对';
+      const revised = r.verdict === 'confirmed' && (r.title && r.title !== item.title || r.kind && r.kind !== 'task');
+      return `<div class="parsed-review-row"><span>${esc(r.by || '核对者未记录')}</span><span class="badge ${r.verdict === 'confirmed' ? 'purple' : 'gray'}">${esc(label)}</span>
+        ${r.verdict === 'confirmed' ? `<small>${esc(r.kind === 'task' ? r.owner ? `负责人：${parsedOwnerLabel(r.owner)}` : '负责人待确认' : ({ decision: '改为决定', open: '改为待定' }[r.kind] || '类别待核对'))}</small>` : ''}
+        ${revised ? `<p class="meta">${esc(r.title || item.title)}</p>` : ''}
+        ${expanded && r.detail ? `<p class="meta">${esc(r.detail)}</p>` : ''}${expanded && r.due ? `<p class="meta">时间：${esc(r.due)}</p>` : ''}
+        ${expanded && r.into ? `<p class="meta">合并至：${esc(r.into)}</p>` : ''}
+        ${expanded && r.updated_at ? `<p class="meta">${esc(formatDate(r.updated_at))}${r.revision != null ? ` · 核对版本 ${esc(r.revision)}` : ''}</p>` : ''}</div>`;
+    }).join('');
+    return `<article class="card parsed-task-card" data-parsed-id="${esc(item.id)}">
+      <div class="section-title"><span class="badge ${state === 'confirmed' ? 'purple' : 'gray'}">${esc(PARSED_FILTER[state])}</span><span class="meta">${meetingSource ? 'App 会后核对结果' : '原核对站 · 独立候选'}</span></div>
+      <h3>${esc(item.title || item.what)}</h3><p class="meta">来源：${esc(item.source_meeting?.title || item.source_meeting?.id || '会议未记录')}${item.source_meeting?.started_at ? ` · ${esc(formatDate(item.source_meeting.started_at))}` : ''}</p>
+      ${item.source_status === 'retained' ? '<p class="meta">完整原文已到期，依据为独立确认保留的短原话。</p>' : ''}
+      <p class="parsed-owner">${owner ? `人工负责人：${esc(parsedOwnerLabel(owner))}` : state === 'disputed' ? '核对有分歧，负责人尚未统一' : '负责人待人工确认'}${item.due ? ` · ${esc(item.due)}` : ''}</p>
+      ${reviewRows ? `<div class="parsed-reviews" aria-label="各人核对状态">${reviewRows}</div>` : '<p class="meta">尚无人工核对记录</p>'}
+      ${current ? `${evidence.length ? `<div class="parsed-evidence">${(expanded ? evidence : evidence.slice(0, 1)).map(e => `<blockquote><p>${esc(expanded ? e.text : String(e.text || '').slice(0, 110))}${!expanded && String(e.text || '').length > 110 ? '…' : ''}</p><cite>${esc(e.speaker || '说话人待核对')} · ${clock(e.start_ms || 0)}${expanded ? ` · 原话 ${esc(e.id)}` : ''}</cite></blockquote>`).join('')}</div>` : '<p class="warn-text">未读到原话依据，请回核对站核验。</p>'}` : '<p class="error-text">来源已失效，旧正文和依据不可继续使用。</p>'}
+      <div class="inline-actions parsed-actions"><button class="chip" type="button" data-act="parsed-expand" data-id="${esc(item.id)}" aria-expanded="${expanded}">${expanded ? '收起原话与核对详情' : `展开原话${evidence.length ? ` ${evidence.length}` : ''}与核对详情`}</button>
+        ${current && meetingSource && candidateSession(item) ? `<button class="chip selected" type="button" data-act="meeting-open" data-id="${esc(candidateSession(item))}">到原会话查看与核对</button>`
+          : current && item.review_url && /^https?:\/\//i.test(item.review_url) ? `<button class="chip selected" type="button" data-act="parsed-review-open" data-id="${esc(item.id)}">去原核对站继续核对</button>` : '<span class="meta">核对入口暂不可用</span>'}</div>
+    </article>`;
+  }
+  function parsedStatusHtml(status) {
+    if (!status) return '';
+    const state = status.state;
+    const message = { loading: '正在读取当前核对状态，旧候选暂不展示或操作。', partial: '部分会议暂不可读取；下方只显示当前有效的候选。', unavailable: '暂时读不到核对站事项，请重新读取。', disabled: '当前服务未连接核对站。', unsupported: '当前服务尚未提供核对站事项，请更新服务后重试。' }[state];
+    const meetings = (status.meetings || []).filter(m => !['ready', 'current'].includes(m.status));
+    const label = { source_changed: '来源已变化', stale: '来源已失效', expired: '依据已到期', withdrawn: '来源已撤回', unavailable: '读取失败', failed: '读取失败', waiting_summary: '等待纪要', waiting_transcript: '等待原话' };
+    return message || meetings.length ? `<section class="card parsed-source-state" role="status">${message ? `<p>${esc(message)}</p>` : ''}${meetings.map(m => `<p class="meta">${esc(m.title || m.id)} · ${esc(label[m.status] || '来源暂不可用')}</p>`).join('')}<button class="button quiet" type="button" data-act="tasks-retry">重新读取核对状态</button></section>` : '';
   }
   function tasksHtml() {
     const t = S.tasks;
     const needSelf = t.mine && !S.state.selfName;
-    const q = t.query.trim();
-    const items = (t.items || []).filter((x) => !q || (x.what || '').includes(q) || (x.who || '').includes(q));
+    const q = t.query.trim().toLocaleLowerCase();
+    const matches = value => !q || String(value || '').toLocaleLowerCase().includes(q);
+    const items = (t.items || []).filter(x => matches([x.what, x.who, x.quote, x.meeting?.title, x.meeting?.goal].join(' ')));
+    const archived = (t.archived || []).filter(x => matches([x.what, x.who, x.quote, x.meeting?.title, x.meeting?.goal].join(' ')));
+    const available = [...(t.parsedItems || []), ...(t.meetingItems || []).filter(x => !x.linked_created)].filter(x => !t.mine || parsedOwner(x) === S.state.selfName);
+    const parsed = available.filter(x => (t.reviewFilter === 'all' || parsedReviewState(x) === t.reviewFilter)
+      && matches([x.title, x.what, x.detail, x.source_meeting?.title, ...(x.evidence || []).map(e => e.text), ...(x.reviews || []).flatMap(r => [r.by, r.owner, r.title])].join(' ')));
     const overdue = items.filter((x) => x.overdue), open = items.filter((x) => !x.overdue && ['open', 'unknown'].includes(x.feishu?.state));
     const done = items.filter((x) => x.feishu?.state === 'done'), gone = items.filter((x) => x.feishu?.state === 'deleted');
     const group = (title, rows) => rows.length ? `<section class="stack task-group"><div class="section-title"><h2>${title} <span class="meta">${rows.length}</span></h2></div>${rows.map(taskCard).join('')}</section>` : '';
-    const mineCount = t.mine && t.items ? (t.items.filter((x) => x.feishu?.state !== 'done').length) : null;
     return `<div class="stack task-list">
-      <div class="section-title"><div><h1 class="title">把事情往前推进</h1><p class="meta">${mineCount != null ? `${mineCount}项我的工作` : '团队在飞书里的任务'}</p></div></div>
-      <div class="segmented" role="tablist">${[['mine', '我的任务'], ['all', '全部任务']].map(([k, label]) => `<button role="tab" aria-selected="${(k === 'mine') === t.mine}" data-act="tasks-scope" data-value="${k}">${label}</button>`).join('')}</div>
-      <div class="task-search-row"><div class="search-input">${icon('magnifying-glass', 18)}<input id="tasks-search" aria-label="搜索任务或负责人" placeholder="搜索任务或负责人" value="${esc(t.query)}"></div>
-        <button class="task-filter-button" data-act="tasks-status-cycle" aria-label="任务筛选">${icon('sliders-horizontal', 18)}<span>${{ open: '未完成', done: '已完成', all: '全部' }[t.status]}</span></button></div>
-      <p class="meta">${t.mine ? `${esc(S.state.selfName || '本人')}负责` : '全部负责人'} · ${{ open: '未结束', done: '已完成', all: '全部状态' }[t.status]} · 只含经确认后建的飞书任务</p>
+      <div class="section-title"><div><h1 class="title">把事情往前推进</h1><p class="meta">先核对会议待办，再分别推进正式任务</p></div><button class="chip" type="button" data-act="tasks-retry" aria-label="刷新任务和核对状态">刷新</button></div>
+      <div class="segmented" role="tablist">${[['review', '待核对'], ['mine', '我的任务'], ['all', '团队任务']].map(([k, label]) => `<button role="tab" aria-selected="${k === t.scope}" data-act="tasks-scope" data-value="${k}">${label}</button>`).join('')}</div>
+      <div class="task-search-row"><div class="search-input">${icon('magnifying-glass', 18)}<input id="tasks-search" aria-label="搜索任务、原话或会议" placeholder="搜索任务、原话或会议" value="${esc(t.query)}"></div></div>
       ${needSelf ? `<section class="card"><h3>先选你是谁</h3><p class="meta">选好后，这里只列你负责的任务。</p><div class="inline-actions">${S.team.map((n) => `<button class="chip" data-act="tasks-self" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div></section>`
-        : `${requestNotice(S.requests.tasks, 'tasks-retry', !!t.items)}${t.items == null ? S.requests.tasks.error ? '' : spinnerHtml('正在读取飞书任务…', '状态最多缓存 5 分钟')
-        : `${group('需要跟进', overdue)}${group('进行中', open)}${group('已完成', done)}${group('飞书里已删除', gone)}
-          ${!items.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>没有符合条件的任务</strong><p>会议里确认的待办建成飞书任务后会出现在这里。</p></div>` : ''}`}
+        : `${requestNotice(S.requests.tasks, 'tasks-retry', t.items !== null)}${t.items == null ? S.requests.tasks.error ? '' : spinnerHtml('正在读取会议待办和正式任务…', '读取原核对站的当前人工核对状态')
+        : `<section class="stack task-group parsed-task-group"><div class="section-title"><h2>${t.mine ? '明确由我负责的会议候选' : '会议待办候选'} <span class="meta">${parsed.length}${parsed.length !== available.length ? ` / ${available.length}` : ''}</span></h2></div>
+          <p class="meta">${t.mine ? '只显示人工明确指定本人、且核对没有分歧的候选。' : '未分配的待办也在这里。'}确认内容不代表业务完成；原话中的说话人与人工负责人分别记录。${t.refreshedAt ? ` · 本次读取 ${esc(formatDate(t.refreshedAt))}` : ''}</p>
+          <div class="parsed-filters" aria-label="候选核对状态">${Object.entries(PARSED_FILTER).map(([key, label]) => `<button class="chip ${t.reviewFilter === key ? 'selected' : ''}" type="button" data-act="parsed-filter" data-value="${key}" aria-pressed="${t.reviewFilter === key}">${label}</button>`).join('')}</div>
+          ${parsedStatusHtml(t.parsedStatus)}${[['label_review', '原核对站候选'], ['meeting_review', 'App 会后已确认待办']].map(([source, title]) => { const rows = parsed.filter(x => x.source === source); return rows.length ? `<h3 class="parsed-source-heading">${title} · ${rows.length}</h3>${rows.map(parsedCard).join('')}` : ''; }).join('')}
+          ${!parsed.length && !['loading', 'unavailable', 'disabled', 'unsupported'].includes(t.parsedStatus?.state) ? `<p class="meta">${t.mine ? '暂没有明确由你负责且符合筛选的会议候选；未分配或有分歧的内容可在「待核对」查看。' : '没有符合筛选的当前候选。可清除搜索或切换核对状态。'}</p>` : ''}</section>
+          <section class="stack task-group formal-task-group"><div class="section-title"><h2>飞书正式任务 <span class="meta">${items.length}</span></h2><button class="chip" type="button" data-act="tasks-status-cycle" aria-label="筛选飞书业务状态">${{ open: '未完成', done: '已完成', all: '全部状态' }[t.status]}</button></div>
+          <p class="meta">${t.mine ? `${esc(S.state.selfName)}负责` : '团队全部负责人'} · 已创建的飞书任务，业务状态单独读取</p>
+          ${group('需要跟进', overdue)}${group('进行中', open)}${group('已完成', done)}${group('飞书里已删除', gone)}
+          ${!items.length ? '<p class="meta">没有符合条件的飞书正式任务。上方候选尚不等于已创建任务。</p>' : ''}
+          ${archived.length ? `<details><summary>已收起的验收记录 ${archived.length} 条</summary><p class="meta">保留原记录，已移出业务待办，不计入正式任务数量。</p>${archived.map(taskCard).join('')}</details>` : ''}</section>`}
         `}
     </div>`;
   }
@@ -1019,6 +1176,7 @@
     }
     const items = S.projects.items;
     return `<div class="stack memory-settings">${seg}
+      ${meetingWorkEntryHtml()}
       <button class="card clickable ms-pending" data-act="daily-candidates"><span class="badge gray">私人 · 待核对</span><h3>日常留下的候选重点</h3><p class="meta">只留必要短依据，核对后单独保存；不保留整场原音或全文。</p></button>
       <button class="card clickable ms-pending" data-act="go" data-route="sessions"><span class="badge purple">项目记忆</span><h3>同一项目里确认过的决定</h3><p class="meta">会在之后开会时用来提醒"和之前定的不一样"。在会议里点「所属项目」把会议归进项目。</p></button>
       ${sectionTitle('项目')}
@@ -1034,14 +1192,18 @@
     const p = S.projects.open;
     if (!p) return requestNotice(S.requests.project, 'project-retry', false) || spinnerHtml('正在读取项目…', S.route.name_ || '');
     const sec = S.projects.section;
-    const seg = `<div class="segmented" role="tablist">${[['decisions', `决定 ${p.decisions.length}`], ['tasks', `任务 ${p.tasks.length}`], ['meetings', `会议 ${p.meetings.length}`]]
+    const meetingTasks = (p.meeting_items || []).filter(x => !x.linked_created && candidateCurrent(x));
+    const seg = `<div class="segmented" role="tablist">${[['decisions', `决定 ${p.decisions.length}`], ['tasks', `任务 ${p.tasks.length + meetingTasks.length}`], ['meetings', `会议 ${p.meetings.length}`]]
       .map(([k, label]) => `<button role="tab" aria-selected="${k === sec}" data-act="project-section" data-value="${k}">${label}</button>`).join('')}</div>`;
     const body = sec === 'decisions'
-      ? `${p.unreviewed_decisions ? `<p class="meta">另有 ${p.unreviewed_decisions} 条决定还没会后核对。核对确认后会出现在这里，并用于开会时的冲突提醒。</p>` : ''}
+      ? `${p.source_filtered ? '<p class="warn-text">已撤回删除会议的旧依据；请重新读取项目以更新统计。</p>' : p.unreviewed_decisions ? `<p class="meta">另有 ${p.unreviewed_decisions} 条决定还没会后核对。核对确认后会出现在这里，并用于开会时的冲突提醒。</p>` : ''}
         ${p.decisions.map((d) => `<button class="card clickable" data-act="meeting-open" data-id="${esc(d.session_id)}"><div class="ms-card-heading"><span class="badge ${d.tag === 'constraint' ? 'gray' : 'green'}">${d.tag === 'constraint' ? '约束' : '决定'}</span></div>
-          <h3>${esc(d.text)}</h3><p class="meta">${formatDate(d.started_at)} ·《${esc(d.meeting_title || '会议')}》${d.speaker ? ` · ${esc(manualLabel(d.speaker))}` : ''}</p></button>`).join('')
+          <h3>${esc(d.text)}</h3><p class="meta">${esc(formatDate(d.started_at))} ·《${esc(d.meeting_title || '会议')}》${d.speaker ? ` · ${esc(manualLabel(d.speaker))}` : ''}</p>
+          ${d.source === 'meeting_review' ? `<p class="meta">来自会后事项人工确认${d.review?.by ? ` · ${esc(d.review.by)}` : ''}${d.source_status === 'retained' ? ' · 独立保留短依据' : ''}</p>${d.evidence?.length ? `<p class="parsed-decision-quote">“${esc(d.evidence[0].text)}”</p>` : ''}` : ''}</button>`).join('')
           || `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>还没有确认过的决定</strong><p>在会后核对里点「是决定」。</p></div>`}`
-      : sec === 'tasks' ? (p.tasks.map(taskCard).join('') || `<div class="empty-state"><strong>这个项目的会议还没有建过飞书任务</strong></div>`)
+      : sec === 'tasks' ? `${meetingTasks.length ? `<h3 class="parsed-source-heading">会后已确认待办 · ${meetingTasks.length}</h3>${meetingTasks.map(parsedCard).join('')}` : ''}
+        ${p.tasks.length ? `<h3 class="parsed-source-heading">飞书正式任务 · ${p.tasks.length}</h3>${p.tasks.map(taskCard).join('')}` : ''}
+        ${!meetingTasks.length && !p.tasks.length ? '<div class="empty-state"><strong>这个项目还没有当前有效的确认待办或飞书正式任务</strong></div>' : ''}`
       : p.meetings.map(sessionCard).join('');
     return `<div class="stack memory-settings"><div class="section-title"><div><h1 class="title">${esc(p.name)}</h1><p class="meta">${p.meetings.length} 场会议 · 已确认决定 ${p.decisions.length}</p></div></div>${requestNotice(S.requests.project, 'project-retry', true)}${seg}${body}</div>`;
   }
@@ -1152,7 +1314,7 @@
         <div class="inline-actions"><button class="chip" data-act="pick-audio">选择测试 WAV</button><button class="chip" data-act="reset-audio">恢复内置音频</button></div>
         ${toggle('set-voice', '说「Oops」触发找回/提问', '', s.voiceTrigger !== false)}
         ${toggle('set-vibrate', '提醒短震动', '', s.noticeVibrate !== false)}</section>
-      <section class="card"><h3>保存方式</h3><p>日常原音与临时全文只滚动保留5分钟，停止清除。明确选择正式会议后才云端归档；原音与全文分别选7/30/90天。</p><p class="meta">实时识别可能使用云端ASR，不归档不代表音频完全不上云。历史记录不追溯删除。</p><button class="button secondary" type="button" data-act="daily-candidates">查看私人待核对候选</button><p class="meta">${s.recordingsPending || 0} 场会议资产待上传</p><input type="checkbox" id="set-sync" hidden ${s.memorySync !== false ? 'checked' : ''}><input type="checkbox" id="set-record" hidden ${s.recordSession ? 'checked' : ''}></section>
+      <section class="card"><h3>保存方式</h3><p>日常原音与临时全文只滚动保留5分钟，停止清除。明确选择正式会议后才云端归档；原音与全文分别选7/30/90天。</p><p class="meta">实时识别可能使用云端ASR，不归档不代表音频完全不上云。历史记录不追溯删除。</p><button class="button secondary" type="button" data-act="daily-candidates">查看私人待核对候选</button><p class="meta">${s.recordingsPending || 0} 场会议资产待上传到当前来源服务</p>${s.recordingArchiveMessage ? `<p class="warn-text" role="status">${esc(s.recordingArchiveMessage)}${s.recordingsBlocked ? `（${s.recordingsBlocked} 场）` : ''}</p><button class="button quiet" type="button" data-act="archive-retry" ${s.capturing || s.asr === 'finishing' ? 'disabled' : ''}>重试当前服务的恢复 / 上传</button>` : ''}<input type="checkbox" id="set-sync" hidden ${s.memorySync !== false ? 'checked' : ''}><input type="checkbox" id="set-record" hidden ${s.recordSession ? 'checked' : ''}></section>
       <section class="card"><h3>团队服务器</h3>
         ${toggle('set-mock', '使用 Mock 后端', '只在本机模拟，不连服务器', s.backend === 'mock')}
         <label class="form-field"><span>后端地址</span><input id="set-url" inputmode="url" placeholder="https://…" value="${esc(s.backendUrl || '')}"></label>
@@ -1161,7 +1323,8 @@
       <section class="card"><h3>试验功能</h3>
         ${toggle('set-spk', '说话人区分', '实验：测试中会丢句', s.speakerInfo)}
         ${toggle('set-preview', '实时换人拆分与重叠提示', '试验', s.speakerPreviewEnabled)}</section>
-      <button class="button primary" type="button" data-act="apply-settings"><span>保存设置</span></button>
+      <p id="settings-save-state" class="${S.settingsSave?.error ? 'error-text' : 'meta'}" role="status">${esc(S.settingsSave?.error || (S.settingsSave?.status === 'saving' ? '正在保存设置…' : S.settingsSave?.status === 'saved' ? '设置已保存' : ''))}</p>
+      <button class="button primary" type="button" data-act="apply-settings" ${S.settingsSave?.status === 'saving' ? 'disabled' : ''}><span>保存设置</span></button>
       <section class="card"><h3>召回耗时</h3><p class="meta">${esc(latency)}（验收：中位数 ≤ 5 秒）</p>
         <h3>诊断</h3><pre class="diag" id="diag">${esc(diagText())}</pre></section>
     </div>`;
@@ -1175,11 +1338,14 @@
       `asr      ${s.asr}${s.asrDetail ? ` — ${s.asrDetail}` : ''}`,
       `backend  ${s.backend}${s.backend === 'http' ? ` ${s.backendUrl}` : ''}`,
       `gaps     ${(s.asrGaps || []).length}`,
+      ...(s.recordingArchiveMessage ? [`archive  ${s.recordingArchiveMessage}`] : []),
     ].join('\n');
   }
 
   function applySettings() {
+    if (S.settingsSave?.status === 'saving') return;
     const settings = {
+      requestId: `settings-${++S.historySerial}`,
       voiceTrigger: $('set-voice').checked, noticeVibrate: $('set-vibrate').checked, memorySync: $('set-sync').checked,
       source: $('set-source').value,
       remoteAddress: $('set-remote').value.trim(),
@@ -1191,8 +1357,13 @@
     };
     if ($('set-clear-token').checked) settings.backendToken = '';
     else if ($('set-token').value.trim()) settings.backendToken = $('set-token').value.trim();
+    S.settingsSave = { requestId: settings.requestId, status: 'saving' }; updateSettingsSaveStatus();
     send('settings.set', settings);
-    toast('设置已保存');
+  }
+  function updateSettingsSaveStatus() {
+    const status = $('settings-save-state'), button = document.querySelector('[data-act="apply-settings"]');
+    if (status) { status.textContent = S.settingsSave?.error || (S.settingsSave?.status === 'saving' ? '正在保存设置…' : S.settingsSave?.status === 'saved' ? '设置已保存' : ''); status.className = S.settingsSave?.error ? 'error-text' : 'meta'; }
+    if (button) button.disabled = S.settingsSave?.status === 'saving';
   }
 
   // ---- sheets -----------------------------------------------------------------------------
@@ -1251,6 +1422,7 @@
       notices: () => frame('会议提醒', noticeRecordsHtml(S.sheet.rows || [...S.notices.values()], !!S.sheet.rows)),
       speaker: speakerPickHtml,
       review: reviewHtml,
+      items: itemReviewHtml,
       minutesSource: minutesSourceHtml,
       requestError: () => frame('暂时无法读取', `<p class="error-text">${esc(S.sheet.error)}</p><button class="button primary" type="button" data-act="meeting-retry"><span>重新打开会议</span></button>`),
       projectPick: projectPickHtml,
@@ -1323,6 +1495,7 @@
   // ---- recall card --------------------------------------------------------------------------
 
   function openCard(card) {
+    if (S.deletedSessions.has(card.sessionId || card.sourceSessionId) || card.items?.some(x => S.deletedSessions.has(x.sessionId))) return;
     S.card = { data: card, sel: 0, before: 0, after: 0 };
     openSheet({ kind: 'card' });
     highlight(card.items.map((i) => i.id));
@@ -1399,7 +1572,11 @@
   // ---- action draft -----------------------------------------------------------------------
 
   function openDraft(d) {
+    const sourceSessionId = d.sessionId || d.session_id || (d.evidence?.sourceBinding || d.evidence?.source_binding)?.session_id || S.card?.data.sessionId || S.card?.data.sourceSessionId
+      || (d.evidence?.utteranceIds?.some(id => S.records.has(id)) ? S.state.sessionId : null);
+    if (S.deletedSessions.has(sourceSessionId)) return;
     S.draft = window.OopsDraftState.create(d);
+    S.draft.sourceSessionId = sourceSessionId;
     openSheet({ kind: 'draft' });
   }
   function draftSourceValid(d) {
@@ -1438,6 +1615,8 @@
   }
   function draftHtml() {
     const { data: d, status, error } = S.draft;
+    const sourceChanged = S.draft.errorCode === 'SOURCE_CHANGED' || S.draft.sourceInvalidated || S.draft.sourceBlocked;
+    const sourceRejected = sourceChanged && status === 'failed' && !S.draft.sourceBlocked;
     const names = [...new Set([...(d.ownerCandidates || []).map((c) => c.name), ...(d.assigneeCandidates || []), ...(d.who ? [d.who] : []), ...(d.suggestedOwner ? [d.suggestedOwner] : [])])];
     const options = ['<option value="">请选择负责人</option>'].concat(names.map((n) => `<option ${n === d.who ? 'selected' : ''}>${esc(n)}</option>`)).join('');
     const sending = status === 'sending';
@@ -1446,11 +1625,10 @@
     const dailyUnavailable = !validSource && S.state.recordingMode === 'daily' && (d.sourceError || d.source_error);
     const tier = d.tier === 'A' ? ['A · 模型高可信', 'green'] : d.tier === 'B' ? ['B · 建议，请核对', 'amber'] : ['C · 模型未确认负责人', 'gray'];
     const suggestions = [...new Set([d.suggestedOwner, ...(d.ownerCandidates || []).map((c) => c.name)].filter(Boolean))].slice(0, 2);
-    return frame('整理成飞书任务', `<div class="inline-actions"><span class="badge ${tier[1]}">${tier[0]}</span><span class="badge ${S.draft.reviewStatus === 'confirmed' ? 'green' : 'purple'}">${S.draft.reviewStatus === 'confirmed' ? '人工已确认' : '待你确认'}</span></div>
+    return frame('整理成飞书任务', `<div class="inline-actions"><span class="badge ${tier[1]}">${tier[0]}</span><span class="badge ${sourceChanged ? 'gray' : S.draft.reviewStatus === 'confirmed' ? 'green' : 'purple'}">${sourceChanged ? '来源已变化 · 原操作记录' : S.draft.reviewStatus === 'confirmed' ? '人工已确认' : '待你确认'}</span></div>
       <p class="meta">${esc(d.reason || '请核对负责人')}${typeof d.ownerConfidence === 'number' ? ` · 模型建议可信度 ${(d.ownerConfidence * 100).toFixed(0)}%` : ''}</p>
       ${suggestions.length ? `<div class="inline-actions">${suggestions.map((n) => `<button class="chip" data-act="choose-owner" data-name="${esc(n)}" ${submitted ? 'disabled' : ''}>建议 ${esc(n)}</button>`).join('')}</div>` : ''}
-      <section class="card evidence-card"><button class="play-mini" data-act="play-evidence" data-key="ev-${esc(d.draftId)}" aria-label="回听原声">${icon('play', 16)}</button><p>“${esc(d.evidence.quote)}”</p></section>
-      ${taskContextHtml(d.taskContext)}
+      ${sourceChanged ? '<p class="warn-text">旧依据已撤回，不能据此重新执行。创建结果尚未知时，只能查询原操作。</p>' : `<section class="card evidence-card"><button class="play-mini" data-act="play-evidence" data-key="ev-${esc(d.draftId)}" aria-label="回听原声">${icon('play', 16)}</button><p>“${esc(d.evidence.quote)}”</p></section>${taskContextHtml(d.taskContext)}`}
       <label class="form-field"><span>负责人</span><select id="f-who" ${submitted ? 'disabled' : ''}>${options}</select></label>
       <label class="form-field"><span>事项</span><textarea id="f-what" rows="3" ${submitted ? 'disabled' : ''}>${esc(d.what)}</textarea></label>
       <label class="form-field"><span>截止时间</span><input type="date" id="f-when" ${submitted ? 'disabled' : ''} value="${esc(d.whenIso || '')}">${d.whenRaw ? `<small>原话：${esc(d.whenRaw)}</small>` : ''}</label>
@@ -1458,11 +1636,12 @@
       <p class="meta">只有你点确认后才会写入飞书；同一次确认只会建一条任务。</p>
       ${!validSource && !S.draft.submitted ? `<p class="error-text">${dailyUnavailable ? '这段日常原话仅在本机临时保留，当前不能核验并创建飞书任务。可先保存私人候选，或在飞书手工记录。' : d.sourceError || d.source_error ? '原话依据已变化或不可用，请重新读取后核对。' : '原话依据尚未核验，请重新读取原话并整理任务。'}</p>` : ''}
       ${error ? `<p class="error-text">${esc(error)}</p>` : ''}
-      ${!validSource && status !== 'waiting' && !sending ? dailyUnavailable ? '<button class="button secondary" type="button" data-act="daily-candidates"><span>查看私人候选</span></button>' : '<button class="button secondary" type="button" data-act="draft-source-reload"><span>重新核对原话</span></button>' : ''}
-      <button class="button primary" type="button" data-act="${status === 'waiting' ? 'query-action' : 'confirm'}" ${sending || status !== 'waiting' && !validSource ? 'disabled' : ''}><span>${sending ? '正在查询…' : status === 'waiting' ? '查询创建结果' : status === 'failed' ? '重试同一操作' : '确认创建飞书任务'}</span></button>
+      ${!validSource && !sourceRejected && status !== 'waiting' && !sending ? dailyUnavailable ? '<button class="button secondary" type="button" data-act="daily-candidates"><span>查看私人候选</span></button>' : '<button class="button secondary" type="button" data-act="draft-source-reload"><span>重新核对原话</span></button>' : ''}
+      <button class="button primary" type="button" data-act="${sourceRejected ? 'draft-source-reopen' : status === 'waiting' ? 'query-action' : 'confirm'}" ${sending || !sourceRejected && status !== 'waiting' && !validSource ? 'disabled' : ''}><span>${sending ? '正在查询…' : sourceRejected ? '重新核对当前原话' : status === 'waiting' ? '查询原操作创建结果' : status === 'failed' ? '重试同一操作' : '确认创建飞书任务'}</span></button>
       <button class="button quiet" type="button" data-act="close"><span>取消</span></button>`);
   }
   function confirmDraft() {
+    if (S.draft?.errorCode === 'SOURCE_CHANGED' || S.draft?.sourceInvalidated || S.draft?.sourceBlocked) return toast('旧依据已撤回，请核对当前原话；未知创建结果只查询原操作', true);
     if (!S.draft || !draftSourceValid(S.draft.data)) { toast('原话依据尚未核验或已经变化，请重新读取后核对', true); return; }
     const d = S.draft.data;
     const who = $('f-who').value.trim();
@@ -1480,10 +1659,13 @@
   }
   function onActionResult(p) {
     if (!S.draft || S.draft.data.draftId !== p.draftId) return;
-    if (p.sourceInvalidated === true) S.draft.data.sourceError = 'source_changed';
+    S.draft.sourceBlocked = p.sourceBlocked === true || p.source_blocked === true || !!S.draft.sourceBlocked && p.status !== 'created';
+    S.draft.sourceInvalidated = p.sourceInvalidated === true || p.source_invalidated === true;
+    if (S.draft.sourceInvalidated || S.draft.sourceBlocked || p.errorCode === 'SOURCE_CHANGED') S.draft.data.sourceError = 'source_changed';
     S.draft.submitted = true;
-    if (p.status === 'pending') {
-      S.draft.status = p.polling ? 'sending' : 'waiting';
+    S.draft.errorCode = p.errorCode || null;
+    if (p.status === 'pending' || S.draft.sourceBlocked && p.status !== 'created') {
+      S.draft.status = p.polling && !S.draft.sourceBlocked ? 'sending' : 'waiting';
       S.draft.error = p.message || null;
       if (S.sheet?.kind === 'draft') renderSheet();
       return;
@@ -1622,7 +1804,53 @@
 
   // ---- past meetings ------------------------------------------------------------------------
 
+  function visibleProject(project) {
+    const meetings = (project.meetings || []).filter(x => !S.deletedSessions.has(x.session_id));
+    const decisions = (project.decisions || []).filter(x => !S.deletedSessions.has(x.session_id) && !['changed', 'unavailable'].includes(x.source_status));
+    return { ...project, meetings, decisions, tasks: (project.tasks || []).map(visibleTaskSource), meeting_items: (project.meeting_items || []).filter(candidateSourceVisible),
+      source_filtered: meetings.length !== (project.meetings || []).length || decisions.length !== (project.decisions || []).length };
+  }
+  function deleteHistory() {
+    const sessionId = S.history?.session_id;
+    if (!sessionId || S.pendingDelete?.status === 'saving') return;
+    const requestId = `delete-${++S.historySerial}`;
+    S.pendingDelete = { sessionId, requestId, status: 'saving' };
+    renderSheet(); send('history.delete', { sessionId, requestId, confirm: true });
+  }
+  function onHistoryDeleted(p) {
+    const pending = S.pendingDelete;
+    if (!pending || p.sessionId !== pending.sessionId || p.requestId !== pending.requestId || p.deleted !== true) return;
+    const sid = pending.sessionId;
+    const wasVisible = S.route.name === 'meeting' && S.route.id === sid || S.history?.session_id === sid && S.sheet?.kind === 'tools';
+    S.deletedSessions.add(sid); S.pendingDelete = null;
+    S.historyItems = S.historyItems?.filter(x => x.session_id !== sid) || null;
+    S.minutes.delete(sid); S.projects.items = null;
+    if (S.projects.open) S.projects.open = visibleProject(S.projects.open);
+    if (S.history?.session_id === sid) S.history = null;
+    if (S.meetingRequest?.sessionId === sid) { S.meetingRequest.active = false; S.pendingMeetingId = null; }
+    if (S.pendingReview === sid) S.pendingReview = null;
+    if (S.pendingTools === sid) S.pendingTools = null;
+    if (S.pendingRetention?.sessionId === sid) S.pendingRetention = null;
+    if (S.review?.sessionId === sid) S.review = null;
+    if (S.itemReview?.sessionId === sid) S.itemReview = null;
+    if (S.card && (S.card.data.sessionId === sid || S.card.data.sourceSessionId === sid || S.card.data.pool?.some(x => x.sessionId === sid))) S.card = null;
+    if (S.draft && !S.draft.submitted && S.draft.sourceSessionId === sid) S.draft = null;
+    if (sid === S.state.sessionId) { resetTranscript(); S.expiredBoardSession = sid; S.board = null; }
+    if (S.playingKey || S.loadingKey) { send('clip.stop'); S.playingKey = null; S.loadingKey = null; }
+    S.tasks.items = S.tasks.items?.map(visibleTaskSource) || null; S.tasks.archived = (S.tasks.archived || []).map(visibleTaskSource); S.homeTasks = S.homeTasks?.map(visibleTaskSource) || null;
+    S.tasks.parsedItems = S.tasks.parsedItems?.filter(candidateSourceVisible) || null;
+    S.tasks.meetingItems = S.tasks.meetingItems?.filter(candidateSourceVisible) || null;
+    for (const cached of S.tasks.cache.values()) {
+      cached.items = cached.items.map(visibleTaskSource); cached.archived = (cached.archived || []).map(visibleTaskSource);
+      cached.parsedItems = cached.parsedItems?.filter(candidateSourceVisible) || null;
+      cached.meetingItems = cached.meetingItems?.filter(candidateSourceVisible) || null;
+    }
+    toast('会议与原始录音已删除；正式任务回执独立保留');
+    if (wasVisible) { closeSheet(); go('sessions'); } else render();
+    requestTasks(false, 'all');
+  }
   function historyOpen(p) {
+    if (S.deletedSessions.has(p.session_id) || p.requestId && p.requestId !== S.meetingRequest?.requestId) return;
     if (S.meetingRequest && (!S.meetingRequest.active || S.meetingRequest.sessionId !== p.session_id)) return;
     if (S.meetingRequest) S.meetingRequest.active = false;
     S.pendingMeetingId = null;
@@ -1635,8 +1863,9 @@
     if (S.pendingTools === p.session_id) { S.pendingTools = null; openSheet({ kind: 'tools', live: false }); }
   }
   function historySearch(p) {
-    if (!p.items?.length) return openSheet({ kind: 'notFound', reason: '往期会议原话里没有找到答案' });
-    const items = p.items.map((i) => ({ id: i.id, text: i.text, startMs: i.start_ms, endMs: i.end_ms, speaker: i.speaker, prob: i.prob, audioAvailable: false, startedAt: i.started_at }));
+    const source = (p.items || []).filter(i => !S.deletedSessions.has(i.session_id));
+    if (!source.length) return openSheet({ kind: 'notFound', reason: '往期会议原话里没有找到答案' });
+    const items = source.map((i) => ({ id: i.id, sessionId: i.session_id, text: i.text, startMs: i.start_ms, endMs: i.end_ms, speaker: i.speaker, prob: i.prob, audioAvailable: false, startedAt: i.started_at }));
     openCard({ id: 'history-search', trigger: 'ask', query: p.query, nowMs: 0, items, pool: items, single: items.length === 1, engine: p.engine, latencyMs: 0, readOnly: true });
   }
 
@@ -1674,13 +1903,14 @@
       const actions = Array.isArray(m.actions) ? m.actions : [];
       const main = actions.filter((x) => (x.priority || 'main') === 'main'), other = actions.filter((x) => x.priority === 'other');
       const task = (x) => `${x.owner ? `${x.owner}：` : ''}${x.task || ''}${x.due ? `（${x.due}）` : ''}${x.owner ? '' : '（负责人待定）'}`;
+      const itemsLead = S.history?.session_id === sessionId && Array.isArray(S.history.items) && S.history.items.length;
       body = `${m.theme ? `<p class="minutes-theme"><small>会议主题</small><strong>${esc(m.theme)}</strong></p>` : ''}
         ${m.overview ? `<p class="minutes-overview">${esc(m.overview)}</p>` : ''}
-        ${rows('主线任务', main, task, x => x.ids)}
+        ${itemsLead ? '<p class="meta">待办、决定和还没定的事已整理在上方「会后事项」里核对。</p>' : `${rows('主线任务', main, task, x => x.ids)}
         ${rows('决定', m.decisions, x => x.text, x => x.ids)}
-        ${rows('其他事项', other, task, x => x.ids)}
+        ${rows('其他事项', other, task, x => x.ids)}`}
         ${rows('讨论要点', m.topics, x => `${x.topic || ''}：${Array.isArray(x.points) ? x.points.join('；') : x.points || ''}`, () => [])}
-        ${rows('待确认问题', m.open_questions, x => x.question, x => [x.id])}
+        ${itemsLead ? '' : rows('待确认问题', m.open_questions, x => x.question, x => [x.id])}
         ${rows('后续跟进建议', m.follow_ups, x => `${x.title || ''}${x.start ? ' · ' + x.start : ''}`, () => [])}
         ${m.substantive === false ? '<p class="meta">这场对话没有需要整理的实质内容。</p>' : ''}
         ${p.doc_url ? `<button class="button secondary" type="button" data-act="minutes-doc"><span>查看飞书纪要文档</span></button>` : ''}`;
@@ -1713,6 +1943,7 @@
   }
   function toolsHtml() {
     const live = S.sheet.live;
+    const deletion = S.pendingDelete?.sessionId === S.history?.session_id ? S.pendingDelete : null;
     const rows = live ? [
       listRow({ act: 'commitments-open', ic: 'check-circle', title: '本场纪要', sub: '决定、待办、约束与想法' }),
       listRow({ act: 'agenda-open', ic: 'list-checks', title: '议程与时间' }),
@@ -1728,7 +1959,7 @@
       listRow({ act: 'history-delete-prompt', ic: 'trash', title: '删除这场会议', sub: '团队成员将无法再查看，录音一并删除' }),
     ];
     return frame(live ? '本次会话工具' : '会议工具', `${rows.join('')}
-      ${S.sheet.deleteConfirm ? `<p class="meta">团队成员将无法再查看这场会议，原始录音一并删除。确认删除？</p><button class="button danger" type="button" data-act="history-delete-confirm"><span>确认删除</span></button>` : ''}`);
+      ${S.sheet.deleteConfirm ? `<p class="meta">团队成员将无法再查看这场会议，原始录音一并删除。确认删除？</p>${deletion?.error ? `<p class="error-text">${esc(deletion.error)}</p>` : ''}<button class="button danger" type="button" data-act="history-delete-confirm" ${deletion?.status === 'saving' ? 'disabled' : ''}><span>${deletion?.status === 'saving' ? '正在删除…' : '确认删除'}</span></button>` : ''}`);
   }
   function selfPickHtml() {
     return frame('选择本人', `<p class="meta">用于"我的任务"和首页的待处理。</p>
@@ -1786,7 +2017,9 @@
   // ---- after the meeting: one sentence at a time ----------------------------------------------
 
   const REVIEW_KIND = { commitment: '待办', decision: '决定', speaker: '说话人' };
-  function startReview(row) {
+  function startReview(row, itemId) {
+    // With minutes, people check things to do / decided / still open — not sentences.
+    if (Array.isArray(row.items)) return startItemReview(row, itemId);
     if (S.review?.sessionId === row.session_id && S.review.pending) return openSheet({ kind: 'review' });
     S.review = { sessionId: row.session_id, items: row.review_queue || [], i: 0, done: new Set(), ownerStep: false };
     openSheet({ kind: 'review' });
@@ -1878,6 +2111,107 @@
     finishReviewSave(p, 'review.set');
   }
 
+  // ---- after the meeting: one item at a time (from the minutes) --------------------------------
+
+  const ITEM_KIND = { task: ['待办', 'purple'], decision: ['决定', 'green'], open: ['待定', 'amber'] };
+  const COLLECTIVE = '大家';
+  const itemState = (it) => it.stale ? 'stale' : !it.review ? 'todo' : it.review.status === 'confirmed' ? 'done' : 'out';
+  const itemView = (it) => it.review?.status === 'confirmed' ? { ...it, kind: it.review.kind, title: it.review.title, due: it.review.due, owner: it.review.owner } : { ...it, owner: '' };
+  function startItemReview(row, itemId) {
+    const items = row.items || [], todo = items.filter((it) => itemState(it) === 'todo');
+    const first = itemId ? items.findIndex((it) => it.id === itemId) : items.indexOf(todo[0]);
+    S.itemReview = { sessionId: row.session_id, i: Math.max(0, first), done: new Set(), editing: false, owner: {}, draft: null, pending: null };
+    openSheet({ kind: 'items' });
+  }
+  function itemReviewHtml() {
+    const r = S.itemReview, row = S.history, items = row?.items || [];
+    const left = items.filter((it) => itemState(it) === 'todo').length;
+    const it = items[r.i];
+    if (!it) return frame('会后核对', `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>${items.length ? '这场会的事项都看完了' : '纪要里没有需要核对的事项'}</strong>
+      <p>本次处理 ${r.done.size} 件${left ? `，还有 ${left} 件待核对` : ''}。</p></div><button class="button primary" type="button" data-act="items-finish"><span>回到会议</span></button>`);
+    const v = itemView(it), st = itemState(it), [kindLabel, tone] = ITEM_KIND[v.kind] || ['事项', 'gray'];
+    const saving = r.pending?.status === 'saving';
+    const quotes = (it.evidence || []).map((e) => `<section class="card evidence-card"><button class="play-mini" data-act="item-play" data-id="${esc(e.id)}" aria-label="回听原声">${icon(S.playingKey === 'it-' + e.id ? 'stop' : 'play', 16)}</button><p><span class="meta">${hms(e.start_ms)} · ${esc(e.speaker ? speakerLabel(e.speaker) || e.speaker : '说话人未识别')}</span><br>“${esc(e.text)}”</p></section>`).join('');
+    const ownerChips = (selected) => `${sectionTitle('谁负责？')}<div class="inline-actions">${[...S.team, COLLECTIVE].map((n) => `<button class="chip ${n === selected ? 'selected' : ''}" type="button" data-act="item-owner" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+      ${it.owner_hint && st === 'todo' ? `<p class="meta">原话里有人认领：${esc(it.owner_hint)}（请听原话确认，不会自动选上）</p>` : ''}`;
+    let body;
+    if (r.editing) {
+      const d = r.draft;
+      body = `<label class="form-field"><span>类别</span><select id="item-kind">${Object.entries(ITEM_KIND).map(([k, [label]]) => `<option value="${k}" ${d.kind === k ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+        <label class="form-field"><span>一句话说清这件事</span><input id="item-title" maxlength="120" value="${esc(d.title)}"></label>
+        <label class="form-field"><span>截止（原话提到才填）</span><input id="item-due" maxlength="40" value="${esc(d.due)}"></label>
+        ${d.kind === 'task' ? ownerChips(d.owner) : ''}
+        <div class="action-grid"><button class="button secondary" type="button" data-act="item-edit-cancel"><span>取消</span></button><button class="button primary" type="button" data-act="item-save"><span>保存并确认</span></button></div>`;
+    } else if (st === 'stale') {
+      body = '<p class="meta">纪要依据的原话已经变化，这条旧事项只能查看，不能再确认。</p>';
+    } else if (st === 'todo') {
+      const others = items.filter((x) => x.id !== it.id && itemState(x) !== 'out' && !x.stale);
+      body = `${v.kind === 'task' ? ownerChips(r.owner[it.id] || '') : ''}
+        <div class="action-grid"><button class="button secondary" type="button" data-act="item-reject"><span>不是事项</span></button><button class="button primary" type="button" data-act="item-confirm"><span>确认这件事</span></button></div>
+        <div class="inline-actions"><button class="chip" type="button" data-act="item-edit">改写</button>${others.length ? `<select id="item-merge" class="chip" aria-label="和另一件是同一件事"><option value="">和另一件重复…</option>${others.map((x) => `<option value="${esc(x.id)}">${esc(itemView(x).title.slice(0, 24))}</option>`).join('')}</select>` : ''}</div>`;
+    } else if (st === 'done') {
+      body = `<p class="confirmed-line"><span class="badge green">已确认</span> ${v.kind === 'task' && v.owner ? `负责人 ${esc(v.owner)}` : ''}${it.review.edited ? ' · 已改写' : ''}</p>
+        <div class="inline-actions"><button class="chip" type="button" data-act="item-edit">改写</button><button class="chip" type="button" data-act="item-reopen">撤回确认</button></div>`;
+    } else {
+      const into = items.find((x) => x.id === it.review.into);
+      body = `<p class="meta">${it.review.status === 'merged' ? `已合并到「${esc(into ? itemView(into).title : '另一件事项')}」` : '已标为不是事项'}</p><button class="chip" type="button" data-act="item-reopen">重新核对</button>`;
+    }
+    const saveState = r.pending ? `<section class="review-save-state" role="status"><p class="${r.pending.error ? 'error-text' : 'meta'}">${esc(r.pending.error || '正在保存…')}</p>
+      ${r.pending.error ? '<button class="button primary" type="button" data-act="item-retry"><span>重试保存</span></button>' : ''}</section>` : '';
+    return frame(`会后核对 · ${r.i + 1} / ${items.length}`, `<div class="inline-actions"><span class="badge ${tone}">${kindLabel}</span>${st !== 'todo' && st !== 'stale' ? '' : `<span class="meta">还有 ${left} 件待核对</span>`}</div>
+      ${r.editing ? '' : `<h3 class="item-title">${esc(v.title)}</h3>${it.detail ? `<p class="meta">${esc(it.detail)}</p>` : ''}${v.due ? `<p class="meta">截止：${esc(v.due)}</p>` : ''}`}
+      <fieldset class="review-answer" ${saving ? 'disabled' : ''}>${body}</fieldset>${saveState}
+      ${sectionTitle(`依据原话 · ${(it.evidence || []).length} 句`)}${quotes}
+      <div class="inline-actions review-nav"><button class="chip" data-act="item-prev" ${r.i && !saving ? '' : 'disabled'}>上一件</button><button class="chip" data-act="item-next" ${saving ? 'disabled' : ''}>${st === 'todo' ? '跳过' : '下一件'}</button></div>
+      <p class="meta">AI 根据整场会整理；确认后才算数。负责人由你来选。</p>`);
+  }
+  function itemCurrent() { const r = S.itemReview; return { r, it: (S.history?.items || [])[r.i] }; }
+  function itemMove(step) {
+    const r = S.itemReview;
+    if (r.pending?.status === 'saving') return;
+    r.i = Math.max(0, r.i + step); r.editing = false; r.draft = null; r.pending = null;
+    if (S.sheet?.kind === 'items') renderSheet();
+  }
+  function itemSend(action, extra = {}) {
+    const { r, it } = itemCurrent();
+    if (!it || r.pending?.status === 'saving') return;
+    const payload = { sessionId: r.sessionId, itemId: it.id, fingerprint: it.fingerprint, action, ...extra };
+    r.pending = { status: 'saving', itemId: it.id, payload, advance: itemState(it) === 'todo' && action !== 'reopen' };
+    if (S.sheet?.kind === 'items') renderSheet();
+    send('items.review', payload);
+  }
+  function onItemsSaved(p) {
+    const r = S.itemReview;
+    if (S.history?.session_id !== p.sessionId || !Array.isArray(p.items)) return;
+    S.history.items = p.items; S.history.review_queue = p.review_queue || [];
+    if (r?.pending && r.pending.itemId === p.itemId && r.sessionId === p.sessionId) {
+      const advance = r.pending.advance;
+      r.done.add(p.itemId); r.pending = null; r.editing = false; r.draft = null;
+      const at = p.items.findIndex((x) => x.id === p.itemId);
+      if (at >= 0) r.i = at;
+      if (advance) { const next = p.items.findIndex((x, i) => i > r.i && itemState(x) === 'todo'); r.i = next >= 0 ? next : p.items.length; }
+    }
+    loadHistory();
+    S.projects.items = null;
+    if (S.projects.open?.meetings?.some(x => x.session_id === p.sessionId)) S.projects.open = null;
+    requestTasks(S.tasks.mine && !!S.state.selfName, S.tasks.status);
+    if (S.sheet?.kind === 'items') renderSheet();
+    if (S.route.name === 'meeting') render();
+  }
+  function itemsOverviewHtml(h) {
+    const items = h.items || [];
+    if (!items.length) return '';
+    const groups = [['task', '待办'], ['decision', '决定'], ['open', '还没定的事']];
+    const line = (it) => { const v = itemView(it), st = itemState(it);
+      const sub = st === 'todo' ? '待核对' : st === 'stale' ? '依据已变化' : st === 'out' ? (it.review.status === 'merged' ? '已合并' : '不是事项') : v.kind === 'task' ? `负责人 ${v.owner || '未定'}${it.task_status === 'created' ? ' · 已建飞书任务' : ''}` : '已确认';
+      return listRow({ act: 'item-open', data: `data-id="${esc(it.id)}"`, ic: v.kind === 'task' ? 'check-square' : v.kind === 'decision' ? 'check-circle' : 'clock', title: v.title, sub: `${sub}${v.due ? ' · ' + v.due : ''}` }); };
+    const shown = items.filter((it) => itemState(it) !== 'out');
+    const out = items.length - shown.length;
+    return `<section class="card session-items"><div class="section-title"><h2>会后事项</h2><span class="meta">${items.filter((it) => itemState(it) === 'todo').length} 件待核对</span></div>
+      ${groups.map(([k, title]) => { const list = shown.filter((it) => itemView(it).kind === k); return list.length ? `<h3>${title}</h3>${list.map(line).join('')}` : ''; }).join('')}
+      ${out ? `<p class="meta">另有 ${out} 件已排除或合并。</p>` : ''}</section>`;
+  }
+
   // ---- projects -----------------------------------------------------------------------------
 
   function openProjectPick(sessionId, current) {
@@ -1907,10 +2241,21 @@
   // ---- errors -------------------------------------------------------------------------------
 
   function onError(p) {
+    if (p.scope === 'tasks' && !currentTaskReply(p)) return;
+    if (p.scope === 'history' && p.requestId) {
+      const expected = { 'history.list': S.historyRequestId, 'history.open': S.meetingRequest?.requestId, 'history.search': S.searchRequestId, 'history.delete': S.pendingDelete?.requestId }[p.operation];
+      if (expected && p.requestId !== expected) return;
+    }
     toast(p.message, true);
+    if (p.scope === 'settings.set' && S.settingsSave && (!p.requestId || p.requestId === S.settingsSave.requestId)) {
+      S.settingsSave = { ...S.settingsSave, status: 'failed', error: p.message }; updateSettingsSaveStatus();
+    }
     const operation = p.operation || '';
     if (p.scope === 'history') {
-      if ((operation === 'history.open' || !operation && S.pendingMeetingId) && (!p.sessionId || p.sessionId === S.pendingMeetingId)) {
+      if (operation === 'history.delete' && S.pendingDelete?.sessionId === p.sessionId && (!p.requestId || p.requestId === S.pendingDelete.requestId)) {
+        S.pendingDelete.status = 'failed'; S.pendingDelete.error = p.message;
+        if (S.sheet?.kind === 'tools') renderSheet();
+      } else if ((operation === 'history.open' || !operation && S.pendingMeetingId) && (!p.sessionId || p.sessionId === S.pendingMeetingId)) {
         openSheet({ kind: 'requestError', error: p.message, sessionId: S.pendingMeetingId });
       } else if (operation === 'history.list' || !operation && S.requests.history.loading) {
         S.requests.history = { error: p.message };
@@ -1924,10 +2269,21 @@
       if (['memory', 'project'].includes(S.route.name)) render();
       if (S.sheet?.kind === 'projectPick') renderSheet();
     } else if (p.scope === 'tasks') {
+      S.tasks.pending.delete(taskKey(!!p.mine, p.status || 'open'));
       if (p.mine && p.selfName && p.selfName !== S.state.selfName) return;
+      const serial = Number(String(p.requestId || '').replace(/^tasks-/, '')) || 0;
+      if (!p.requestId || serial >= S.tasks.parsedSerial) {
+        S.tasks.parsedSerial = serial;
+        S.tasks.parsedItems = [];
+        S.tasks.meetingItems = [];
+        S.tasks.parsedStatus = { state: 'unavailable', meetings: [] };
+        for (const saved of S.tasks.cache.values()) {
+          saved.parsedItems = []; saved.meetingItems = []; saved.parsedStatus = S.tasks.parsedStatus;
+        }
+      }
       if ((!('mine' in p) || !!p.mine === S.tasks.mine) && (!p.status || p.status === S.tasks.status)) S.requests.tasks = { error: p.message };
       if ((!('mine' in p) || p.mine) && (!p.status || p.status === 'open')) S.homeTasksState = { error: p.message };
-      if (['tasks', 'home'].includes(S.route.name)) render();
+      if (['tasks', 'home', 'memory'].includes(S.route.name)) render();
     } else if (p.scope === 'retention') {
       const pending=S.pendingRetention;
       if (pending && (!p.requestId || pending.requestId===p.requestId) && (!p.sessionId || pending.sessionId===p.sessionId)) {
@@ -1939,6 +2295,13 @@
       if (entry && (!p.requestId || p.requestId === entry.requestId)) {
         S.minutes.set(p.sessionId, { requestId: entry.requestId, error: p.message });
         if (S.route.name === 'meeting' && S.history?.session_id === p.sessionId) render();
+      }
+    } else if (p.scope === 'items') {
+      const r = S.itemReview;
+      if (r?.pending && (!p.sessionId || p.sessionId === r.sessionId) && (!p.itemId || p.itemId === r.pending.itemId)) {
+        r.pending = { ...r.pending, status: 'failed', error: p.message };
+        if (p.changed && S.history?.session_id === r.sessionId) { r.pending = null; openMeeting(r.sessionId); }
+        else if (S.sheet?.kind === 'items') renderSheet();
       }
     } else if (p.scope === 'review') {
       const pending = S.review?.pending;
@@ -1977,13 +2340,16 @@
   function askSubmit(query, history) {
     if (!query) return toast('请输入问题');
     openSheet({ kind: 'pending', title: '查找原话', sub: history ? '在往期会议里找' : '在本场里找' });
-    send(history ? 'history.search' : 'ask.session', { query });
+    if (history) { S.searchRequestId = `search-${++S.historySerial}`; send('history.search', { query, requestId: S.searchRequestId }); }
+    else send('ask.session', { query });
   }
   function openMeeting(id) {
+    if (!id || S.deletedSessions.has(id)) return toast('这场会议已删除，不能重新打开', true);
     S.pendingMeetingId = id;
-    S.meetingRequest = { sessionId: id, active: true };
+    const requestId = `open-${++S.historySerial}`;
+    S.meetingRequest = { sessionId: id, requestId, active: true };
     openSheet({ kind: 'pending', title: '打开会议', sub: '团队服务器' });
-    send('history.open', { sessionId: id });
+    send('history.open', { sessionId: id, requestId });
   }
 
   const ACTIONS = {
@@ -2081,6 +2447,7 @@
     'agenda-clear': () => { send('agenda.clear'); closeSheet(); },
     'commitments-open': () => openSheet({ kind: 'commitments' }),
     'ideas-all': () => { S.showAllIdeas = true; renderSheet(); },
+    'transcript-mode': () => { S.transcriptFilter.showAll = !S.transcriptFilter.showAll; render(); },
     'notices-open': () => openSheet({ kind: 'notices' }),
     'meeting-notices': () => openSheet({ kind: 'notices', rows: S.history?.notices || [] }),
     'live-tools': () => openSheet({ kind: 'tools', live: true }),
@@ -2099,10 +2466,10 @@
     'rename-open': () => openSheet({ kind: 'rename' }),
     'rename-save': () => send('history.rename', { sessionId: S.history.session_id, title: $('rename-input').value.trim() }),
     'history-delete-prompt': () => { S.sheet.deleteConfirm = true; renderSheet(); },
-    'history-delete-confirm': () => send('history.delete', { sessionId: S.history.session_id, confirm: true }),
+    'history-delete-confirm': deleteHistory,
     'history-quote': (el) => {
       const u = S.history.utterances.find((x) => x.id === el.dataset.id);
-      if (u) historySearch({ query: '', engine: 'archive', items: [{ ...u, prob: 1, started_at: S.history.started_at }] });
+      if (u) historySearch({ query: '', engine: 'archive', items: [{ ...u, session_id: S.history.session_id, prob: 1, started_at: S.history.started_at }] });
     },
     'history-speaker': (el) => {
       const u = S.history.utterances.find((x) => x.id === el.dataset.id);
@@ -2149,9 +2516,36 @@
       else send('clip.play', { key, sessionId: r.sessionId, startMs: u.start_ms, endMs: u.end_ms });
     },
     'review-finish': () => openMeeting(S.review.sessionId),
-    'tasks-scope': (el) => { S.tasks.mine = el.dataset.value === 'mine'; openTasks(); render(); },
+    'items-finish': () => { closeSheet(); render(); },
+    'item-open': (el) => { if (S.history) startItemReview(S.history, el.dataset.id); },
+    'item-owner': (el) => { const { r, it } = itemCurrent(); if (!it) return; if (r.editing) r.draft.owner = el.dataset.name; else r.owner[it.id] = el.dataset.name; renderSheet(); },
+    'item-confirm': () => { const { r, it } = itemCurrent(); if (!it) return; if (it.kind === 'task' && !r.owner[it.id]) return toast('待办需要先选负责人', true); itemSend('confirm', it.kind === 'task' ? { owner: r.owner[it.id] } : {}); },
+    'item-reject': () => itemSend('reject'),
+    'item-reopen': () => itemSend('reopen'),
+    'item-retry': () => { const r = S.itemReview; if (r?.pending?.status === 'failed') { const p = r.pending.payload; r.pending = { ...r.pending, status: 'saving', error: null }; renderSheet(); send('items.review', p); } },
+    'item-edit': () => { const { r, it } = itemCurrent(); if (!it) return; const v = itemView(it); r.editing = true; r.draft = { kind: v.kind, title: v.title, due: v.due || '', owner: v.owner || r.owner[it.id] || '' }; renderSheet(); },
+    'item-edit-cancel': () => { const r = S.itemReview; r.editing = false; r.draft = null; renderSheet(); },
+    'item-save': () => { const r = S.itemReview, d = r.draft; d.title = ($('item-title')?.value || '').trim(); d.due = ($('item-due')?.value || '').trim();
+      if (d.title.length < 2) return toast('请用一句话写清这件事', true); if (d.kind === 'task' && !d.owner) return toast('待办需要先选负责人', true);
+      itemSend('confirm', { kind: d.kind, title: d.title, due: d.due, ...(d.kind === 'task' ? { owner: d.owner } : {}) }); },
+    'item-prev': () => itemMove(-1),
+    'item-next': () => itemMove(1),
+    'item-play': (el) => { const { r } = itemCurrent(), e = (itemCurrent().it?.evidence || []).find((x) => x.id === el.dataset.id); if (!e) return; const key = `it-${e.id}`;
+      if (S.playingKey === key) send('clip.stop'); else send('clip.play', { key, sessionId: r.sessionId, startMs: e.start_ms, endMs: e.end_ms }); },
+    'tasks-scope': (el) => { S.tasks.scope = el.dataset.value; S.tasks.mine = el.dataset.value === 'mine'; if (S.tasks.scope === 'review') S.tasks.status = 'all'; openTasks(); render(); },
     'tasks-status-cycle': () => { S.tasks.status = { open: 'done', done: 'all', all: 'open' }[S.tasks.status]; openTasks(); render(); },
     'tasks-self': (el) => { clearTaskIdentity(); S.state.selfName = el.dataset.name; send('settings.set', { selfName: el.dataset.name }); openTasks(); render(); },
+    'parsed-filter': (el) => { if (el.dataset.value in PARSED_FILTER) { S.tasks.reviewFilter = el.dataset.value; render(); } },
+    'parsed-expand': (el) => { const id = el.dataset.id; if (S.tasks.expanded.has(id)) S.tasks.expanded.delete(id); else S.tasks.expanded.add(id); render(); },
+    'meeting-work-open': () => { S.tasks.scope = 'review'; S.tasks.mine = false; S.tasks.status = 'all'; S.tasks.reviewFilter = 'all'; S.tasks.query = ''; go('tasks'); },
+    'parsed-review-open': (el) => {
+      const item = (S.tasks.parsedItems || []).find(x => x.id === el.dataset.id);
+      if (item?.source_status !== 'current' || !/^https?:\/\//i.test(item.review_url || '')) return;
+      S.pendingReviewReturn = true; S.externalReviewHidden = false;
+      S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = { state: 'loading', meetings: [] };
+      for (const cached of S.tasks.cache.values()) { cached.parsedItems = null; cached.meetingItems = null; cached.parsedStatus = S.tasks.parsedStatus; }
+      send('open.url', { url: item.review_url }); render();
+    },
     'task-open': (el) => { if (el.dataset.url) send('open.url', { url: el.dataset.url }); },
     'self-pick': () => openSheet({ kind: 'selfPick' }),
     'self-set': (el) => { clearTaskIdentity(); S.state.selfName = el.dataset.name; send('settings.set', { selfName: el.dataset.name }); closeSheet(); enter(); render(); },
@@ -2187,6 +2581,14 @@
       toggleClip(`ev-${S.draft.data.draftId}`, { startMs: ev.startMs, endMs: ev.endMs });
     },
     confirm: confirmDraft,
+    'draft-source-reopen': () => {
+      if (S.draft?.status !== 'failed' || S.draft.sourceBlocked || !S.draft.sourceInvalidated && S.draft.errorCode !== 'SOURCE_CHANGED') return;
+      const sid = S.draft.sourceSessionId;
+      S.draft = null; closeSheet();
+      if (sid && !S.deletedSessions.has(sid) && sid !== S.state.sessionId) openMeeting(sid);
+      else go(sid === S.state.sessionId && S.records.size ? 'live' : 'sessions');
+      toast('请重新选择当前有效原话后起草');
+    },
     'query-action': () => {
       S.draft.status = 'sending'; renderSheet();
       send('action.status', { draftId: S.draft.data.draftId });
@@ -2203,6 +2605,7 @@
     'vp-delete-prompt': (el) => { S.voiceprintDelete = el.dataset.name; renderSheet(); },
     'vp-delete-confirm': () => { send('voiceprint.delete', { name: S.voiceprintDelete, confirm: true }); S.voiceprintDelete = null; },
     'apply-settings': applySettings,
+    'archive-retry': () => { if (!S.state.capturing && S.state.asr !== 'finishing') send('archive.retry', { requestId: `archive-${++S.historySerial}` }); },
     'pick-audio': () => send('testAudio.pick'),
     'reset-audio': () => send('testAudio.reset'),
   };
@@ -2218,6 +2621,10 @@
   $('sheet').addEventListener('change', (e) => {
     if (e.target.id === 'vp-name') { S.voiceprintName = e.target.value; renderSheet(); }
     if (e.target.id === 'f-who') editDraftField('who', e.target.value);
+    if (e.target.id === 'item-merge' && e.target.value) itemSend('merge', { into: e.target.value });
+    if (e.target.id === 'item-kind' && S.itemReview?.draft) {
+      const d = S.itemReview.draft; d.title = $('item-title')?.value ?? d.title; d.due = $('item-due')?.value ?? d.due; d.kind = e.target.value; renderSheet();
+    }
   });
   $('sheet').addEventListener('input', (e) => {
     const field = { 'f-who': 'who', 'f-what': 'what', 'f-when': 'whenIso', 'f-constraint': 'constraint' }[e.target.id];
@@ -2253,10 +2660,18 @@
     if (card) ACTIONS['line-speaker'](card);
   });
   $('root').addEventListener('input', (e) => {
+    if (e.target.id === 'home-ask') S.homeQuery = e.target.value;
     if (e.target.id === 'sessions-search') { S.sessionsQuery = e.target.value; const pos = e.target.selectionStart; render(); const i = $('sessions-search'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }
     if (e.target.id === 'tasks-search') { S.tasks.query = e.target.value; const pos = e.target.selectionStart; render(); const i = $('tasks-search'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }
     if (e.target.id === 'meeting-search') { S.transcriptFilter.query = e.target.value; const pos = e.target.selectionStart; render(); const i = $('meeting-search'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }
   });
+
+  window.OopsResume = () => resumeReviewReturn(true);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && S.pendingReviewReturn) S.externalReviewHidden = true;
+    else resumeReviewReturn();
+  });
+  window.addEventListener('focus', () => resumeReviewReturn());
   $('root').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.isComposing) return;
     if (e.target.id === 'live-ask') { e.preventDefault(); askSubmit(e.target.value.trim(), false); }

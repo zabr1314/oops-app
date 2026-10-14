@@ -19,9 +19,11 @@ from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
 
+import minutes_items
+import minutes_quality
 import minutes_vote
 import question_watch
-from meeting_features import timestamp
+from meeting_features import timestamp, read_json
 
 LEDGER_NAME = "Oops 会议台账"
 LEDGER_TABLES = {
@@ -328,10 +330,11 @@ MINUTES_PROMPT = (
     "substantive：布尔值，整场会有没有值得记录的实质内容；\n"
     "theme：这场会的主题，一个短语，不超过 20 字（如「录音豆 App 的 MVP 范围」），没有实质内容时为空字符串；\n"
     "overview：一两句话说明这场会主要在解决什么、结果如何，没有实质内容时为空字符串；\n"
-    "decisions：[{text, ids}]，只收已经明确拍板的决定，讨论中、建议、“先试试”的不算；\n"
-    "actions：[{owner, task, due, priority, ids}]，只收会后还要完成的具体事情；会议进行中当场就做完的操作（开远程、传文件、给验证码、试一下效果等）不算；owner 是负责人姓名，不明确就留空；task 以动词开头；due 是期限原话（如“周五前”），没有就留空；"
+    "decisions：[{text, ids}]，只收已经明确拍板的决定，讨论中、建议、“先试试”的不算；会上有人明确反对、仍在争论或只是个人倾向的也不算，写进 undecided；\n"
+    "actions：[{owner, task, due, priority, ids}]，只收会后还要完成的具体事情；举例、假设、一般沟通原则不算任务；条件句只有明确实际认领才算。原话数字或单位冲突（如“一百／一版”）写进 undecided，不能猜测或擅自纠正；会议进行中当场就做完的操作（开远程、传文件、给验证码、试一下效果等）不算；owner 只在原话里本人明确认领（「我来」「我去问」）或被点名时才填团队成员姓名，否则留空，不要按说话人或分工去猜；task 以动词开头；due 是期限原话（如“周五前”），没有就留空；"
     "priority：main = 直接推进会议主题的主线工作，other = 顺带的事务（申请账号、订酒店、准备材料等）；\n"
     "topics：[{topic, points, ids}]，最多 4 个议题，每个最多 3 条要点，每条不超过 40 字，只写以后有参考价值的观点、依据或结论；不要重复决定和待办里已有的内容，操作过程和闲谈不算；\n"
+    "undecided：[{topic, views, ids}]，最多 4 条：讨论过但有分歧或没有结论、需要之后拍板的问题；topic 写成一个问题，views 用一句话概括各方观点；同一话题不要既写成决定又写成待定；\n"
     "open_questions：[{question, ids}]，最多 3 条：会上提出、没人答出来、需要查资料或事实才能回答的问题，写成可以直接搜索的一句话；闲聊、反问、已回答的不要；\n"
     "follow_ups：[{title, start, minutes, attendees, ids}]，只收会上约定了具体时间的再次开会或碰头；start 格式 YYYY-MM-DDTHH:MM，按会议时区和会议日期换算；\n"
     "一场会通常只有 0–3 个决定、0–5 个待办（主线通常 1–3 条），宁少勿多。每一条都必须在 ids 里给出支撑它的原话编号。没有的项给空数组。"
@@ -487,7 +490,7 @@ class FeishuActions:
         data = self.backend.people.data or {}
         return list(dict.fromkeys([n for n in self.people] + ([data["self"]["name"]] if data.get("self") else [])))
 
-    MINUTES_VERSION = 4  # 3: voted over minutes_vote.RUNS runs; 4: theme, main/other tasks, no automatic tags as hints
+    MINUTES_VERSION = 5  # 3: voted; 4: theme, main/other tasks, no automatic tags; 5: undecided, owners only when claimed
 
     @classmethod
     def minutes_fingerprint(cls, row):
@@ -507,7 +510,11 @@ class FeishuActions:
         analysis = self.state.get("meetings", sid, "analysis")
         if not analysis:
             return None
-        return {"tasks": {i for a in analysis.get("actions", []) for i in a.get("ids", [])},
+        # Meetings.load calls this callback; read raw source without recursion.
+        analysis = minutes_quality.project(analysis, read_json(self.backend.meetings.path(sid)))
+        invalidated = bool(self.state.get("meetings", sid, "analysis_invalidated"))
+        return {"items": minutes_items.build(analysis), "invalidated": invalidated,
+                "tasks": {i for a in analysis.get("actions", []) for i in a.get("ids", [])},
                 "decisions": {i for d in analysis.get("decisions", []) for i in d.get("ids", [])},
                 "theme": (analysis.get("theme") or None) if not self.state.get("meetings", sid, "analysis_invalidated") else None}
 
@@ -540,7 +547,7 @@ class FeishuActions:
             return row, {}
         if not analysis or not self.minutes_current(row):
             raise MinutesSourceChanged("纪要依据已变化，请先核对当前会议；旧纪要不能继续用于此操作")
-        return row, analysis
+        return row, minutes_quality.project(analysis, row)
 
     def analyse(self, row):
         """Minutes written minutes_vote.RUNS times independently; only what most runs agree on is kept (minutes_vote)."""
@@ -558,13 +565,13 @@ class FeishuActions:
             raise errors[0] if errors else RuntimeError("纪要没有生成")
         if errors:
             self.log(f"minutes {row['session_id'][:8]}: {len(errors)} of {minutes_vote.RUNS} runs failed, voting on {len(runs)}")
-        return dict(minutes_vote.vote(runs), version=self.MINUTES_VERSION)
+        return minutes_quality.project(dict(minutes_vote.vote(runs), version=self.MINUTES_VERSION), row)
 
     def analyse_once(self, row):
         """The model's minutes, kept only where each item points at sentences that exist."""
         resolver = self.backend.resolver
         result = dict(version=self.MINUTES_VERSION, substantive=False, theme="", overview="", decisions=[], actions=[], topics=[],
-                      open_questions=[], follow_ups=[])
+                      undecided=[], open_questions=[], follow_ups=[])
         if not resolver or len(row["utterances"]) < 5:
             return result
         zone = ZoneInfo(row.get("time_zone") or "Asia/Shanghai")
@@ -598,6 +605,9 @@ class FeishuActions:
             points = [clean(x, 60) for x in (t.get("points") or [])[:3] if clean(x, 60)] if isinstance(t, dict) else []
             if backed(t) and clean(t.get("topic"), 30) and points:
                 result["topics"].append(dict(topic=clean(t["topic"], 30), points=points))
+        for u in (answer.get("undecided") or [])[:4]:
+            if isinstance(u, dict) and backed(u) and clean(u.get("topic"), 120):
+                result["undecided"].append(dict(topic=clean(u["topic"], 120), views=clean(u.get("views"), 200), ids=backed(u)))
         for q in (answer.get("open_questions") or [])[:3]:
             if backed(q) and clean(q.get("question"), 200):
                 result["open_questions"].append(dict(question=clean(q["question"], 200), quote=ids[backed(q)[0]]["text"][:200],
@@ -614,11 +624,12 @@ class FeishuActions:
                                              attendees=[a for a in (f.get("attendees") or []) if a in team],
                                              quote=ids[backed(f)[0]]["text"][:200]))
         result["decisions"], result["actions"] = result["decisions"][:8], result["actions"][:12]
-        useful = result["decisions"] or result["actions"] or result["topics"] or result["open_questions"] or result["follow_ups"]
+        useful = (result["decisions"] or result["actions"] or result["topics"] or result["undecided"] or result["open_questions"]
+                  or result["follow_ups"])
         result["substantive"] = bool(useful) and answer.get("substantive") is not False
         result["overview"] = clean(answer.get("overview"), 150) if result["substantive"] else ""
         result["theme"] = clean(answer.get("theme"), 30) if result["substantive"] else ""
-        return result
+        return minutes_quality.project(result, row)
 
     def minutes_view(self, row, now=None):
         """The minutes as the app sees them: what the bot wrote, or why there is none yet. Never asks the model."""
@@ -635,12 +646,16 @@ class FeishuActions:
                 return dict(status="unavailable", reason="source_changed",
                             message="说话人、负责人或核对结论已变化。旧纪要仅保留为历史，当前未重新生成；请使用已核对的会议要点继续处理。",
                             historical_doc_url=self.state.get("meetings", sid, "doc_url"))
+            analysis = minutes_quality.project(analysis, row)
             ids = {u["id"]: u for u in row["utterances"]}
-            cited = [i for item in analysis.get("decisions", []) + analysis.get("actions", []) for i in item.get("ids", [])]
+            cited = [i for item in analysis.get("decisions", []) + analysis.get("actions", []) + analysis.get("undecided", [])
+                     for i in item.get("ids", [])]
             cited += [q["id"] for q in analysis.get("open_questions", []) if q.get("id")]
             sources = {i: dict(text=ids[i]["text"], start_ms=ids[i]["start_ms"], end_ms=ids[i]["end_ms"], speaker=self.speaker(ids[i]))
                        for i in dict.fromkeys(cited) if i in ids}  # a sentence deleted since is left out, not invented
-            return dict(status="ready", minutes=analysis, sources=sources, doc_url=self.state.get("meetings", sid, "doc_url"))
+            return dict(status="ready", minutes=analysis, sources=sources, doc_url=self.state.get("meetings", sid, "doc_url"),
+                        asr_closure=row.get('asr_closure'),
+                        warning='转写结束未确认，结果需结合原声核对' if row.get('asr_closure') in ('incomplete', 'cancelled') else None)
         ended, _ = effective_end(row, now or now_utc())
         if ended is None and not row.get("last_sync_at"):
             return dict(status="unavailable", reason="no_end")  # older records: no end and no sync time, so no end is ever inferred
@@ -654,7 +669,7 @@ class FeishuActions:
 
     @staticmethod
     def worth_sending(analysis):
-        return analysis.get("substantive") and any(analysis.get(k) for k in ("decisions", "actions", "topics", "open_questions", "follow_ups"))
+        return analysis.get("substantive") and any(analysis.get(k) for k in ("decisions", "actions", "topics", "undecided", "open_questions", "follow_ups"))
 
     def header(self, row):
         zone = ZoneInfo(row.get("time_zone") or "Asia/Shanghai")
@@ -684,6 +699,8 @@ class FeishuActions:
             parts.append("## 讨论要点")
             for t in analysis["topics"]:
                 parts += [f"**{t['topic']}**", *[f"- {x}" for x in t["points"]], ""]
+        if analysis.get("undecided"):
+            parts += ["## 还没定的事", *[f"- {u['topic']}" + (f"（{u['views']}）" if u.get("views") else "") for u in analysis["undecided"]], ""]
         if analysis["open_questions"]:
             parts += ["## 待查的问题", *[f"- {q['question']}" for q in analysis["open_questions"]], ""]
         found = self.research_found(row["session_id"])
@@ -754,6 +771,7 @@ class FeishuActions:
             self.log(f"meeting {sid[:8]} minutes「{title}」 {int(time.monotonic() - started)}s: decisions={len(analysis['decisions'])} "
                      f"actions={len(analysis['actions'])} topics={len(analysis['topics'])} questions={len(analysis['open_questions'])} "
                      f"follow_ups={len(analysis['follow_ups'])}")
+        analysis = minutes_quality.project(analysis, row)
         if not self.worth_sending(analysis):
             self.state.put(True, "meetings", sid, "done")
             self.log(f"meeting {sid[:8]}: nothing worth sending")
@@ -787,7 +805,7 @@ class FeishuActions:
             if row is None:
                 row = self.titled(self.backend.meetings.load(sid))
                 doc_url, analysis = self.state.get("meetings", sid, "doc_url"), self.state.get("meetings", sid, "analysis")
-            self.ledger(row, doc_url, analysis)
+            self.ledger(row, doc_url, minutes_quality.project(analysis, row))
             self.state.put(True, "meetings", sid, "ledger")
             self.state.put(analysis.get("version"), "meetings", sid, "ledger_version")
             self.state.put(False, "meetings", sid, "ledger_pending")

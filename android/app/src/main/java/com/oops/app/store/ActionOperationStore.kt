@@ -30,6 +30,7 @@ class ActionOperationStore(private val dir: File) {
                     .put("url", operation.result.taskUrl ?: JSONObject.NULL))
                 .put("message", operation.result.message ?: JSONObject.NULL)
                 .put("source_invalidated", operation.result.sourceInvalidated).put("source_blocked", operation.result.sourceBlocked)
+                .put("error_code", operation.result.errorCode ?: JSONObject.NULL)
                 .put("read_back_confirmed", operation.result.readBackConfirmed))
         val target = File(dir, "${r.opId}.json")
         val temp = File(dir, "${r.opId}.tmp")
@@ -56,7 +57,8 @@ class ActionOperationStore(private val dir: File) {
                     if (d.isNull("owner_confidence")) null else d.optDouble("owner_confidence").takeIf { it.isFinite() && it in 0.0..1.0 },
                     d.optString("tier", "C"), d.optString("reason", "负责人待确认"),
                     ApiJson.readSpeakerCandidates(d.optJSONArray("owner_candidates")), j.optLong("model_revision", 0),
-                    d.optString("review_status", "confirmed"), d.optString("owner_selection_source", "user"))
+                    d.optString("review_status", "confirmed"), d.optString("owner_selection_source", "user"),
+                    sourceReceipt = r.nullable("source_receipt"))
                 val mock = j.getBoolean("mock")
                 val result = ApiJson.actionResult(j.getJSONObject("result")).copy(
                     mock = mock, readBackConfirmed = j.getJSONObject("result").optBoolean("read_back_confirmed"))
