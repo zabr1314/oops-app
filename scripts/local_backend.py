@@ -1227,6 +1227,11 @@ class Backend:
         # With minutes, post-meeting review covers the sentences they rest on, not every line the live tagging flagged.
         self.meetings.cited = self.feishu.cited_sentences if self.feishu else None
         self.meetings.minutes_current = self.feishu.minutes_current if self.feishu else None
+        if self.feishu:
+            from asr_review import AsrReview
+            self.feishu.asr_review = AsrReview.from_env(self.recordings, state, log)
+            if self.feishu.asr_review:
+                log(f"会后逐句复核：已开启（{self.feishu.asr_review.client.model}）")
         self.speakers = Speakers(args.speaker_accept, args.speaker_margin, os.path.join(state, "voiceprints.json"))
         self.speaker_preview, self.preview_error = None, None
         if getattr(args, 'speaker_preview', False) and self.speakers.ready:
@@ -2413,6 +2418,7 @@ class Handler(BaseHTTPRequestHandler):
                          "notices": True, "meetings": True, "recordings": True, "archive_policy_version": 1, "action_source_binding_version": 1,
                          "item_quality_version": 1, "asr_closure_version": 1, "content_curation_version": 1,
                          "feishu_bot": getattr(self.backend, "feishu", None) is not None,
+                         "asr_review": bool(getattr(getattr(self.backend, "feishu", None), "asr_review", None)),
                          "mac_agent_online": bool(getattr(self.backend, "feishu", None) and self.backend.feishu.jobs.online())}
                 summary = "health"
             elif method == "GET" and self.path == "/v1/voiceprints":

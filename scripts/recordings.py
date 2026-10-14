@@ -24,6 +24,7 @@ CLIP_LIMIT_MS, CLIP_PAD_MS = 30_000, 300
 BYTES_PER_MS = 32  # 16 kHz mono s16le; byte 0 of audio.pcm is session time 0
 SESSION = re.compile(r"[A-Za-z0-9-]{8,80}")
 TRANSCRIPT_FILES = {'finals.jsonl', 'asr.jsonl', 'timing.jsonl', 'meta.json'}
+DERIVED_TRANSCRIPT_FILES = {'asr_review.json'}  # server-side second reading (asr_review); expires with the transcript
 
 
 class RecordingError(ValueError):
@@ -81,7 +82,7 @@ class Recordings:
         policy = manifest.get('storage_policy')
         if not policy: return 0
         removed, changed = 0, False
-        for asset, names in (('audio', {'audio.pcm'}), ('transcript', TRANSCRIPT_FILES)):
+        for asset, names in (('audio', {'audio.pcm'}), ('transcript', TRANSCRIPT_FILES | DERIVED_TRANSCRIPT_FILES)):
             if expired(policy, asset, now):
                 for name in names:
                     target = os.path.join(folder, name)
