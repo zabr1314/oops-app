@@ -372,10 +372,18 @@ function ImportMaterial({ session: s }: { session: Session }) {
   return <div className="stack"><p className="meta">添加到「{s.title}」</p><Field label="资料名称" value={draft.title} onChange={title => setDraft(current => ({ ...current, title }))} /><Field label="资料文字" value={draft.body} onChange={body => setDraft(current => ({ ...current, body }))} multiline /><SelectField label="关联原话（可选）" value={source ? label(source) : '手工添加，无原话出处'} options={['手工添加，无原话出处', ...s.transcript.map(label)]} onChange={value => setDraft(current => ({ ...current, sourceId: s.transcript.find(t => label(t) === value)?.id || '' }))} /><input type="file" ref={fileRef} hidden accept=".txt,.md,.pdf,.xlsx,.xls,audio/*" onChange={e => void read(e.target.files?.[0])} /><Button tone="secondary" icon="paperclip" onClick={() => fileRef.current?.click()}>选择本地资料</Button>{file && <Card><strong>{file.name}</strong><p className="meta">{file.size} · 文本以外仅保留文件信息</p></Card>}{error && <p className="error-text">{error}</p>}<Button onClick={save}>加到本次资料</Button><Button tone="quiet" onClick={() => navigate({ view: 'session-detail', id: s.id, mode: '资料' })}>取消</Button></div>;
 }
 
+// 设计语言 TranscriptLine: six speaker colours, "我" is always speaker-1; the colour always comes with the name.
+function speakerTone(name: string) {
+  if (!name || /待确认|未知|未识别|匿名/.test(name)) return '';
+  if (name === '我') return 'spk-1';
+  let h = 0;
+  for (const c of name) h = (h * 31 + (c.codePointAt(0) || 0)) >>> 0;
+  return `spk-${h % 5 + 2}`;
+}
 function TranscriptCard({ item, active = false, onClick, label }: { item: Transcript; active?: boolean; onClick?: () => void; label?: string }) {
   // A sentence that was just heard slides in once; opening the page later shows it still.
   const [fresh] = useState(() => !!item.receivedAt && Date.now() - item.receivedAt < 1500);
-  return <Card className={`session-transcript ${active ? 'highlighted' : ''}${fresh ? ' is-new' : ''}`} onClick={onClick}><div className="session-speaker"><Avatar name={item.speaker} /><strong>{item.speaker}</strong><span>{label || item.time || '时间未提供'}</span>{item.private && <Badge tone="gray">私有</Badge>}</div><p>{item.text}</p></Card>;
+  return <Card className={`session-transcript ${active ? 'highlighted' : ''}${fresh ? ' is-new' : ''}`} onClick={onClick}><div className="session-speaker"><Avatar name={item.speaker} tone={speakerTone(item.speaker)} /><strong>{item.speaker}</strong><span>{label || item.time || '时间未提供'}</span>{item.private && <Badge tone="gray">私有</Badge>}</div><p>{item.text}</p></Card>;
 }
 
 type SessionReaderState = { tab: string; query: string; speaker: string; view: string; note: string };
@@ -500,7 +508,7 @@ function SessionExperience({ session: s }: { session: Session }) {
     <SessionStorageStatus session={s} allowSwitch={active && !shared} />
     <div className="session-stage"><Badge tone={active ? 'purple' : flag(data, `review-${s.id}`) ? 'amber' : 'gray'}>{active ? s.status : s.status === '待开始' ? '待开始' : flag(data, `review-${s.id}`) ? '来源待复核' : needsSessionReview(data, s) && !shared ? '已保存 · 待核对' : '已保存'}</Badge>{shared && <span><Icon name="users" size={14} />共同视角</span>}</div>
     {tab === '现场' && <>
-      <div className="session-recording session-recording-compact"><span className={s.status === '进行中' ? 'recording-dot' : 'recording-dot paused'} /><div><strong>{s.status === '进行中' ? '示例记录中' : '记录已暂停'}</strong><small>预设文字 · 麦克风未开启</small></div><button onClick={() => unknown.length && !shared ? open('session-identity') : switchTab('原文')}><Icon name="user-circle" size={16} />{unknown.length ? `${unknown.length}待核对` : `${new Set(currentTranscript.map(t => t.speaker)).size}个发言标签`}</button></div>
+      <div className="session-recording session-recording-compact"><div><span className={`rec-indicator${s.status === '进行中' ? '' : ' is-paused'}`}><i aria-hidden="true" />{s.status === '进行中' ? '示例记录中' : '记录已暂停'}</span><small>预设文字 · 麦克风未开启</small></div><button onClick={() => unknown.length && !shared ? open('session-identity') : switchTab('原文')}><Icon name="user-circle" size={16} />{unknown.length ? `${unknown.length}待核对` : `${new Set(currentTranscript.map(t => t.speaker)).size}个发言标签`}</button></div>
       <Card className="session-current-topic"><div className="session-topic-eyebrow"><span>当前话题重点</span>{s.kind === '会议' && <button onClick={() => open('session-agenda')}>议程<Icon name="caret-right" size={13} /></button>}</div><h3>{presentation.topic || s.title}</h3>
         {presentation.topicPoints.length > 0 && <ul className="session-topic-points">{presentation.topicPoints.map(point => <li key={point.id}><button className="session-topic-point" onClick={() => navigate(point.route)}><small>{point.label}</small><span>{point.text}</span><strong>查看原话 · {point.sourceTime || '时间未提供'}<Icon name="arrow-up-right" size={11} /></strong></button></li>)}</ul>}
         {s.kind === '会议' && s.agenda.length > 0 && <div className="session-agenda-progress"><span>{previousChapters.length}项已讨论</span><strong>当前 {Math.min(s.agenda.length, previousChapters.length + 1)} / {s.agenda.length}</strong><span>{nextChapter ? `下一项：${nextChapter.topic}` : '最后一项议题'}</span></div>}

@@ -32,13 +32,19 @@ async function renderSettings(space = '我的空间') {
   return { data, before, rows, navigations, markup };
 }
 
-test('five primary destinations stay stable while the fifth becomes Settings with a bundled gear icon', async () => {
+// 2026-10-13: the user merged the tab bar to four entries around the record button; Settings opens from the home header.
+test('four primary destinations surround the record button and Settings opens from the home header with a bundled gear icon', async () => {
   const declaration = prototype.match(/const tabs=\[[^\n]+;/)?.[0];
   assert.ok(declaration);
   const { tabs } = await load(declaration, ['tabs']);
-  assert.deepEqual(tabs.map(tab => tab.view), ['home', 'sessions', 'tasks', 'memory', 'settings']);
-  assert.deepEqual(tabs.map(tab => tab.title), ['首页', '会话', '任务', '记忆', '设置']);
-  assert.equal(tabs[4].icon, 'gear');
+  assert.deepEqual(tabs.map(tab => tab.view), ['home', 'sessions', 'tasks', 'memory']);
+  assert.deepEqual(tabs.map(tab => tab.title), ['首页', '会话', '任务', '记忆']);
+  const entry = prototype.match(/const settingsEntry=\{[^\n]+;/)?.[0];
+  assert.ok(entry);
+  const { settingsEntry } = await load(entry, ['settingsEntry']);
+  assert.deepEqual({ ...settingsEntry }, { view: 'settings', title: '设置', icon: 'gear' });
+  assert.match(prototype, /tabs\.slice\(0, 2\)\.map\(navTab\)}<span className="app-nav-center"><RecordButton/);
+  assert.match(prototype, /aria-label=\{settingsEntry\.title\} onClick=\{\(\) => navigate\(\{ view: settingsEntry\.view \}\)\}/);
   assert.ok(existsSync(new URL('../public/icons/gear.svg', import.meta.url)));
 });
 

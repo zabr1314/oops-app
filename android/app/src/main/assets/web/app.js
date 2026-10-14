@@ -108,15 +108,27 @@
   };
 
   let toastTimer = null;
+  /** 设计语言 Toast: a small slip (a failed request, missing input, a changed source) brings Pupu's oops; a finished
+      save brings happy. Deleting, clearing, stopping and plain notices stay neutral, without the mascot. */
+  function toastTone(message, bad) {
+    if (bad || /^(先|请|选择)|填写|不能|不允许|无法|失败|未能|已变化|缺失/.test(message)) return 'oops';
+    if (/删除|移除|撤销|撤回|关闭|清除|清空|停止|结束|取消|解除|忽略|需要|重新|待|未/.test(message)) return 'neutral';
+    return /已保存|保存成功|已确认|已核对|已创建|已建|已添加|已更新|已记录|已开始|已复制|已恢复|已采纳|已标记|已连接|已配对/.test(message) ? 'success' : 'neutral';
+  }
   function toast(message, bad = false) {
     const t = $('toast');
-    t.textContent = message;
+    const tone = toastTone(message, bad);
+    const mascot = tone !== 'neutral' && window.OopsPupu ? window.OopsPupu.svg(tone === 'oops' ? 'oops' : 'happy', { still: true }).replace('class="pupu', 'class="toast-pupu pupu') : '';
+    t.innerHTML = `${mascot}<span>${esc(message)}</span>`;
+    t.setAttribute('role', tone === 'oops' ? 'alert' : 'status');
     t.classList.toggle('bad', bad);
+    t.classList.toggle('is-oops', tone === 'oops');
+    t.classList.toggle('is-success', tone === 'success');
     t.hidden = true;
     void t.offsetWidth; // a new message pops in again even if the last one is still showing
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
   }
 
   function applyInsets(i) {
@@ -347,6 +359,8 @@
     set('home-record-people', homePeopleSummary());
     // Input level from native (0–1, twice a second) drives the meters; flat while nothing is coming in.
     const level = Math.max(0, Math.min(1, Number(s.level) || 0)).toFixed(2), idle = !s.capturing || !s.sourceReady;
+    const navRecord = $('nav-record');
+    if (navRecord && navRecord.style) navRecord.style.setProperty('--level', idle ? '0' : level);
     for (const id of ['home-level', 'rc-level']) {
       const el = $(id);
       if (el) { el.style.setProperty('--level', level); el.classList.toggle('is-idle', idle); }
@@ -520,7 +534,9 @@
 
   // ---- routing ----------------------------------------------------------------------------
 
-  const NAV = [['home', '首页', 'house'], ['sessions', '会话', 'chat-circle'], ['tasks', '任务', 'check-square'], ['memory', '记忆', 'bookmark-simple'], ['me', '设置', 'gear-six']];
+  // Four entries around the record button (设计语言 TabBar, 2 | ● | 2); Settings ("me") opens from the home header (2026-10-13).
+  const NAV = [['home', '首页', 'house'], ['sessions', '会话', 'chat-circle'], ['tasks', '任务', 'check-square'], ['memory', '记忆', 'bookmark-simple']];
+  const SETTINGS_ENTRY = ['me', '设置', 'gear-six'];
   const NAV_OF = { home: 'home', sessions: 'sessions', live: 'sessions', meeting: 'sessions', tasks: 'tasks', memory: 'memory', project: 'memory', me: 'me', settings: 'me', device: 'me' };
 
   function go(name, extra = {}) {
@@ -565,7 +581,7 @@
     if (tabs) $('tabs').innerHTML = tabsHtml(r);
     const html = ({ home: homeHtml, sessions: sessionsHtml, live: liveHtml, meeting: meetingHtml, tasks: tasksHtml,
       memory: memoryHtml, project: projectHtml, me: meHtml, settings: settingsHtml, device: deviceHtml })[r];
-    $('screen').setAttribute('aria-label', NAV.find((n) => n[0] === NAV_OF[r])?.[1] || '');
+    $('screen').setAttribute('aria-label', [...NAV, SETTINGS_ENTRY].find((n) => n[0] === NAV_OF[r])?.[1] || '');
     $('screen').className = `screen-content ${r === 'home' ? 'home-main' : ''}`;
     $('screen').innerHTML = html ? html() : '';
     mountTranscript();
@@ -573,6 +589,27 @@
     renderNav();
     renderRecordingControls();
     renderStatus();
+    slideSegments();
+  }
+
+  /** 设计语言 SegmentedControl: a raised thumb (oops-design.css .segmented::before) slides to the selected view. Pages are
+      redrawn as HTML, so a control that changed selection starts its thumb at the old place and then springs across. */
+  const segmentLast = new Map();
+  function slideSegments() {
+    document.querySelectorAll('.oops-root .segmented').forEach((seg) => {
+      const buttons = [...seg.children].filter((b) => b.tagName === 'BUTTON');
+      const index = buttons.findIndex((b) => b.getAttribute('aria-selected') === 'true');
+      const key = `${seg.parentElement?.id || ''}:${buttons[0]?.dataset.act || ''}:${buttons.length}`;
+      const last = segmentLast.get(key);
+      segmentLast.set(key, index);
+      seg.style.setProperty('--n', String(Math.max(1, buttons.length)));
+      seg.classList.toggle('has-thumb', index >= 0);
+      if (index < 0) return;
+      if (last === undefined || last < 0 || last === index) { seg.style.setProperty('--i', String(index)); return; }
+      seg.style.setProperty('--i', String(last));
+      void getComputedStyle(seg, '::before').transform; // start from the old place, then move
+      (window.requestAnimationFrame || setTimeout)(() => seg.style.setProperty('--i', String(index)));
+    });
   }
 
   function mountTranscript() {
@@ -590,10 +627,11 @@
     if (r === 'home') {
       const unread = [...S.notices.values()].some((n) => !n.dismissed);
       return `<img class="wordmark" alt="Oops" src="brand/wordmark.png"><div class="header-tools">
-        <button class="icon-button notification-button" data-act="notices-open" aria-label="提醒">${icon('bell', 25)}${unread ? '<i></i>' : ''}</button></div>`;
+        <button class="icon-button notification-button" data-act="notices-open" aria-label="提醒">${icon('bell', 25)}${unread ? '<i></i>' : ''}</button>
+        <button class="icon-button" aria-label="${SETTINGS_ENTRY[1]}" data-act="go" data-route="${SETTINGS_ENTRY[0]}">${icon(SETTINGS_ENTRY[2], 24)}</button></div>`;
     }
     const title = { sessions: '会话', live: '会话', meeting: '会话', tasks: '任务', memory: '记忆', project: '项目', me: '设置', settings: '收音与服务', device: '设备与自动聆听' }[r];
-    const left = ['live', 'meeting', 'project', 'settings', 'device'].includes(r) ? button('back', '返回上一页', 'caret-left', 23)
+    const left = ['live', 'meeting', 'project', 'me', 'settings', 'device'].includes(r) ? button('back', '返回上一页', 'caret-left', 23)
       : button('ask-open', '搜索全部内容', 'magnifying-glass', 23);
     const right = r === 'sessions' || r === 'live' || r === 'meeting' ? (S.state.capturing ? spacer : button('capture-start', '新建记录', 'plus'))
       : ['memory', 'me', 'project', 'settings', 'device'].includes(r) ? button('go', '回到首页', 'house').replace('data-act="go"', 'data-act="go" data-route="home"') : spacer;
@@ -606,9 +644,19 @@
     return `<div class="segmented" role="tablist">${items.map(([k, label]) => `<button role="tab" aria-selected="${k === current}" data-act="tab" data-tab="${k}">${label}</button>`).join('')}</div>`;
   }
 
+  /** 设计语言 RecordButton, raised in the middle of the tab bar: it starts a record, and while one runs it ends it after a
+      one-step confirmation (a daily capture clears its temporary full text when it stops). The halo follows the real
+      input level that renderStatus() writes into --level. */
+  function navRecordHtml() {
+    const on = !!S.state.capturing;
+    return `<span class="app-nav-center"><button type="button" class="record-button ${on ? 'is-recording' : 'is-idle'}" id="nav-record" data-act="record-button" aria-label="${on ? '结束记录' : '开始记录'}" style="--size:64px">`
+      + '<span class="record-button-ring outer" aria-hidden="true"></span><span class="record-button-ring" aria-hidden="true"></span>'
+      + `<span class="record-button-core" aria-hidden="true">${on ? '<span class="record-button-stop"></span>' : icon('microphone-bold', 26)}</span></button></span>`;
+  }
   function renderNav() {
     const current = NAV_OF[S.route.name];
-    const html = NAV.map(([k, label, ic]) => `<button aria-label="${label}" class="${k === current ? 'selected' : ''}" ${k === current ? 'aria-current="page"' : ''} data-act="go" data-route="${k}">${icon(ic, 25)}<span>${label}</span>${k === 'tasks' && S.openTaskCount ? `<b>${S.openTaskCount}</b>` : ''}</button>`).join('');
+    const tabs = NAV.map(([k, label, ic]) => `<button aria-label="${label}" class="${k === current ? 'selected' : ''}" ${k === current ? 'aria-current="page"' : ''} data-act="go" data-route="${k}">${icon(k === current ? `${ic}-duotone` : ic, 24)}<span>${label}</span>${k === 'tasks' && S.openTaskCount ? `<b>${S.openTaskCount}</b>` : ''}</button>`);
+    const html = tabs.slice(0, 2).join('') + navRecordHtml() + tabs.slice(2).join('');
     // Only redraw when something changed, so the selected tab's pop (oops-design.css) is not restarted by data arriving.
     if (S.navHtml !== html) { $('nav').innerHTML = html; S.navHtml = html; }
   }
@@ -625,23 +673,22 @@
     const expanded = onsite || !!S.rcExpanded;
     rc.classList.toggle('is-compact', !expanded);
     $('root').classList.toggle('rc-compact', !expanded);
-    const status = `<span><span id="rc-status">${S.state.sourceReady ? '收音中' : '等待收音'}</span> · <time id="rc-time">${mmss(S.state.sessionMs)}</time>${levelMeter('rc-level')}</span>`;
+    const status = `<span class="rec-indicator ${S.state.sourceReady ? '' : 'is-paused'}"><i aria-hidden="true"></i><span id="rc-status">${S.state.sourceReady ? '收音中' : '等待收音'}</span><time id="rc-time">${mmss(S.state.sessionMs)}</time>${levelMeter('rc-level')}</span>`;
     const toggle = onsite ? '' : `<button class="rc-expand" data-act="rc-expand" aria-expanded="${expanded}" aria-label="${expanded ? '收起记录控制' : '展开记录控制'}">${icon(expanded ? 'caret-down' : 'caret-up', 16)}</button>`;
     if (!expanded) {
-      rc.innerHTML = `<div class="rc-heading"><span class="rc-dot ${S.state.sourceReady ? '' : 'paused'}"></span>
+      rc.innerHTML = `<div class="rc-heading">
           <button class="rc-session" data-act="go" data-route="live" aria-label="回到记录现场"><strong>${esc(liveTitle())}</strong>${status}</button>
           <div class="rc-compact-actions">
-            <button id="rc-recall" data-act="recall" aria-label="找回刚才">${icon('clock-counter-clockwise', 19)}</button>
-            <button class="rc-end" data-act="capture-stop" aria-label="结束当前记录">${icon('stop', 18)}</button></div>${toggle}</div>`;
+            <button id="rc-recall" data-act="recall" aria-label="找回刚才">${icon('clock-counter-clockwise', 19)}</button></div>${toggle}</div>`;
       return;
     }
-    rc.innerHTML = `<div class="rc-heading"><span class="rc-dot ${S.state.sourceReady ? '' : 'paused'}"></span>
+    rc.innerHTML = `<div class="rc-heading">
         <div class="rc-session"><strong>${esc(liveTitle())}</strong>${status}</div>
         ${onsite ? '' : `<button class="rc-scene" data-act="go" data-route="live">现场${icon('caret-right', 13)}</button>`}${toggle}</div>
       <div class="rc-actions">
-        <button id="rc-recall" data-act="recall">${icon('clock-counter-clockwise', 19)}<span>找回刚才</span></button>
-        <button data-act="saved-list">${icon('bookmark-simple', 19)}<span id="rc-saved">已保存 ${S.state.savedCount ?? 0}</span></button>
-        <button class="rc-end" data-act="capture-stop">${icon('stop', 19)}<span>结束</span></button></div>`;
+        <button id="rc-recall" data-act="recall"><span class="rc-action-icon">${icon('clock-counter-clockwise', 20)}</span><span>找回刚才</span></button>
+        <button class="rc-saved" data-act="saved-list"><span class="rc-action-icon">${icon('bookmark-simple', 20)}</span><span id="rc-saved">已保存 ${S.state.savedCount ?? 0}</span></button>
+        <button class="rc-end" data-act="capture-stop"><span class="rc-action-icon">${icon('stop', 20)}</span><span>结束</span></button></div>`;
   }
 
   const recordingModeLabel = () => S.state.recordingMode === 'meeting' ? '正式会议' : '日常临时聆听';
@@ -687,7 +734,7 @@
       <section class="native-record-hero ${S.state.capturing ? 'is-active' : ''}" aria-label="记录状态">
         <div class="native-record-heading"><div><small>${S.state.capturing ? `本场记录${liveStartedAt() ? ` · ${shortDate(liveStartedAt().toISOString())} 开始` : ''}` : '从这一刻开始'}</small>
           <h1>${S.state.capturing ? esc(S.state.agenda?.goal || recordingModeLabel()) : '重要的话，<br>交给 Oops 记住。'}</h1></div>${heroMascot()}</div>
-        ${S.state.capturing ? `<div class="native-record-status"><span class="recording-dot ${S.state.sourceReady ? '' : 'idle'}"></span><strong id="home-record-status">${S.state.sourceReady ? '正在记录' : '等待收音'}</strong>${levelMeter('home-level')}<time id="home-record-time">${mmss(S.state.sessionMs)}</time></div>
+        ${S.state.capturing ? `<div class="native-record-status"><span class="rec-indicator ${S.state.sourceReady ? '' : 'is-paused'}"><i aria-hidden="true"></i><strong id="home-record-status">${S.state.sourceReady ? '正在记录' : '等待收音'}</strong></span>${levelMeter('home-level')}<time id="home-record-time">${mmss(S.state.sessionMs)}</time></div>
           <p class="meta" id="home-record-people">${homePeopleSummary()}</p>
           <button class="button primary" type="button" data-act="go" data-route="live">${icon('waveform')}<span>回到记录现场</span></button>`
           : `<button class="button primary" type="button" data-act="capture-start">${icon('microphone')}<span>开始记录</span></button>`}
@@ -1341,6 +1388,8 @@
       devicePreferences: devicePreferencesHtml,
       privacy: privacyHtml,
       captureMode: captureModeHtml,
+      stopConfirm: () => frame('结束这次记录？', `<p>${S.state.recordingMode === 'meeting' ? '已收到的原话和标记会保留，结束后可以在会后核对里整理。' : '日常临时聆听结束后，最近 5 分钟的完整原音和临时全文会清除，只留下待你核对的私人候选。'}</p>
+        <button class="button primary" type="button" data-act="capture-stop-confirm"><span>结束记录</span></button><button class="button quiet" type="button" data-act="close"><span>继续记录</span></button>`),
       dailyCandidates: () => frame('私人待核对候选', S.dailyCandidates.length ? S.dailyCandidates.map(x => `<section class="card"><span class="badge">私有 · 未确认</span><p>${esc(x.quote)}</p><p class="meta">${formatDate(x.updated_at)} · 独立短依据，完整原音/全文已不保留</p><button class="button secondary" data-act="daily-confirm-open" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">核对这条内容</button><button class="button quiet" data-act="daily-discard" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">舍弃候选</button></section>`).join('') : '<p>还没有私人候选；不会保存整场全文来填充这里。</p>'),
       dailyConfirm: () => frame('核对并保存私人记忆', `<label class="form-field"><span>要留下的内容</span><textarea id="daily-quote">${esc(S.sheet.item.quote)}</textarea></label><label class="toggle-row"><span>我已核对这条短依据，单独保存为私人记忆</span><input id="daily-confirmed" type="checkbox"></label><p class="meta">不自动创建任务、关联身份或共享。完整原音和全文不会恢复。</p><button class="button primary" data-act="daily-confirm-save">保存私人记忆</button>`),
       selfPick: selfPickHtml,
@@ -1352,6 +1401,7 @@
     const next = $('sheet').querySelector ? $('sheet').querySelector('.sheet-content') : null;
     if (next) next.scrollTop = keep;
     syncPlayButtons();
+    slideSegments();
   }
 
   function retentionHtml() {
@@ -2052,6 +2102,7 @@
     const r = S.route.name;
     if (r === 'project') return go('memory');
     if (['settings', 'device'].includes(r)) return go('me');
+    if (r === 'me') return go('home'); // Settings opens from the home header
     go('sessions');
   }
   function noticeFeedback(id, useful) {
@@ -2135,6 +2186,8 @@
     'device-resume': () => applyDeviceEvent({type:'resume'}),
     'device-reset': () => applyDeviceEvent({type:'reset'}),
     'capture-start': () => openSheet({kind:'captureMode',mode:'daily'}),
+    'record-button': () => S.state.capturing ? openSheet({ kind: 'stopConfirm' }) : ACTIONS['capture-start'](),
+    'capture-stop-confirm': () => { closeSheet(); if (S.state.capturing) ACTIONS['capture-stop'](); },
     'capture-meeting': () => openSheet({kind:'captureMode',mode:'meeting',switching:true}),
     'capture-mode': el => { S.sheet.mode = el.dataset.mode; renderSheet(); },
     'capture-before-recall': () => { closeSheet(); send('recall.trigger'); },

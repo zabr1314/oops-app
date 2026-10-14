@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { useOops } from '../store';
 import { useViewState } from '../viewState';
 import { Avatar, Badge, Button, Card, Check, Chips, Empty, Field, Icon, Notice, Row, SectionTitle, SelectField, Sheet } from '../ui';
@@ -12,7 +12,7 @@ const sampleLabel = (sample: VoiceSample) => `${sample.label} · ${sample.id.sli
 const statusTone = (status: VoiceMatch['status']) => status === '已匹配' || status === '已纠正' ? 'green' : status === '保持匿名' ? 'gray' : 'orange';
 
 function Waveform({ active = false }: { active?: boolean }) {
-  return <div className={'vi-waveform' + (active ? ' active' : '')} aria-label={active ? '声音采集示例进行中' : '声音样本示意'}>{[14, 25, 37, 19, 46, 30, 52, 34, 20, 42, 29, 48, 31, 18, 38, 24, 13].map((height, index) => <span key={index} style={{ height, animationDelay: `${index * .06}s` }} />)}</div>;
+  return <div className={'vi-waveform' + (active ? ' active' : '')} aria-label={active ? '声音采集示例进行中' : '声音样本示意'}>{[14, 25, 37, 19, 46, 30, 52, 34, 20, 42, 29, 48, 31, 18, 38, 24, 13].map((height, index) => <span key={index} style={{ height, animationDelay: `${index * .06}s`, '--t': index / 16 } as CSSProperties} />)}</div>;
 }
 
 function PersonalOnly() {

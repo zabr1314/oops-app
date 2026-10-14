@@ -2,7 +2,11 @@
    Loaded after proto.css and app.css; it changes how things look and move, never what they do.
    Source of truth: the "Oops 设计语言" design system (tokens, components, mascot, motion, voice).
    Rules: one gradient highlight per screen; red only means "recording"; Pupu only at emotional moments;
-   every press answers with a jelly rebound; everything respects prefers-reduced-motion. */
+   every press answers with a jelly rebound; everything respects prefers-reduced-motion.
+   Second pass (2026-10-13): the components follow the design system's own styles (components/bundle.css): TabBar with
+   the RecordButton raised in the middle (two entries each side), RecIndicator, Button, IconButton, Chip, SegmentedControl, Switch, Checkbox, Tag, ListItem, Toast,
+   EmptyState and the waveform. On pages the tab bar's record button is the gradient, so a page's own main action is ink
+   and buttons in cards are secondary; sheets cover the tab bar and keep the gradient for their main action. */
 
 @font-face {
   font-family: "Nunito";
@@ -52,8 +56,10 @@
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
   --font-sans: "Nunito", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
+  --brand-indigo: #24298f; --brand-royal: #3e42da; --on-dusk: #ffffff; --on-dusk-2: #e9e6ff; --scrim: #1211308c;
+  --control-lg: 52px; --control-md: 44px; --control-sm: 32px; --tabbar-h: 64px; --record-lg: 80px; --record-md: 64px;
   --nav-h: 64px;
-  --nav-gap: 12px;
+  --nav-gap: 16px;
 }
 html, body { background: var(--canvas); }
 
@@ -97,24 +103,30 @@ html, body { background: var(--canvas); }
   width: 44px; height: 44px; padding: 0; border-radius: var(--radius-full); color: var(--ink);
   transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast) var(--ease-standard);
 }
-.oops-root .icon-button:active { background: var(--fill); }
-.oops-root .notification-button i { background: var(--danger); border-color: var(--canvas); width: 9px; height: 9px; top: 7px; right: 8px; }
+.oops-root .app-header .icon-button:not([aria-hidden]) { background: var(--surface); box-shadow: var(--shadow-1); }
+.oops-root .notification-button i { background: var(--danger); border: 0; width: 10px; height: 10px; top: 9px; right: 10px; box-shadow: 0 0 0 2px var(--surface); animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1; }
 
 /* ---------- buttons ---------- */
 .oops-root .button {
-  min-height: 48px; padding: 12px 22px; gap: 8px; border: 0; border-radius: var(--radius-full);
+  min-height: var(--control-md); padding: 10px 20px; gap: 8px; border: 0; border-radius: var(--radius-full);
   font-family: var(--font-sans); font-size: 15px !important; font-weight: 800 !important; letter-spacing: .01em;
   transition: transform var(--dur-slow) var(--ease-bounce), box-shadow var(--dur-base) var(--ease-standard),
     background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), opacity var(--dur-fast);
 }
 .oops-root .button.primary { background: var(--gradient-action); color: var(--on-primary); box-shadow: var(--shadow-glow); }
+.oops-root .bottom-sheet .button.primary { min-height: var(--control-lg); font-size: 16px !important; }
+/* On pages the tab bar's record button is the gradient: a page's own main action is ink, buttons in cards are secondary. */
+.oops-root #screen .button.primary, .oops-root .recording-controls .button.primary { background: var(--inverse); color: var(--on-inverse); box-shadow: none; }
+.oops-root #screen .card .button.primary { background: var(--primary-soft); color: var(--primary-text); }
 .oops-root .button.secondary { background: var(--primary-soft); color: var(--primary-text); border: 0; }
-.oops-root .button.quiet { background: transparent; color: var(--ink-2); min-height: 44px; }
+.oops-root .button.quiet { background: transparent; color: var(--primary-text); min-height: var(--control-md); }
+/* Solid danger only confirms inside a sheet; on a page a destructive button is tinted and asks again. */
 .oops-root .button.danger { background: var(--danger); color: var(--on-danger); border: 0; }
+.oops-root #screen .button.danger { background: var(--danger-soft); color: var(--danger); }
 .oops-root .button:disabled { opacity: 1; background: var(--fill); color: var(--ink-disabled); box-shadow: none; }
 .oops-root .button .icon { width: 20px !important; height: 20px !important; }
 .oops-root .action-grid .button { padding: 11px 12px; font-size: 14px !important; }
-.oops-root .quiet-link { color: var(--ink-2) !important; font-weight: 700; font-size: 13px !important; }
+.oops-root .quiet-link { color: var(--primary-text) !important; font-weight: 800; font-size: 13px !important; }
 
 /* ---------- cards, rows, section titles ---------- */
 .oops-root .card {
@@ -124,8 +136,8 @@ html, body { background: var(--canvas); }
 .oops-root .card p { font-size: 14px; line-height: 1.6; }
 .oops-root .card.clickable { transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast); }
 .oops-root .card.clickable:active { background: var(--surface); }
-.oops-root .bottom-sheet .card { box-shadow: none; border: 1.5px solid var(--line); }
-.oops-root .card .card { box-shadow: none; border: 1.5px solid var(--line); }
+.oops-root .bottom-sheet .card { box-shadow: none; border: 0; background: var(--fill); }
+.oops-root .card .card { box-shadow: none; border: 0; background: var(--fill); }
 .oops-root .card > .section-title:first-child { margin-top: 0; }
 .oops-root .card .list-row:last-child { border-bottom: 0; }
 /* Tinted cards: badges sit on white so they still read as badges. */
@@ -133,11 +145,14 @@ html, body { background: var(--canvas); }
 
 /* Spacing stays with proto.css, whose contextual rules (task cards, list groups, home) tune it per place. */
 .oops-root .section-title h2 { font-size: 18px; font-weight: 800; color: var(--ink); }
-.oops-root .text-action { color: var(--ink-3) !important; font-size: 13px !important; font-weight: 700; min-height: 32px; }
+.oops-root .text-action { color: var(--primary-text) !important; font-size: 13px !important; font-weight: 800; min-height: 32px; }
 
 .oops-root .list-row { border-bottom: 1px solid var(--line); gap: 12px; color: var(--ink); }
 :where(.oops-root) .list-row { min-height: 64px; padding: 12px 0; }
-.oops-root .row-icon { width: 40px; height: 40px; border-radius: 12px; background: var(--primary-soft); color: var(--primary-text); }
+.oops-root .row-icon { width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--primary-soft); color: var(--primary-text); }
+/* 设计语言 ListItem: inside a card the dividers start at the text, not at the edge. */
+.oops-root .card .list-row { position: relative; border-bottom: 0; }
+.oops-root .card .list-row + .list-row::before { content: ""; position: absolute; top: 0; right: 0; left: 52px; border-top: 1px solid var(--line); }
 .oops-root .row-copy strong { font-size: 16px; font-weight: 700; color: var(--ink); }
 .oops-root .row-copy small { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
 .oops-root .list-row > .icon:last-child { color: var(--ink-3); }
@@ -145,9 +160,20 @@ html, body { background: var(--canvas); }
 
 /* ---------- badges, chips, segmented ---------- */
 .oops-root .badge {
-  border-radius: var(--radius-xs); padding: 3px 8px; font-size: 12px; line-height: 16px; font-weight: 800; letter-spacing: .01em;
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; box-sizing: border-box;
+  border-radius: var(--radius-xs); font-size: 12px; line-height: 16px; font-weight: 800; letter-spacing: .01em;
   background: var(--primary-soft); color: var(--primary-text);
 }
+/* 设计语言 Tag: status tones always carry an icon as well as colour. */
+.oops-root .badge.green::before, .oops-root .badge.success::before, .oops-root .badge.amber::before, .oops-root .badge.orange::before,
+.oops-root .badge.warning::before, .oops-root .badge.red::before, .oops-root .badge.danger::before {
+  content: ""; flex: none; width: 13px; height: 13px; background: currentColor;
+  -webkit-mask: url(icons/check-circle-bold.svg) center / contain no-repeat; mask: url(icons/check-circle-bold.svg) center / contain no-repeat;
+}
+.oops-root .badge.amber::before, .oops-root .badge.orange::before, .oops-root .badge.warning::before {
+  -webkit-mask-image: url(icons/warning-bold.svg); mask-image: url(icons/warning-bold.svg);
+}
+.oops-root .badge.red::before, .oops-root .badge.danger::before { -webkit-mask-image: url(icons/x-circle-bold.svg); mask-image: url(icons/x-circle-bold.svg); }
 .oops-root .badge.purple { background: var(--primary-soft); color: var(--primary-text); }
 .oops-root .badge.gray, .oops-root .badge.muted { background: var(--fill); color: var(--ink-2); }
 .oops-root .badge.green, .oops-root .badge.success { background: var(--success-soft); color: var(--success); }
@@ -155,19 +181,39 @@ html, body { background: var(--canvas); }
 .oops-root .badge.amber, .oops-root .badge.orange, .oops-root .badge.warning { background: var(--warning-soft); color: var(--warning); }
 
 .oops-root .chip {
-  min-height: 36px; padding: 7px 16px; border: 0; border-radius: var(--radius-full); background: var(--fill); color: var(--ink-2);
+  display: inline-flex; align-items: center; gap: 6px; min-height: var(--control-sm); padding: 6px 16px;
+  border: 0; border-radius: var(--radius-full); background: var(--fill); color: var(--ink-2);
   font-size: 14px !important; font-weight: 700;
   transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-base) var(--ease-standard), color var(--dur-base);
 }
-.oops-root .chip.selected, .oops-root .chip[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 800; }
+.oops-root .chip.selected, .oops-root .chip[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 700; }
+/* 设计语言 Chip: a chosen filter or person gets a check that pops in. */
+.oops-root .chip[aria-pressed="true"], .oops-root .chip.selected:is([data-act="self-set"], [data-act="speaker-set"], [data-act="project-set"], [data-act="review-owner"], [data-act="choose-owner"]) { padding-left: 12px; }
+.oops-root .chip[aria-pressed="true"]::before,
+.oops-root .chip.selected:is([data-act="self-set"], [data-act="speaker-set"], [data-act="project-set"], [data-act="review-owner"], [data-act="choose-owner"])::before {
+  content: ""; flex: none; width: 14px; height: 14px; background: currentColor;
+  -webkit-mask: url(icons/check-bold.svg) center / contain no-repeat; mask: url(icons/check-bold.svg) center / contain no-repeat;
+  animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1;
+}
 .oops-root .chip:disabled { background: var(--fill); color: var(--ink-disabled); }
 
-.oops-root .segmented { background: var(--fill); border-radius: var(--radius-full); padding: 4px; gap: 4px; }
-.oops-root .segmented button {
-  min-height: 36px; border-radius: var(--radius-full); color: var(--ink-2); font-size: 14px; font-weight: 700;
-  transition: background-color var(--dur-base) var(--ease-standard), color var(--dur-base), box-shadow var(--dur-base);
+/* 设计语言 SegmentedControl: a raised thumb springs across to the selected view (app.js slideSegments sets --n and --i). */
+.oops-root .segmented {
+  position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  height: 40px; padding: 4px; gap: 0; border-radius: var(--radius-full); background: var(--fill);
 }
-.oops-root .segmented button[aria-selected="true"] { background: var(--surface-raised); color: var(--ink); font-weight: 800; box-shadow: var(--shadow-1); }
+.oops-root .segmented.has-thumb::before {
+  content: ""; position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / var(--n, 1));
+  border-radius: var(--radius-full); background: var(--surface-raised); box-shadow: var(--shadow-1);
+  transform: translateX(calc(100% * var(--i, 0))); transition: transform var(--dur-slow) var(--ease-bounce);
+}
+.oops-root .segmented button {
+  position: relative; z-index: 1; min-width: 0; min-height: 0; height: 32px; padding: 0 10px; border-radius: var(--radius-full);
+  background: transparent; color: var(--ink-2); font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--dur-base) var(--ease-standard), transform var(--dur-slow) var(--ease-bounce);
+}
+.oops-root .segmented button[aria-selected="true"] { color: var(--ink); font-weight: 800; }
+.oops-root .segmented:not(.has-thumb) button[aria-selected="true"] { background: var(--surface-raised); box-shadow: var(--shadow-1); }
 .oops-root .session-fixed-tabs { border-bottom: 0; }
 
 /* ---------- forms ---------- */
@@ -195,72 +241,136 @@ html, body { background: var(--canvas); }
 
 .oops-root .toggle-row strong { font-size: 15px; font-weight: 700; color: var(--ink); }
 .oops-root .toggle-row small { color: var(--ink-3); font-size: 12px; }
-.oops-root .toggle-row input { width: 52px; height: 32px; background: var(--line-strong); transition: background var(--dur-base) var(--ease-standard); }
-.oops-root .toggle-row input:checked { background: var(--primary); }
-.oops-root .toggle-row input::after { width: 26px; height: 26px; box-shadow: var(--shadow-2); transition: left var(--dur-slow) var(--ease-bounce); }
-.oops-root .toggle-row input:checked::after { left: 23px; }
+/* 设计语言 Switch: on fades in the action gradient; the thumb squashes wider while pressed and springs across. */
+.oops-root .toggle-row input { width: 52px; height: 32px; background: var(--line-strong); transition: box-shadow var(--dur-fast); }
+.oops-root .toggle-row input::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--gradient-action);
+  opacity: 0; transition: opacity var(--dur-base) var(--ease-standard);
+}
+.oops-root .toggle-row input::after {
+  top: 3px; left: 3px; width: 26px; height: 26px; background: var(--on-primary); box-shadow: var(--shadow-2);
+  transition: transform var(--dur-slow) var(--ease-bounce), width var(--dur-base) var(--ease-bounce);
+}
+.oops-root .toggle-row input:checked { background: var(--line-strong); }
+.oops-root .toggle-row input:checked::before { opacity: 1; }
+.oops-root .toggle-row input:checked::after { left: 3px; transform: translateX(20px); }
+.oops-root .toggle-row input:active::after { width: 32px; }
+.oops-root .toggle-row input:checked:active::after { transform: translateX(14px); }
+/* 设计语言 Checkbox: a rounded square; checked fills with primary and the check pops in. */
 .oops-root .check-row { font-size: 15px; color: var(--ink); }
-.oops-root .check-row input { accent-color: var(--primary); width: 20px; height: 20px; }
+.oops-root .check-row input {
+  -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 22px; height: 22px; margin: 0;
+  border: 2px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--surface); cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), transform var(--dur-slow) var(--ease-bounce);
+}
+.oops-root .check-row input::after {
+  content: ""; position: absolute; left: 1px; top: 1px; width: 16px; height: 16px; background: var(--on-primary);
+  -webkit-mask: url(icons/check-bold.svg) center / contain no-repeat; mask: url(icons/check-bold.svg) center / contain no-repeat;
+  transform: scale(0); transition: transform var(--dur-base) var(--ease-bounce);
+}
+.oops-root .check-row input:checked { background: var(--primary); border-color: var(--primary); }
+.oops-root .check-row input:checked::after { transform: scale(1); }
+.oops-root .check-row:active input { transform: scale(.86); transition-duration: var(--dur-instant); }
 
-/* ---------- floating tab bar ---------- */
+/* ---------- tab bar (设计语言 TabBar: floating capsule, 2 | record button raised in the middle | 2) ---------- */
 .oops-root .app-nav {
   left: 16px; right: 16px; bottom: calc(var(--mobile-safe-area-height, 0px) + var(--nav-gap));
-  min-height: 0; height: var(--nav-h); padding: 6px; gap: 4px; align-items: center;
+  min-height: 0; height: var(--tabbar-h); padding: 0 8px; gap: 4px; align-items: center; justify-content: stretch;
   border: 0; border-radius: var(--radius-full); background: var(--surface); box-shadow: var(--shadow-2);
 }
-.oops-root .app-nav button {
-  flex: 1 1 0; width: auto; min-width: 0; height: 52px; min-height: 0; gap: 2px; border-radius: var(--radius-full);
+.oops-root .app-nav > button {
+  flex: 1 1 0; width: auto; min-width: 0; height: 52px; min-height: 0; padding: 0; gap: 2px; border-radius: var(--radius-full);
   color: var(--ink-3); font-size: 11px; font-weight: 700; letter-spacing: .02em;
   transition: background-color var(--dur-base) var(--ease-standard), color var(--dur-base), transform var(--dur-slow) var(--ease-bounce);
 }
-.oops-root .app-nav button .icon { width: 24px !important; height: 24px !important; }
-.oops-root .app-nav button.selected { background: var(--primary-soft); color: var(--primary-text); font-weight: 800; }
-.oops-root .app-nav button.selected::before { content: none; }
-.oops-root .app-nav button b {
-  top: 3px; right: calc(50% - 22px); min-width: 18px; width: auto; height: 18px; padding: 0 5px; border-radius: var(--radius-full);
-  background: var(--danger); color: var(--on-danger); font-size: 11px; font-weight: 800; box-shadow: 0 0 0 2px var(--surface);
+.oops-root .app-nav > button > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 14px; }
+.oops-root .app-nav > button .icon { width: 24px !important; height: 24px !important; }
+.oops-root .app-nav > button.selected { background: var(--primary-soft); color: var(--primary-text); font-weight: 700; }
+.oops-root .app-nav > button.selected::before { content: none; }
+.oops-root .app-nav > button b {
+  display: block; position: absolute; top: 2px; right: calc(50% - 18px); min-width: 18px; width: auto; height: 18px; padding: 0 5px;
+  border-radius: var(--radius-full); background: var(--danger); color: var(--on-danger); box-shadow: 0 0 0 2px var(--surface);
+  font-size: 11px; line-height: 18px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums;
+  animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1;
 }
+.oops-root .app-nav-center { flex: none; display: grid; place-items: center; width: var(--record-md); height: var(--record-md); margin: -40px 4px 0; }
 
-/* ---------- recording island: present on every page while capturing ---------- */
-.oops-root .recording-controls {
-  bottom: calc(var(--mobile-safe-area-height, 0px) + var(--nav-h) + var(--nav-gap) + 10px);
-  border: 0; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-2); padding: 12px 12px 12px 16px;
+/* ---------- record button (设计语言 RecordButton) ---------- */
+.oops-root .record-button {
+  --size: var(--record-lg); --level: 0;
+  -webkit-appearance: none; appearance: none; position: relative; display: inline-grid; place-items: center; flex: none;
+  grid-template: 100% / 100%; place-content: normal; gap: 0; min-width: 0; min-height: 0;
+  width: var(--size); height: var(--size); margin: 0; padding: 0; border: 0; border-radius: var(--radius-full); background: transparent;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; transition: transform var(--dur-slow) var(--ease-bounce);
 }
-.oops-root .rc-heading { gap: 10px; margin-bottom: 10px; min-height: 36px; }
-.oops-root .rc-dot { width: 10px; height: 10px; background: var(--rec); box-shadow: 0 0 0 4px var(--rec-soft); animation: oo-rec-blink 1.2s var(--ease-standard) infinite; }
-.oops-root .rc-dot.paused { background: var(--ink-3); box-shadow: 0 0 0 4px var(--fill); animation: none; opacity: 1; }
-.oops-root .rc-session strong { font-size: 14px; font-weight: 800; color: var(--ink); }
-.oops-root .rc-session > span { font-size: 12px; color: var(--ink-3); font-weight: 600; }
-.oops-root .rc-session time { color: var(--ink-2); font-weight: 800; }
+.oops-root .record-button-core {
+  position: relative; z-index: 1; width: 100%; height: 100%; display: grid; place-items: center;
+  border-radius: var(--radius-full); background: var(--gradient-action); color: var(--on-primary); box-shadow: var(--shadow-glow);
+}
+.oops-root .record-button-ring {
+  position: absolute; inset: 0; border-radius: var(--radius-full); background: var(--primary-soft);
+  transform: scale(calc(1.14 + var(--level) * .22)); transition: transform var(--dur-fast) var(--ease-standard);
+}
+.oops-root .record-button-ring.outer { opacity: 0; transform: scale(calc(1.3 + var(--level) * .4)); }
+.oops-root .record-button.is-recording .record-button-ring.outer { opacity: .55; }
+.oops-root .record-button-stop { width: 34%; height: 34%; border-radius: var(--radius-xs); background: var(--on-primary); }
+.oops-root .record-button:active { transform: scale(.92); transition-duration: var(--dur-instant); }
+.oops-root .record-button:focus-visible { outline: none; box-shadow: none; }
+.oops-root .record-button:focus-visible .record-button-core { box-shadow: var(--focus-ring), var(--shadow-glow); }
+
+/* ---------- recording strip: status reads like RecIndicator; full controls when expanded ---------- */
+.oops-root .recording-controls {
+  bottom: calc(var(--mobile-safe-area-height, 0px) + 116px);
+  border: 0; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-2); padding: 12px 12px 14px 16px;
+}
+.oops-root .rc-heading { gap: 8px; margin-bottom: 14px; min-height: 52px; }
+.oops-root .rc-session { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.oops-root .rc-session strong { max-width: 100%; font-size: 15px; line-height: 20px; font-weight: 800; color: var(--ink); }
+.oops-root .rec-indicator {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; border-radius: var(--radius-full);
+  background: var(--rec-soft); color: var(--ink); font-size: 13px; line-height: 18px; font-weight: 800; white-space: nowrap;
+}
+.oops-root .rec-indicator > i { flex: none; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--rec); animation: oo-rec-blink 1200ms var(--ease-standard) infinite; }
+.oops-root .rec-indicator time { font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.oops-root .rec-indicator strong { font-size: 13px; font-weight: 800; color: var(--ink); }
+.oops-root .rec-indicator.is-paused { background: var(--fill); }
+.oops-root .rec-indicator.is-paused > i { animation: none; background: var(--ink-3); }
 .oops-root .rc-scene { color: var(--primary-text) !important; font-size: 13px !important; font-weight: 800; padding: 8px 6px 8px 10px; border-radius: var(--radius-full); }
-.oops-root .rc-actions { grid-template-columns: 1.5fr 1fr 1fr; gap: 8px; }
+.oops-root .rc-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .oops-root .rc-actions > button {
-  min-height: 44px; border-radius: var(--radius-full); background: var(--fill); gap: 6px; padding: 8px 10px;
-  color: var(--ink-2) !important; font-size: 13px !important; font-weight: 800 !important;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; min-height: 0; padding: 0;
+  border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink-2) !important;
+  font-size: 12px !important; line-height: 16px; font-weight: 700 !important; white-space: nowrap;
+}
+.oops-root .rc-actions > button:active { background: transparent; }
+.oops-root .rc-action-icon {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--radius-full); background: var(--fill); color: var(--ink);
   transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast);
 }
-.oops-root .rc-actions > button#rc-recall { background: var(--primary-soft); color: var(--primary-text) !important; }
-.oops-root .rc-actions > button.rc-end { background: var(--danger-soft); color: var(--danger) !important; }
-.oops-root .rc-actions .icon { opacity: 1; width: 18px !important; height: 18px !important; }
+.oops-root .rc-actions > #rc-recall .rc-action-icon { background: var(--primary-soft); color: var(--primary-text); }
+.oops-root .rc-actions > .rc-end .rc-action-icon { background: var(--inverse); color: var(--on-inverse); }
+.oops-root .rc-actions .icon { opacity: 1; width: 20px !important; height: 20px !important; }
 .oops-root #rc-recall.busy { opacity: 1; pointer-events: none; }
 .oops-root #rc-recall.busy .icon { animation: oo-spin-back 900ms var(--ease-standard) infinite; }
 
-/* Compact island on pages other than the live scene: one capsule, recall and end one tap away, the rest expands. */
-.oops-root .recording-controls.is-compact { padding: 8px 8px 8px 16px; border-radius: var(--radius-full); }
-.oops-root .is-compact .rc-heading { margin-bottom: 0; min-height: 44px; }
+/* Compact strip on pages other than the live scene: status, "找回刚才" one tap away; the tab bar's record button ends. */
+.oops-root .recording-controls.is-compact { padding: 8px 8px 8px 16px; border-radius: var(--radius-xl); }
+.oops-root .is-compact .rc-heading { margin-bottom: 0; min-height: 52px; }
 .oops-root button.rc-session {
-  display: block; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left;
+  display: flex; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left;
 }
 .oops-root .rc-compact-actions { display: flex; gap: 6px; flex: none; }
 .oops-root .rc-compact-actions > button, .oops-root .rc-expand {
   display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-full);
-  background: var(--fill); color: var(--ink-2); transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast);
+  background: var(--fill); color: var(--ink); transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast);
 }
 .oops-root .rc-compact-actions > #rc-recall { background: var(--primary-soft); color: var(--primary-text); }
-.oops-root .rc-compact-actions > .rc-end { background: var(--danger-soft); color: var(--danger); }
 .oops-root .rc-expand { width: 36px; background: transparent; color: var(--ink-3); }
 .oops-root .rc-compact-actions .icon { width: 19px !important; height: 19px !important; }
-.has-recording-controls.rc-compact .screen-content { padding-bottom: calc(var(--mobile-safe-area-height, 0px) + 196px); }
+/* Room for the floating chrome: tab bar 16px up, record button rising 20px above it, the strip 116px up. */
+.oops-root .screen-content { padding-bottom: calc(var(--mobile-safe-area-height, 0px) + 140px); }
+.oops-root.has-recording-controls .screen-content { padding-bottom: calc(var(--mobile-safe-area-height, 0px) + 300px); }
+.oops-root.has-recording-controls.rc-compact .screen-content { padding-bottom: calc(var(--mobile-safe-area-height, 0px) + 208px); }
 
 /* Live input level: five rounded bars driven by --level (0–1) from the native state. */
 .oops-root .level-meter { display: inline-flex; align-items: center; gap: 2px; height: 18px; flex: none; }
@@ -268,13 +378,13 @@ html, body { background: var(--canvas); }
   display: block; width: 3px; border-radius: 2px; background: var(--primary);
   height: calc(4px + 14px * var(--level, 0) * var(--k, 1)); transition: height 420ms var(--ease-standard), background-color var(--dur-base);
 }
-.oops-root .level-meter i:nth-child(1) { --k: .45; } .oops-root .level-meter i:nth-child(2) { --k: .8; }
-.oops-root .level-meter i:nth-child(3) { --k: 1; } .oops-root .level-meter i:nth-child(4) { --k: .7; }
-.oops-root .level-meter i:nth-child(5) { --k: .4; }
+.oops-root .level-meter i:nth-child(1) { --k: .45; background: var(--brand-jelly); } .oops-root .level-meter i:nth-child(2) { --k: .8; background: #4f63f0; }
+.oops-root .level-meter i:nth-child(3) { --k: 1; background: #5a58ed; } .oops-root .level-meter i:nth-child(4) { --k: .7; background: #5f50eb; }
+.oops-root .level-meter i:nth-child(5) { --k: .4; background: var(--primary); }
 .oops-root .level-meter.is-idle i { height: 4px; background: var(--fill-strong); }
 .oops-root .native-record-status .level-meter { margin-left: 2px; }
 /* In the island the meter sits in the 12px status line, so it is shorter. */
-.oops-root .rc-session .level-meter { height: 12px; margin-left: 8px; vertical-align: -1px; }
+.oops-root .rc-session .level-meter { height: 12px; margin-left: 2px; vertical-align: -1px; }
 .oops-root .rc-session .level-meter i { width: 2.5px; height: calc(3px + 9px * var(--level, 0) * var(--k, 1)); }
 .oops-root .rc-session .level-meter.is-idle i { height: 3px; }
 
@@ -282,28 +392,30 @@ html, body { background: var(--canvas); }
 .oops-root .home-date { color: var(--ink-3); font-size: 13px; font-weight: 700; margin: 6px 0 2px; }
 .oops-root .home-positioning { color: var(--ink-2); font-size: 14px; margin: 2px 0 16px; }
 .oops-root .native-record-hero {
-  position: relative; padding: 20px; border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-1); overflow: hidden;
+  position: relative; padding: 20px; border: 0; border-radius: var(--radius-xl); background: var(--gradient-dusk); color: var(--on-dusk);
+  box-shadow: var(--shadow-2); overflow: hidden;
 }
-.oops-root .native-record-hero::before {
-  content: ""; position: absolute; right: -40px; top: -50px; width: 220px; height: 200px; border-radius: 50%;
-  background: radial-gradient(closest-side, #e5d3fa 0%, #ece8ff 45%, transparent 100%); opacity: .9; pointer-events: none;
-}
+/* 设计语言 Card "dusk": the home header card is the screen's hero. No glow on the card: jelly gloss is for Pupu only. */
+.oops-root .native-record-hero::before { content: none; }
 .oops-root .native-record-hero > * { position: relative; }
 .oops-root .native-record-heading { margin-bottom: 16px; }
-.oops-root .native-record-heading small { color: var(--ink-3); font-size: 13px; font-weight: 700; }
-.oops-root .native-record-heading h1 { font-size: 26px; line-height: 1.3; font-weight: 900; color: var(--ink); text-wrap: balance; }
+.oops-root .native-record-heading small { color: var(--on-dusk-2); font-size: 13px; font-weight: 800; }
+.oops-root .native-record-heading h1 { font-size: 26px; line-height: 1.3; font-weight: 900; color: var(--on-dusk); text-wrap: balance; }
 .oops-root .native-record-heading img, .oops-root .native-record-heading .pupu { width: 96px; height: auto; flex: none; margin: -6px -6px -10px 0; }
 .oops-root .native-record-heading .pupu { height: 96px; }
 /* The official artwork floats a little while idle. */
 .oops-root .hero-mascot { transform-origin: 50% 80%; animation: oo-float 6s var(--ease-standard) infinite; }
 .oops-root .native-record-hero.is-active .native-record-heading h1 { font-size: 24px; }
 .oops-root .native-record-status { gap: 10px; margin-bottom: 4px; }
-.oops-root .native-record-status strong { font-size: 15px; font-weight: 800; color: var(--ink); }
-.oops-root .native-record-status time { font-size: 34px; line-height: 1.1; font-weight: 900; letter-spacing: -.02em; color: var(--ink); }
-.oops-root .native-record-hero .button.primary { min-height: 52px; font-size: 16px !important; }
+.oops-root .native-record-status strong { font-size: 13px; font-weight: 800; color: var(--ink); }
+.oops-root .native-record-status time { font-size: 34px; line-height: 1.1; font-weight: 900; letter-spacing: -.02em; color: var(--on-dusk); margin-left: auto; }
+.oops-root .native-record-hero .meta, .oops-root .native-record-hero p { color: var(--on-dusk-2); }
+.oops-root #screen .native-record-hero .button.primary { min-height: var(--control-lg); font-size: 16px !important; background: var(--primary-soft); color: var(--primary-text); box-shadow: none; }
+.oops-root .native-record-hero .level-meter i { background: #c9d4ff; }
+.oops-root .native-record-hero .level-meter.is-idle i { background: #ffffff40; }
 .oops-root .native-record-hero #home-record-people { margin: 4px 0 16px; }
-.oops-root .record-under { color: var(--ink-3); font-size: 12px; font-weight: 600; margin: 14px 4px 0; }
-.oops-root .record-under button { color: var(--primary-text); font-weight: 800; border-left-color: var(--line); min-height: 32px; white-space: nowrap; flex: none; }
+.oops-root .record-under { color: var(--on-dusk-2); font-size: 12px; font-weight: 700; margin: 14px 4px 0; }
+.oops-root .record-under button { color: var(--on-dusk); font-weight: 800; border-left-color: #ffffff33; min-height: 32px; white-space: nowrap; flex: none; }
 .oops-root .record-under > span { word-break: keep-all; }
 /* 360dp phones: keep the hero headline in whole words beside a smaller Pupu. */
 @media (max-width: 380px) {
@@ -425,17 +537,25 @@ html, body { background: var(--canvas); }
 
 /* ---------- toast & notices ---------- */
 .oops-root .app-toast {
-  left: 20px; right: 20px; padding: 13px 18px; border-radius: var(--radius-lg);
-  background: var(--inverse); color: var(--on-inverse); font-size: 14px; font-weight: 700; line-height: 1.5; box-shadow: var(--shadow-2);
+  left: 16px; right: 16px; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px;
+  border-radius: var(--radius-lg); background: var(--inverse); color: var(--on-inverse); box-shadow: var(--shadow-2);
+  font-size: 15px; font-weight: 700; line-height: 22px; text-align: left;
 }
-.oops-root .app-toast.bad { background: var(--inverse); padding-left: 44px; text-align: left; }
-.oops-root .app-toast.bad::before {
+.oops-root .app-toast[hidden] { display: none; }
+/* 设计语言 Toast: oops and success bring a small, still Pupu (app.js toastTone). */
+.oops-root .app-toast.is-oops, .oops-root .app-toast.is-success { padding-left: 10px; }
+.oops-root .app-toast .toast-pupu { flex: none; width: 36px; height: 36px; }
+.oops-root .app-toast > span { flex: 1; min-width: 0; }
+.oops-root .app-toast.bad { background: var(--inverse); }
+.oops-root .app-toast.bad:not(:has(.pupu)) { padding-left: 44px; }
+.oops-root .app-toast.bad:not(:has(.pupu))::before {
   content: "!"; position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; border-radius: 50%;
   background: #ff7f96; color: var(--inverse); font-weight: 900; font-size: 13px; line-height: 20px; text-align: center;
 }
-.oops-root .app-toast { bottom: calc(var(--mobile-safe-area-height, 0px) + var(--nav-h) + var(--nav-gap) + 14px); }
-.has-recording-controls .app-toast { bottom: calc(var(--mobile-safe-area-height, 0px) + var(--nav-h) + var(--nav-gap) + 134px); }
-.has-recording-controls.rc-compact .app-toast { bottom: calc(var(--mobile-safe-area-height, 0px) + var(--nav-h) + var(--nav-gap) + 84px); }
+/* Above the tab bar's raised record button, and above the recording strip when it shows (compact 68px, expanded ~160px). */
+.oops-root .app-toast { bottom: calc(var(--mobile-safe-area-height, 0px) + 122px); }
+.has-recording-controls .app-toast { bottom: calc(var(--mobile-safe-area-height, 0px) + 284px); }
+.has-recording-controls.rc-compact .app-toast { bottom: calc(var(--mobile-safe-area-height, 0px) + 192px); }
 #notices .notice-banner { border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-3); background: var(--surface); }
 #notices .notice-banner h3 { font-size: 16px; }
 
@@ -444,10 +564,19 @@ html, body { background: var(--canvas); }
 .oops-root .empty-state strong { font-size: 17px; font-weight: 800; color: var(--ink); }
 .oops-root .empty-state p { color: var(--ink-3); font-size: 14px; }
 .oops-root .empty-state > .empty-art {
-  display: grid; place-items: center; width: 112px; height: 104px; margin: 0 0 4px; padding: 0; border-radius: 0; background: none; color: var(--ink-3);
+  display: grid; place-items: center; width: 120px; height: 120px; margin: 0; padding: 0; border-radius: 0; background: none; color: var(--ink-3);
 }
 .oops-root .empty-art .pupu { width: 100%; height: 100%; }
-.oops-root .bottom-sheet .empty-state > .empty-art { width: 96px; height: 88px; }
+.oops-root .bottom-sheet .empty-state > .empty-art { width: 96px; height: 96px; }
+/* 设计语言 EmptyState: with Pupu the title is the brand title (24/32 · 900), the heaviest line on the screen. */
+.oops-root .empty-state:has(> .empty-art .pupu) strong { margin-top: 4px; font-size: 24px; line-height: 32px; font-weight: 900; letter-spacing: -.01em; text-wrap: balance; }
+.oops-root .empty-state:has(> .empty-art .pupu) p { font-size: 15px; line-height: 22px; }
+.oops-root .bottom-sheet .empty-state:has(> .empty-art .pupu) strong { font-size: 20px; line-height: 28px; }
+/* 设计语言 Loader: three jelly dots hop in turn and squash as they land. */
+.oops-root .jelly-loader { display: inline-flex; align-items: flex-end; gap: 6px; height: 22px; vertical-align: middle; }
+.oops-root .jelly-loader i { display: block; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--brand-jelly); transform-origin: 50% 100%; animation: oo-jelly 900ms var(--ease-standard) infinite; }
+.oops-root .jelly-loader i:nth-child(2) { background: var(--primary); animation-delay: 120ms; }
+.oops-root .jelly-loader i:nth-child(3) { background: var(--brand-lilac); animation-delay: 240ms; }
 /* Short waits never flash Pupu: it fades in only if loading takes a moment. */
 .oops-root .oops-loading > .empty-art { animation: oo-fade-in var(--dur-base) var(--ease-standard) 350ms both; }
 .oops-root .oops-spinner { border-color: var(--primary-soft); border-top-color: var(--primary); }
@@ -455,6 +584,8 @@ html, body { background: var(--canvas); }
 /* ---------- inline Pupu ---------- */
 .oops-root .pupu { display: block; overflow: visible; }
 .oops-root .pupu .pupu-body { transform-box: fill-box; transform-origin: 50% 100%; animation: oo-breathe 2.8s var(--ease-standard) infinite; }
+.oops-root .pupu-oops .pupu-body { animation: oo-wobble var(--dur-celebrate) var(--ease-standard) 1, oo-breathe 2.8s var(--ease-standard) var(--dur-celebrate) infinite; }
+.oops-root .pupu-cheer .pupu-body { animation: oo-hop 1200ms var(--ease-bounce) infinite; }
 /* Listening: the sound waves brighten with the real input level (--level from app.js renderStatus), outer waves only when it is loud. */
 .oops-root .pupu-listening .pupu-sound path { opacity: calc(.3 + .7 * var(--level, 0)); transition: opacity 420ms var(--ease-standard); }
 .oops-root .pupu-listening .pupu-sound path:nth-child(even) { opacity: calc(.12 + .88 * var(--level, 0) * var(--level, 0)); }
@@ -469,18 +600,19 @@ html, body { background: var(--canvas); }
 .oops-root .pupu.is-still *, .oops-root .pupu.is-still .pupu-body { animation: none !important; }
 
 /* ---------- motion ---------- */
-/* Press: squeeze fast, rebound with a jelly overshoot. */
-.oops-root .button:active:not(:disabled), .oops-root .chip:active:not(:disabled), .oops-root .rc-actions > button:active,
-.oops-root .rc-compact-actions > button:active, .oops-root .rc-expand:active,
-.oops-root .mic-button:active, .oops-root .segmented button:active, .oops-root .app-nav button:active, .oops-root .icon-button:active {
-  transform: scale(.94); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard);
-}
+/* Press: squeeze fast, rebound with a jelly overshoot — buttons .96, chips .94, tabs .92, icon buttons .9, cards .98. */
+.oops-root .button:active:not(:disabled) { transform: scale(.96); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
+.oops-root .chip:active:not(:disabled), .oops-root .segmented button:active { transform: scale(.94); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
+.oops-root .app-nav > button:active { transform: scale(.92); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
+.oops-root .rc-actions > button:active .rc-action-icon, .oops-root .rc-compact-actions > button:active, .oops-root .rc-expand:active,
+.oops-root .mic-button:active, .oops-root .icon-button:active { transform: scale(.9); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
 .oops-root .card.clickable:active, .oops-root .list-row:active { transform: scale(.98); transition-duration: var(--dur-instant); }
 .oops-root .list-row { transition: transform var(--dur-slow) var(--ease-bounce); }
 
 /* A new page or tab rises in; a new main tab pops under the thumb. Added by app.js playEnter() for one change. */
 .oops-root.route-enter #screen { animation: oo-route-in 280ms var(--ease-standard) both; }
-.oops-root.nav-enter .app-nav button.selected { animation: oo-pop var(--dur-slow) var(--ease-bounce) both; }
+/* The selected tab's icon pops once (the tab bar is only redrawn when it changes, app.js renderNav). */
+.oops-root .app-nav > button.selected .icon { animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1; }
 
 /* Sheets slide up with a little spring; the scrim fades. Closing stays instant. */
 .oops-root .bottom-sheet:not([hidden]) { animation: oo-sheet-in var(--dur-slow) var(--ease-bounce) both; }
@@ -494,13 +626,18 @@ html, body { background: var(--canvas); }
 .oops-root .shake { animation: oo-shake var(--dur-slow) var(--ease-standard) 1; }
 
 @keyframes oo-route-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-@keyframes oo-pop { 0% { transform: scale(.82); } 100% { transform: scale(1); } }
+@keyframes oo-pop-in { 0% { transform: scale(.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes oo-rec-ring { 0%, 100% { transform: scale(1.12); } 50% { transform: scale(1.26); } }
+@keyframes oo-rec-ring-outer { 0%, 100% { transform: scale(1.26); opacity: .45; } 50% { transform: scale(1.5); opacity: 0; } }
+@keyframes oo-jelly { 0%, 60%, 100% { transform: translateY(0) scale(1.18, .82); } 30% { transform: translateY(-9px) scale(.9, 1.1); } }
+@keyframes oo-wobble { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-7deg); } 40% { transform: rotate(6deg); } 60% { transform: rotate(-4deg); } 80% { transform: rotate(2deg); } }
+@keyframes oo-hop { 0%, 100% { transform: translateY(0) scale(1.04, .96); } 45% { transform: translateY(-8px) scale(.97, 1.04); } }
 @keyframes oo-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes oo-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes oo-toast-in { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes oo-drop-in { from { opacity: 0; transform: translateY(-14px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes oo-line-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
-@keyframes oo-rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes oo-rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @keyframes oo-caret { 50% { opacity: 0; } }
 @keyframes oo-spin-back { to { transform: rotate(-360deg); } }
 @keyframes oo-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.03, .96); } }
@@ -513,9 +650,22 @@ html, body { background: var(--canvas); }
   .oops-root *, .oops-root *::before, .oops-root *::after, #notices .notice-banner {
     animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
   }
-  .oops-root .pupu *, .oops-root .hero-mascot, .oops-root .rc-dot, .oops-root .recording-dot, .oops-root .live-partial::after { animation: none !important; }
+  .oops-root .pupu *, .oops-root .hero-mascot, .oops-root .rc-dot, .oops-root .recording-dot, .oops-root .live-partial::after,
+  .oops-root .rec-indicator > i, .oops-root .record-button-ring, .oops-root .jelly-loader i { animation: none !important; }
+  .oops-root .jelly-loader i:nth-child(2) { opacity: .7; }
+  .oops-root .jelly-loader i:nth-child(3) { opacity: .45; }
   .oops-root .button:active, .oops-root .chip:active, .oops-root .card.clickable:active, .oops-root .list-row:active,
-  .oops-root .rc-actions > button:active, .oops-root .rc-compact-actions > button:active, .oops-root .rc-expand:active,
-  .oops-root .mic-button:active, .oops-root .segmented button:active, .oops-root .icon-button:active,
-  .oops-root .app-nav button:active { transform: none; }
+  .oops-root .rc-actions > button:active .rc-action-icon, .oops-root .rc-compact-actions > button:active, .oops-root .rc-expand:active,
+  .oops-root .mic-button:active, .oops-root .segmented button:active, .oops-root .icon-button:active, .oops-root .record-button:active,
+  .oops-root .check-row:active input, .oops-root .app-nav > button:active { transform: none !important; }
+  .oops-root .toggle-row input:active::after { width: 26px; }
+  .oops-root .toggle-row input:checked:active::after { transform: translateX(20px); }
 }
+
+/* Content scrolls under the floating tab bar; a canvas fade keeps the last row legible behind it and its record button. */
+.oops-root::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; z-index: 11; pointer-events: none;
+  height: calc(var(--mobile-safe-area-height, 0px) + 112px);
+  background: linear-gradient(to top, var(--canvas) 40%, rgb(242 239 255 / 0) 100%);
+}
+.oops-root.has-recording-controls::after { height: calc(var(--mobile-safe-area-height, 0px) + 124px); background: linear-gradient(to top, var(--canvas) 86%, rgb(242 239 255 / 0) 100%); }

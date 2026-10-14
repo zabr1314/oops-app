@@ -72,9 +72,11 @@ test('an existing session blocks every device capture action without changing th
   for (const type of ['power', 'resume', 'pause', 'stop']) s = m.reduce(s, { type }, external);
   assert.equal(s.status, 'idle'); assert.equal(s.serial, 0); assert.equal(external.activeSessionId, 'already-formal-meeting'); assert.equal(external.recordingMode, 'meeting');
 });
-test('settings replaces only fifth navigation label and keeps old routes and existing entry actions', () => {
-  const u = ui(); assert.match(u.el('nav').innerHTML, /aria-label="设置"[^>]*data-act="go" data-route="me"/);
-  assert.match(u.el('nav').innerHTML, /icons\/gear-six.svg/); assert.doesNotMatch(u.el('nav').innerHTML, /aria-label="我的"/);
+// 2026-10-13: four tab bar entries around the record button; Settings ("me") opens from the home header.
+test('settings opens from the home header beside four tab entries and keeps old routes and existing entry actions', () => {
+  const u = ui(); for (const label of ['首页', '会话', '任务', '记忆']) assert.match(u.el('nav').innerHTML, new RegExp(`aria-label="${label}"`));
+  assert.match(u.el('nav').innerHTML, /data-act="record-button"/); assert.doesNotMatch(u.el('nav').innerHTML, /aria-label="(设置|我的)"/);
+  assert.match(u.el('hdr').innerHTML, /aria-label="设置" data-act="go" data-route="me"/); assert.match(u.el('hdr').innerHTML, /icons\/gear-six.svg/);
   u.click('go', { route: 'me' }); assert.match(u.el('hdr').innerHTML, /<h1>设置<\/h1>/);
   for (const text of ['账户与身份', '声音身份与许可', '收音、唤醒与提醒偏好', '隐私、保存与共享', '服务连接']) assert.ok(u.screen().includes(text), text);
   u.click('go', { route: 'settings' }); assert.match(u.screen(), /id="set-source"/); assert.match(u.screen(), /data-act="apply-settings"/);
