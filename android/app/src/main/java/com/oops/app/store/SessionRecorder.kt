@@ -83,6 +83,17 @@ class SessionRecorder(dir: File, val sessionId: String, private val meta: JSONOb
         synchronized(audioLock) { closeAudioLocked() }
     }
 
+    /** Protocol outcome only; does not trigger ASR retries or alter the frozen archive contract. */
+    fun recordAsrClosure(closure: String, errorCode: String? = null, error: String? = null) {
+        require(closure in setOf("acknowledged", "incomplete", "cancelled"))
+        synchronized(audioLock) {
+            val current = JSONObject(metaFile.readText())
+            current.put("asr_closure", closure).put("asr_error_code", errorCode?.take(80) ?: JSONObject.NULL)
+                .put("asr_error", error?.take(500) ?: JSONObject.NULL)
+            metaFile.writeText(current.toString(2))
+        }
+    }
+
     private fun closeAudioLocked() {
         val stream = out ?: return
         out = null

@@ -57,7 +57,7 @@ object VolcProtocol {
         gzip(json.toByteArray(Charsets.UTF_8)),
     )
 
-    /** Raw PCM packet; [last] marks the final (negative) packet that ends the stream. */
+    /** Raw PCM packet. Flag 2 is a terminal packet without sequence; flag 3 additionally carries a negative sequence. */
     fun audio(pcm: ByteArray, last: Boolean): ByteArray = encode(
         TYPE_AUDIO_ONLY, if (last) FLAG_LAST_PACKET else FLAG_NONE, SERIALIZATION_NONE, COMPRESSION_NONE, pcm,
     )
@@ -65,23 +65,31 @@ object VolcProtocol {
     fun decode(frame: ByteArray): ServerMessage {
         require(frame.size >= 8) { "frame too short: ${frame.size} bytes" }
         val headerSize = (frame[0].toInt() and 0x0F) * 4
+        require((frame[0].toInt() and 0xFF) ushr 4 == 1 && headerSize >= 4 && headerSize <= frame.size - 4) { "invalid header" }
         val type = (frame[1].toInt() and 0xFF) ushr 4
         val flags = frame[1].toInt() and 0x0F
         val compression = frame[2].toInt() and 0x0F
+        require(type == TYPE_FULL_SERVER_RESPONSE || type == TYPE_SERVER_ERROR) { "unsupported response type" }
+        require(flags in 0..3 && compression in 0..1) { "unsupported response flags or compression" }
         var offset = headerSize
         if (type == TYPE_SERVER_ERROR) {
+            require(frame.size - offset >= 8) { "truncated error header" }
             val code = uint32(frame, offset)
-            val size = uint32(frame, offset + 4).toInt()
-            val body = frame.copyOfRange(offset + 8, minOf(frame.size, offset + 8 + size))
+            val size = uint32(frame, offset + 4)
+            require(size == (frame.size - offset - 8).toLong()) { "invalid error payload size" }
+            val body = frame.copyOfRange(offset + 8, frame.size)
             return ServerMessage.Error(code, String(maybeGunzip(body, compression), Charsets.UTF_8))
         }
         var sequence: Int? = null
         if ((flags and FLAG_POSITIVE_SEQUENCE) != 0) {
+            require(frame.size - offset >= 8) { "truncated sequence header" }
             sequence = int32At(frame, offset)
             offset += 4
         }
-        val size = uint32(frame, offset).toInt()
-        val body = frame.copyOfRange(offset + 4, minOf(frame.size, offset + 4 + size))
+        require(frame.size - offset >= 4) { "truncated response header" }
+        val size = uint32(frame, offset)
+        require(size == (frame.size - offset - 4).toLong()) { "invalid response payload size" }
+        val body = frame.copyOfRange(offset + 4, frame.size)
         return ServerMessage.Response(
             sequence = sequence,
             isLast = (flags and FLAG_LAST_PACKET) != 0,

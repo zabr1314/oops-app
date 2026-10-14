@@ -10,6 +10,7 @@ import re
 import tempfile
 import threading
 from zoneinfo import ZoneInfo
+import minutes_items
 from archive_policy import ArchivePolicyError, policy_from_request, expired, require_live
 
 def read_json(path):
@@ -23,6 +24,7 @@ DIGEST = ('decision', 'commitment', 'constraint', 'idea')
 REVIEW_SPEAKERS = ('other', 'multi', 'unclear')
 VERDICTS = ('confirmed', 'rejected')
 DERIVED = ('owner_hint', 'when_raw', 'task_status', 'task_url', 'review')
+MEETING_DERIVED = ('digest', 'tasks', 'items', 'review_queue', 'display_title', 'title_source')
 
 
 def identifier(value):
@@ -337,6 +339,8 @@ class Meetings:
         self.owner, self.deadline = owner, deadline
         # sid → {'tasks', 'decisions', 'theme'} from the meeting's minutes, or None: narrows the review queue and names it.
         self.cited = cited
+        # row → bool: whether the stored minutes still match this meeting's sentences (FeishuActions.minutes_current).
+        self.minutes_current = None
         # Meeting text is a long-lived asset: 0 (default) keeps it until a user deletes the meeting.
         self.retention = int(retention_days if retention_days is not None else os.getenv('OOPS_MEETING_RETENTION_DAYS', '0'))
         if self.retention < 0:
@@ -378,7 +382,8 @@ class Meetings:
                                 end_ms=u['end_ms'], tag=u.get('tag'), speaker=reviews[u['id']].get('speaker') or u.get('speaker'),
                                 confirmed=True, excerpt=True, source_status='expired', review=reviews[u['id']],
                                 source_text_hash=source_text_hash(u['text']), source_revision=raw_revision(row, u),
-                                source_board_hash=board_source_hash(board_source_row(row, u)))
+                                source_board_hash=board_source_hash(board_source_row(row, u)),
+                                original_text_hash=hashlib.sha256(u['text'].encode('utf-8')).hexdigest())
                     row['retained_evidence'] = [dict(u, source_status='changed' if u.get('source_status') == 'changed' else 'expired',
                                                       transcript_status='expired') for u in list(evidence.values())[:50]]
                     changed_ids = {u['id'] for u in row['retained_evidence'] if u.get('source_status') == 'changed'}
@@ -390,7 +395,7 @@ class Meetings:
                     row['utterances'], row['notices'] = [], []
                     row['transcript_status'] = 'expired'
                     row['transcript_expired_at'] = policy['transcript_expires_at']
-                    for key in ('digest', 'tasks', 'review_queue', 'last_sync_at'):
+                    for key in (*MEETING_DERIVED, 'last_sync_at', 'asr_error'):
                         row.pop(key, None)
                     self.write(row['session_id'], row)
                     count += 1
@@ -406,11 +411,17 @@ class Meetings:
             if not os.path.isfile(path):
                 raise FileNotFoundError(sid)
             row = read_json(path)
+            for key in MEETING_DERIVED:
+                row.pop(key, None)
             row.setdefault('transcript_status', 'available')
             reviews = row.get('reviews', {})
             for u in row['utterances']:
                 if u['id'] in reviews:
-                    u['review'] = reviews[u['id']]
+                    saved = reviews[u['id']]
+                    if saved.get('source_changed_at'):
+                        u['stale_review'] = dict(saved)
+                    else:
+                        u['review'] = saved
             # A sentence a person marked "not a task / not a decision" leaves the digest; the model tag stays for comparison.
             row['digest'] = {tag: [u for u in row['utterances'] if u.get('tag') == tag and u.get('review', {}).get('verdict') != 'rejected']
                              for tag in DIGEST}
@@ -421,8 +432,10 @@ class Meetings:
                         if name.endswith('.json'):
                             op = read_json(os.path.join(self.ops.dir, name))
                             request = op.get('request', {})
-                            if request.get('session_id') == sid:
-                                row['tasks'].append(dict(op_id=op.get('op_id'), status=op.get('status'), feishu_task=op.get('feishu_task'), evidence=request.get('evidence', {})))
+                            if request.get('session_id') == sid and not op.get('archived_at'):
+                                row['tasks'].append(dict(op_id=op.get('op_id'), status=op.get('status'), feishu_task=op.get('feishu_task'),
+                                    evidence=request.get('evidence', {}), what=(request.get('draft') or {}).get('what'),
+                                    item_id=request.get('meeting_item_id')))
             for u in row['digest']['commitment']:
                 u['owner_hint'] = self.owner(u['text']) if self.owner else None
                 u['when_raw'] = self.deadline(u['text']) if self.deadline else None
@@ -430,7 +443,13 @@ class Meetings:
                 u['task_status'] = task['status'] if task else None
                 u['task_url'] = (task.get('feishu_task') or {}).get('url') if task else None
             minutes = self.cited(sid) if self.cited else None
-            row['review_queue'] = review_queue(row['utterances'], minutes)
+            if minutes is not None and minutes.get('items') is not None and row['transcript_status'] != 'expired':
+                # With minutes, a person checks their items (what to do / decided / open), not sentences.
+                stale = minutes.get('invalidated') or (self.minutes_current is not None and not self.minutes_current(row))
+                row['items'] = minutes_items.present(minutes['items'], row, row['tasks'], stale=stale)
+                row['review_queue'] = minutes_items.queue(row['items'])
+            else:
+                row['review_queue'] = review_queue(row['utterances'], minutes)
             row['display_title'], row['title_source'] = meeting_title(row,
                 (minutes or {}).get('theme') if row['transcript_status'] != 'expired' else None)
             return row
@@ -455,6 +474,13 @@ class Meetings:
         for stamp in (started, req.get('ended_at')):
             if stamp is not None:
                 timestamp(stamp)
+        closure = req.get('asr_closure')
+        if closure is not None:
+            if closure not in ('acknowledged', 'incomplete', 'cancelled') or not req.get('ended_at'):
+                raise ValueError('转写结束状态无效或会议尚未结束')
+            for key, limit in (('asr_error_code', 80), ('asr_error', 500)):
+                if req.get(key) is not None:
+                    text(req[key], limit)
         zone = text(req.get('time_zone', 'UTC'), 100); ZoneInfo(zone)
         ag = agenda(req.get('agenda'))
         with self.lock:
@@ -478,7 +504,7 @@ class Meetings:
             if policy is not None:
                 row['storage_policy'] = policy
                 row['transcript_status'] = 'available'
-            for derived in ('digest', 'tasks', 'review_queue', 'display_title', 'title_source'):
+            for derived in MEETING_DERIVED:
                 row.pop(derived, None)
             if started and started != row['started_at']:
                 raise ValueError('会议开始日期不可变')
@@ -486,21 +512,37 @@ class Meetings:
                 row['ended_at'] = req['ended_at']
                 # A phone that was killed mid-meeting estimates the end when it is next opened.
                 row['ended_source'] = 'recovered' if req.get('recovered') is True else 'device'
+                if closure is not None:
+                    if row.get('asr_closure') is not None and row['asr_closure'] != closure:
+                        raise ValueError('同场转写结束状态不可被迟到同步改写')
+                    row['asr_closure'] = closure
+                    for key in ('asr_error_code', 'asr_error'):
+                        if closure != 'acknowledged' and req.get(key):
+                            row[key] = req[key]
             if 'agenda' in req:  # an end-only resend carries no agenda and must not wipe it
                 row['agenda'] = ag
             if rows:
                 row['last_sync_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+            changed_ids = []
             for key, updates in (('utterances', rows), ('notices', notices)):
                 merged = {i['id']: {k:v for k,v in i.items() if k not in DERIVED} for i in row[key]}
                 if key == 'utterances':
                     for update in updates:
                         before = merged.get(update['id'])
-                        if before and before['text'] != update['text']:
+                        if before and any(before.get(field) != update.get(field) for field in ('text', 'start_ms', 'end_ms')):
+                            changed_ids.append(update['id'])
+                            versions = row.setdefault('source_versions', {})
+                            versions[update['id']] = int(versions.get(update['id'], 0)) + 1
                             review = row.get('reviews', {}).get(update['id'], {})
-                            if review.get('verdict') == 'confirmed':
-                                review.pop('verdict', None)
+                            if review:
+                                changed_at = dt.datetime.now(dt.timezone.utc).isoformat()
+                                history = row.setdefault('review_history', [])
+                                history.append(dict(utterance_id=update['id'], review=dict(review),
+                                    source_text_hash=hashlib.sha256(before['text'].encode('utf-8')).hexdigest(),
+                                    invalidated_at=changed_at))
+                                row['review_history'] = history[-1000:]
                                 row.get('confirmed_text_hashes', {}).pop(update['id'], None)
-                                review['source_changed_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+                                review['source_changed_at'] = changed_at
                             for evidence in row.get('retained_evidence', []):
                                 if evidence['id'] == update['id']:
                                     evidence['source_status'] = 'changed'
@@ -513,10 +555,11 @@ class Meetings:
             row['utterances'].sort(key=lambda u: (u['start_ms'], u['id']))
             self.write(sid, row)
             result = dict(session_id=sid, utterance_count=len(row['utterances']), notice_count=len(row['notices']),
-                          storage_policy=policy, transcript_status=row.get('transcript_status', 'available'))
+                          storage_policy=policy, transcript_status=row.get('transcript_status', 'available'),
+                          asr_closure=row.get('asr_closure'), source_changed_ids=changed_ids)
             return dict(result, rejected=rejected) if rejected else result
 
-    def set_ended(self, sid, ended_at, source):
+    def set_ended(self, sid, ended_at, source, closure=None, error_code=None, error=None):
         """End time from another signal (e.g. the uploaded recording); never overrides one the phone sent."""
         timestamp(ended_at)
         with self.lock:
@@ -524,9 +567,17 @@ class Meetings:
             if os.path.exists(path + '.deleted') or not os.path.isfile(path):
                 return False
             row = read_json(path)
-            if row.get('ended_at'):
+            changed = not row.get('ended_at')
+            if changed:
+                row['ended_at'], row['ended_source'] = ended_at, source
+            if closure in ('acknowledged', 'incomplete', 'cancelled') and not row.get('asr_closure'):
+                row['asr_closure'] = closure
+                if closure != 'acknowledged':
+                    if isinstance(error_code, str): row['asr_error_code'] = error_code[:80]
+                    if isinstance(error, str) and row.get('transcript_status') != 'expired': row['asr_error'] = error[:500]
+                changed = True
+            if not changed:
                 return False
-            row['ended_at'], row['ended_source'] = ended_at, source
             self.write(sid, row)
             return True
 
@@ -537,7 +588,8 @@ class Meetings:
         fd, tmp = tempfile.mkstemp(dir=self.dir, suffix='.tmp')
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump(row, f, ensure_ascii=False); f.flush(); os.fsync(f.fileno())
+                json.dump({k: v for k, v in row.items() if k not in MEETING_DERIVED}, f, ensure_ascii=False)
+                f.flush(); os.fsync(f.fileno())
             os.replace(tmp, self.path(sid))
         finally:
             if os.path.exists(tmp): os.unlink(tmp)
@@ -564,7 +616,9 @@ class Meetings:
                 raise ValueError('会议里没有这句话')
             reviews = row.setdefault('reviews', {})
             hashes = row.setdefault('confirmed_text_hashes', {})
-            entry = {k: v for k, v in {**reviews.get(uid, {}), **fields}.items() if v is not None and k in ('speaker', 'verdict', 'owner')}
+            previous = reviews.get(uid, {})
+            previous = {} if previous.get('source_changed_at') else previous
+            entry = {k: v for k, v in {**previous, **fields}.items() if v is not None and k in ('speaker', 'verdict', 'owner')}
             if entry:
                 reviews[uid] = dict(entry, by=by, at=dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'))
                 if fields.get('verdict') == 'confirmed':
@@ -576,6 +630,19 @@ class Meetings:
                 hashes.pop(uid, None)
             self.write(sid, row)
             return dict(session_id=sid, utterance_id=uid, review=reviews.get(uid))
+
+    def review_item(self, req):
+        """Check one minutes item. Stored with the meeting, apart from sentence reviews, so the minutes stay current."""
+        sid = identifier(req.get('session_id'))
+        with self.lock:
+            current = self.load(sid)
+            if current.get('items') is None:
+                raise ValueError('这场会议还没有可核对的纪要事项')
+            row = read_json(self.path(sid))
+            minutes_items.review(row, current['items'], req, self.team)
+            self.write(sid, row)
+            fresh = self.load(sid)
+            return dict(session_id=sid, items=fresh['items'], review_queue=fresh['review_queue'])
 
     def retain(self, req):
         """Explicitly save a confirmed summary and short exact quotes independently of full-text expiry."""
@@ -614,7 +681,8 @@ class Meetings:
                     changed_quotes.add(uid)
                 kept[uid] = dict(id=uid, text=quote, start_ms=u['start_ms'], end_ms=u['end_ms'],
                     tag=u.get('tag'), speaker=u.get('review', {}).get('speaker') or u.get('speaker'),
-                    confirmed=True, confirmed_at=confirmed_at, excerpt=True, source_status='available', _action_rebind=True)
+                    confirmed=True, confirmed_at=confirmed_at, excerpt=True, source_status='available', _action_rebind=True,
+                    original_text_hash=expected)
             saved = {s['id']: s for s in row.get('retained_summaries', [])}
             for summary in saved.values():
                 if changed_quotes.intersection(summary.get('source_ids', [])):
@@ -719,10 +787,13 @@ class Meetings:
             return dict(count=len(rows), items=[dict(session_id=r['session_id'], started_at=r['started_at'],
                 title=r['display_title'], title_source=r['title_source'], project=r.get('project'),
                 ended_at=r.get('ended_at'), goal=(r.get('agenda') or {}).get('goal', ''),
+                asr_closure=r.get('asr_closure'),
                 utterance_count=len(r['utterances']), digest_counts={t: len(r['digest'][t]) for t in DIGEST},
                 storage_policy=r.get('storage_policy'), transcript_status=r.get('transcript_status', 'available'),
                 retained_evidence_count=len(r.get('retained_evidence', [])),
-                review_pending={k: sum(q['kind'] == k for q in r['review_queue']) for k in ('commitment', 'decision', 'speaker')})
+                review_pending=({k: sum(q.get('item_kind') == k for q in r['review_queue']) for k in minutes_items.KINDS}
+                                if r.get('items') is not None else
+                                {k: sum(q['kind'] == k for q in r['review_queue']) for k in ('commitment', 'decision', 'speaker')}))
                 for r in rows[:limit]])
 
     def delete(self, req):
@@ -734,7 +805,30 @@ class Meetings:
             fd = os.open(path + '.deleted', os.O_WRONLY | os.O_CREAT, 0o600)
             os.close(fd)
             if os.path.isfile(path): os.unlink(path)
-        return dict(deleted=True)
+        return dict(deleted=True, session_id=req.get('session_id'))
+
+    @staticmethod
+    def confirmed_decisions(row):
+        """Confirmed item conclusions take precedence over their old sentence tags."""
+        if not minutes_items.reusable(row):
+            return []
+        decisions, covered = [], set()
+        for item in row.get('items') or []:
+            if item.get('kind') == 'decision' or (item.get('review') or {}).get('kind') == 'decision':
+                covered.update(item.get('ids') or [])
+        for item in minutes_items.confirmed(row, 'decision'):
+            evidence = item['evidence']
+            decisions.append(dict(id=evidence[0]['id'], item_id=item['id'], text=item['title'], tag='decision',
+                start_ms=min(line['start_ms'] for line in evidence), end_ms=max(line['end_ms'] for line in evidence),
+                speaker=None, source='meeting_review', source_kind='meeting_item', source_status=item['source_status'],
+                evidence=evidence, review=item['review'], fingerprint=item['fingerprint']))
+            covered.update(item.get('ids') or [])
+        decisions.extend(dict(u, source='sentence_review', source_kind=u.get('source_kind', 'transcript'),
+                              source_status='retained' if u.get('source_kind') == 'saved_excerpt' else 'current')
+                         for u in evidence_rows(row) if u['id'] not in covered and u.get('tag') in ('decision', 'constraint')
+                         and u.get('review', {}).get('verdict') == 'confirmed'
+                         and not u.get('review', {}).get('source_changed_at'))
+        return decisions
 
     PROJECT_POOL = 30
 
@@ -752,20 +846,31 @@ class Meetings:
                 return dict(id=f"h:{s['session_id']}:{u['id']}", text=u['text'], start_ms=u['start_ms'], end_ms=u['end_ms'],
                             tag=u.get('tag'), speaker=u.get('review', {}).get('speaker') or u.get('speaker'),
                             session_id=s['session_id'], started_at=s['started_at'], meeting_title=s['title'], confirmed=confirmed,
-                            source_kind=u.get('source_kind', 'transcript'), source_status=u.get('source_status', 'available'))
+                            source_kind=u.get('source_kind', 'transcript'), source_status=u.get('source_status', 'available'),
+                            item_id=u.get('item_id'), evidence=u.get('evidence'), source=u.get('source'))
             if project:
                 pool = []
                 for s in (s for s in sessions if s.get('project') == project):
                     row = self.load(s['session_id'])
-                    pool += [item(s, u, True) for u in evidence_rows(row) if u.get('tag') in ('decision', 'constraint')
-                             and u.get('review', {}).get('verdict') == 'confirmed']
+                    pool += [item(s, u, True) for u in self.confirmed_decisions(row)]
                 if pool:
                     return pool[:self.PROJECT_POOL]
             pool = []
             for s in sessions[:10]:
                 row = self.load(s['session_id'])
-                pool += [item(s, u, u.get('source_kind') == 'saved_excerpt') for u in evidence_rows(row) if u.get('tag') in ('decision', 'constraint')
-                         and u.get('review', {}).get('verdict') != 'rejected']
+                if not minutes_items.reusable(row):
+                    continue
+                confirmed = self.confirmed_decisions(row)
+                covered = {line['id'] for value in confirmed for line in value.get('evidence') or [value]}
+                covered.update(uid for value in row.get('items') or []
+                    if (value.get('review') or {}).get('status') in ('rejected', 'merged')
+                    or (value.get('review') or {}).get('status') == 'confirmed'
+                    and (value.get('review') or {}).get('kind') != 'decision'
+                    for uid in value.get('ids') or [])
+                pool += [item(s, u, True) for u in confirmed]
+                pool += [item(s, u, u.get('source_kind') == 'saved_excerpt') for u in evidence_rows(row) if u['id'] not in covered
+                         and u.get('tag') in ('decision', 'constraint') and u.get('review', {}).get('verdict') != 'rejected'
+                         and not u.get('review', {}).get('source_changed_at')]
             return sorted((u for u in pool if overlap(query, u['text']) > 0),
                           key=lambda u: -overlap(query, u['text']))[:10]
 
@@ -798,15 +903,14 @@ class Meetings:
         with self.lock:
             groups = {}
             for s in self._listing()['items']:
-                if s.get('project'):
+                if s.get('project') and minutes_items.reusable(self.load(s['session_id'])):
                     groups.setdefault(s['project'], []).append(s)
             items = []
             for name, meetings in groups.items():
                 confirmed = 0
                 for s in meetings:
                     row = self.load(s['session_id'])
-                    confirmed += sum(1 for u in evidence_rows(row) if u.get('tag') in ('decision', 'constraint')
-                                     and u.get('review', {}).get('verdict') == 'confirmed')
+                    confirmed += len(self.confirmed_decisions(row))
                 items.append(dict(name=name, meeting_count=len(meetings), confirmed_decisions=confirmed,
                                   last_started_at=max(s['started_at'] for s in meetings)))
             items.sort(key=lambda p: p['last_started_at'], reverse=True)
@@ -818,20 +922,21 @@ class Meetings:
         if not name:
             raise ValueError('缺少项目名称')
         with self.lock:
-            meetings = [s for s in self._listing()['items'] if s.get('project') == name]
+            meetings = [s for s in self._listing()['items'] if s.get('project') == name
+                        and minutes_items.reusable(self.load(s['session_id']))]
             decisions, unreviewed = [], 0
             for s in meetings:
                 row = self.load(s['session_id'])
+                for decision in self.confirmed_decisions(row):
+                    decisions.append(dict(decision, session_id=s['session_id'], started_at=s['started_at'], meeting_title=s['title']))
+                item_decisions = [item for item in row.get('items') or [] if item.get('kind') == 'decision']
+                covered = {uid for item in item_decisions for uid in item.get('ids') or []}
+                unreviewed += sum(not item.get('review') and not item.get('stale') for item in item_decisions)
                 for u in sorted(evidence_rows(row), key=lambda u: u['start_ms']):
-                    if u.get('tag') not in ('decision', 'constraint'):
+                    if u['id'] in covered or u.get('tag') not in ('decision', 'constraint'):
                         continue
                     verdict = u.get('review', {}).get('verdict')
-                    if verdict == 'confirmed':
-                        decisions.append(dict(id=u['id'], text=u['text'], tag=u['tag'], start_ms=u['start_ms'], end_ms=u['end_ms'],
-                                              speaker=u.get('review', {}).get('speaker') or u.get('speaker'),
-                                              session_id=s['session_id'], started_at=s['started_at'], meeting_title=s['title'],
-                                              source_kind=u.get('source_kind', 'transcript'), source_status=u.get('source_status', 'available')))
-                    elif verdict is None and u['tag'] == 'decision':
+                    if verdict is None and u['tag'] == 'decision':
                         unreviewed += 1
             return dict(name=name, meetings=meetings, decisions=decisions, unreviewed_decisions=unreviewed)
 

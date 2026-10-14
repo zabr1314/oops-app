@@ -13,6 +13,9 @@ class MeetingSync(val sessionId: String, private val startedAt: String, private 
     private var revision = 1L
     private var ackRevision = 0L
     private var endedAt: String? = null
+    private var asrClosure: String? = null
+    private var asrErrorCode: String? = null
+    private var asrError: String? = null
     private var lastAttempt = -20_000L
     private var nextAttempt = 0L
     private var failures = 0
@@ -39,7 +42,16 @@ class MeetingSync(val sessionId: String, private val startedAt: String, private 
     @Synchronized fun notice(j: JSONObject) { notices[j.getString("id")] = j.toString() }
     @Synchronized fun agenda(j: JSONObject) { val value = j.toString(); if (value != agenda) { agenda = value; revision++ } }
     /** The end goes out at once, not after a backoff left over from an earlier failure. */
-    @Synchronized fun stop(at: String) { endedAt = at; revision++; nextAttempt = 0 }
+    @Synchronized fun stop(at: String, closure: String? = null, errorCode: String? = null, error: String? = null) {
+        require(closure == null || closure in setOf("acknowledged", "incomplete", "cancelled"))
+        val changed = endedAt != at || closure != null &&
+            (asrClosure != closure || asrErrorCode != errorCode?.take(80) || asrError != error?.take(500))
+        endedAt = at
+        if (closure != null) {
+            asrClosure = closure; asrErrorCode = errorCode?.take(80); asrError = error?.take(500)
+        }
+        if (changed) { revision++; nextAttempt = 0 }
+    }
     @Synchronized fun pendingCount() = utterances.size + notices.size + if (revision != ackRevision) 1 else 0
     @Synchronized fun batch(now: Long, force: Boolean = false): Batch? {
         if (sending || unsupported || pendingCount() == 0 || now < nextAttempt) return null
@@ -62,7 +74,11 @@ class MeetingSync(val sessionId: String, private val startedAt: String, private 
         attachContract(body)
         return Batch(body, u, n, revision)
     }
-    private fun attachContract(body: JSONObject) { archiveContract?.let { contract -> contract.keys().forEach { key -> body.put(key, contract.get(key)) } } }
+    private fun attachContract(body: JSONObject) {
+        archiveContract?.let { contract -> contract.keys().forEach { key -> body.put(key, contract.get(key)) } }
+        asrClosure?.let { body.put("asr_closure", it).put("asr_error_code", asrErrorCode ?: JSONObject.NULL)
+            .put("asr_error", asrError ?: JSONObject.NULL) }
+    }
     @Synchronized fun complete(batch: Batch, now: Long, success: Boolean, supported: Boolean = true) {
         require(batch.body.getString("session_id") == sessionId)
         sending = false

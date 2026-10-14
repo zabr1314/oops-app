@@ -124,11 +124,17 @@ class ArchivePolicyTest(unittest.TestCase):
         contract = dict(self.contract, audio_retention_days=90, transcript_retention_days=7)
         self.meetings.sync(dict(self.body, **contract))
         self.upload(contract)
+        # Simulate a legacy writer which accidentally persisted derived items.
+        path = Path(self.meetings.path(self.sid))
+        legacy = json.loads(path.read_text())
+        legacy['items'] = [dict(title='派生事项', evidence=[dict(text=self.secret)])]
+        path.write_text(json.dumps(legacy, ensure_ascii=False))
         future = self.now + dt.timedelta(days=8)
         self.meetings.cleanup(future); self.recordings.cleanup(future)
         row = self.meetings.load(self.sid)
         self.assertEqual([], row['utterances'])
         self.assertEqual('expired', row['transcript_status'])
+        self.assertNotIn('items', row)
         self.assertNotIn(self.secret, Path(self.meetings.path(self.sid)).read_text())
         folder = Path(self.recordings.folder(self.sid))
         self.assertFalse((folder / 'finals.jsonl').exists())

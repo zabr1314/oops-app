@@ -41,6 +41,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit, parse_qs, unquote
 from meeting_features import Meetings, judge_notice
+import minutes_items
+from action_sources import DailyReceipts, SourceChanged, fingerprint
+from item_quality import assess_item
 from voiceprint_registry import VoiceprintRegistry, audio_quality, person_profiles
 from voiceprint_invites import invite_person
 from recordings import RecordingError, Recordings
@@ -1167,9 +1170,18 @@ class Operations:
         os.replace(tmp, self.path(op["op_id"]))
 
 
+def external_attempted(op):
+    """Both journal generations preserve unknown outcomes across upgrades."""
+    names = ('external_write_attempted', 'external_attempted')
+    if any(op.get(name) is True for name in names):
+        return True
+    return not any(name in op for name in names) and op.get('attempts', 0) > 0
+
+
 def result_of(op):
-    source_failure = (op['status'] == 'failed' and not op.get('source_blocked') and op.get('external_write_attempted') is not True
-                      and (op.get('error_code') == 'SOURCE_BINDING_REQUIRED' or str(op.get('error_code', '')).startswith('ACTION_SOURCE_')))
+    source_failure = (op['status'] == 'failed' and not op.get('source_blocked') and not external_attempted(op)
+                      and (op.get('error_code') in ('SOURCE_BINDING_REQUIRED', 'SOURCE_CHANGED')
+                           or str(op.get('error_code', '')).startswith('ACTION_SOURCE_')))
     return {"op_id": op["op_id"], "status": op["status"], "feishu_task": op.get("feishu_task"),
             "message": op.get("message"), **({"error_code": op['error_code']} if op.get('error_code') else {}),
             **({"source_blocked": True} if op.get('source_blocked') else {}),
@@ -1200,6 +1212,7 @@ class Backend:
         state = args.state_dir
         self.people = People(os.path.join(state, "people.json"))
         self.ops = Operations(os.path.join(state, "operations"))
+        self.daily_receipts = DailyReceipts()
         self.archive_policies = ArchivePolicies(os.path.join(state, 'archive-policies'), self.legacy_archive)
         self.meetings = Meetings(os.path.join(state, "meetings"), self.ops,
             owner=lambda value: commitment_evidence(value)[1], deadline=lambda value: WHEN.search(value).group(0) if WHEN.search(value) else None,
@@ -1212,6 +1225,7 @@ class Backend:
                        if os.environ.get("OOPS_FEISHU_BOT") == "1" else None)
         # With minutes, post-meeting review covers the sentences they rest on, not every line the live tagging flagged.
         self.meetings.cited = self.feishu.cited_sentences if self.feishu else None
+        self.meetings.minutes_current = self.feishu.minutes_current if self.feishu else None
         self.speakers = Speakers(args.speaker_accept, args.speaker_margin, os.path.join(state, "voiceprints.json"))
         self.speaker_preview, self.preview_error = None, None
         if getattr(args, 'speaker_preview', False) and self.speakers.ready:
@@ -1421,14 +1435,24 @@ class Backend:
             meta = self.recordings.meta(sid)
             ended = meta.get("audio_ended_at")
             # A recording cut at the length cap ends at the cap, not when the meeting did.
-            if ended and meta.get("capped") != "True" and self.meetings.set_ended(sid, ended, "recording"):
+            if ended and meta.get("capped") != "True" and self.meetings.set_ended(sid, ended, "recording",
+                    meta.get('asr_closure'), meta.get('asr_error_code'), meta.get('asr_error')):
                 log(f"meeting {sid[:8]} end time from its recording: {ended}")
         except (OSError, ValueError, RecordingError) as error:
             log(f"meeting {sid[:8]} end time from recording skipped: {type(error).__name__}")
 
     def meeting_call(self, action, body):
         try:
-            if action == 'sync': return self.meetings.sync(body)
+            if action == 'sync':
+                result = self.meetings.sync(body)
+                if result.get('source_changed_ids'):
+                    with self.speaker_state_lock:
+                        manual = self._state('manual_speakers')
+                        for uid in result['source_changed_ids']:
+                            manual.pop((result['session_id'], uid), None)
+                    if getattr(self, 'feishu', None):
+                        self.feishu.invalidate_minutes(result['session_id'])
+                return result
             if action == 'delete':
                 result = self.meetings.delete(body)
                 if getattr(self, 'recordings', None):  # audio goes with its meeting
@@ -1437,6 +1461,7 @@ class Backend:
             if action == 'rename': return self.meetings.rename(body)
             if action == 'retain': return self.meetings.retain(body)
             if action == 'project': return self.meetings.set_project(body)
+            if action == 'items': return self.meetings.review_item(body)
             if action == 'review':
                 with self.meetings.lock:
                     before = self.meetings.load(body.get('session_id'))
@@ -1456,6 +1481,8 @@ class Backend:
             raise ApiError(error.status, 'ARCHIVE_POLICY', str(error), **error.extra) from None
         except FileNotFoundError:
             raise ApiError(404, 'NOT_FOUND', '会议不存在或已删除') from None
+        except minutes_items.ItemChanged as error:
+            raise ApiError(409, 'ITEM_CHANGED', str(error)) from None
         except (ValueError, KeyError, TypeError) as error:
             raise ApiError(400, 'BAD_REQUEST', str(error)) from None
 
@@ -1502,7 +1529,9 @@ class Backend:
         except ValueError as error:
             raise ApiError(400, 'BAD_REQUEST', str(error)) from None
         sessions = {m['session_id'] for m in value['meetings']}
-        value['tasks'] = [t for t in self.tasks()['items'] if t['session_id'] in sessions] if sessions and getattr(self, 'ops', None) else []
+        tasks = self.tasks() if sessions and getattr(self, 'ops', None) else {'items': [], 'meeting_items': []}
+        value['tasks'] = [t for t in tasks['items'] if t['session_id'] in sessions]
+        value['meeting_items'] = [t for t in tasks.get('meeting_items', []) if t['session_id'] in sessions]
         return value
 
     def remember_review(self, body):
@@ -1557,7 +1586,16 @@ class Backend:
             else:
                 result = rules_tag(req["text"])
             return {"utterance_id": req["utterance_id"], **result, "timing_ms": timing}
-        return self.tags.get_or_compute((req["session_id"], req["utterance_id"]), compute)
+        result = self.tags.get_or_compute((req["session_id"], req["utterance_id"]), compute)
+        if result.get('tag') == 'commitment':
+            rows = [dict(id=f'context-{i}', text=t if isinstance(t, str) else t.get('text', ''))
+                    for i, t in enumerate(req.get('context', [])) if isinstance(t, (str, dict))]
+            evidence = [dict(id=req['utterance_id'], text=req['text'])]
+            quality = assess_item(result.get('task_clause') or req['text'], evidence, rows + evidence)
+            result = dict(result, task_quality=quality)
+            if quality['status'] != 'accepted':
+                result = dict(result, tag='uncertain', original_tag='commitment')
+        return result
 
     def _shared(self, name, factory):
         return self.__dict__.setdefault(name, factory())
@@ -1797,6 +1835,14 @@ class Backend:
         if not utterances:
             raise ApiError(400, "BAD_REQUEST", "缺少 utterances")
         initial_binding, source_error = self.draft_source_binding(req)
+        source_receipt = None
+        if req.get('recording_mode') == 'daily':
+            try:
+                if os.path.exists(self.meetings.path(req.get('session_id')) + '.deleted'):
+                    raise SourceChanged('source_deleted', '来源已删除，请从当前日常原话重新起草')
+                source_receipt = self.daily_receipts.issue(req)
+            except (SourceChanged, ValueError) as error:
+                raise ApiError(409, 'SOURCE_CHANGED', str(error), no_external_write=True) from None
         context = req.get("context") or []
         main = "".join(u["text"] for u in utterances).strip()
         when = WHEN.search(main)
@@ -1825,6 +1871,18 @@ class Backend:
         resolve_started = time.monotonic()
         tasks = self.resolve_tasks(req, utterances, context)
         deepseek_ms = int((time.monotonic() - resolve_started) * 1000)
+        candidates = tasks
+        tasks = [t for t in candidates if t.get('quality', {}).get('status') == 'accepted']
+        review_candidates = [t for t in candidates if t.get('quality', {}).get('status') == 'needs_review']
+        fallback_quality = assess_item(main, [dict(id=str(u.get('id', u.get('utterance_id', 'source'))), text=u['text'])
+                                                for u in utterances], context + utterances)
+        quality = tasks[0]['quality'] if tasks else (review_candidates[0]['quality'] if review_candidates else fallback_quality)
+        if not tasks and quality['status'] != 'accepted':
+            what, when = '', None
+            ownership = dict(ownership, owner=None, suggested_owner=None)
+            task_context = dict(quote=main, resolutions=[], missing=quality.get('issues') or ['请核对是否为实际待办'],
+                                quality=quality, owner_role='unknown', other_tasks=[])
+        mapped = None
         if tasks:
             primary = tasks[0]
             session = req.get("session_id")
@@ -1842,7 +1900,7 @@ class Backend:
             task_context = {"quote": primary["task_quote"], "resolutions": primary["resolutions"],
                             "missing": primary["missing"], "owner_role": primary["owner_role"],
                             "clause_speaker": speaker, "due_raw": primary["due_raw"],
-                            "other_tasks": [t["what"] for t in tasks[1:]]}
+                            "other_tasks": [t["what"] for t in tasks[1:]], "quality": quality}
         iso = resolve_date(when.group(0), reference_date(req)) if when else None
         board = None
         if req.get("board") is True and isinstance(req.get("session_id"), str):
@@ -1850,19 +1908,22 @@ class Backend:
             # list returned here is the one before this sentence; the phone reads GET .../board for the update.
             boards = getattr(self, "boards", None)
             if boards:
-                if tasks:
+                if candidates:
                     lines = [dict(id=str(u.get("id", "")), text=u.get("text", ""), speaker=u.get("speaker"))
                              for u in context + utterances if isinstance(u, dict) and u.get("text")]
-                    source = str(tasks[0]["utterance"].get("id", ""))
+                    source = str(candidates[0]["utterance"].get("id", ""))
                     boards.submit(req["session_id"], [dict(what=t["what"], source=source,
-                                                           owner=(mapped if i == 0 else owner_for(t, None, [])) or "")
-                                                      for i, t in enumerate(tasks)], lines)
+                                                           owner=(mapped if tasks and t is tasks[0] else owner_for(t, None, [])) or "")
+                                                      for t in candidates], lines)
                 board = boards.view(req["session_id"])
         current_binding, current_error = self.draft_source_binding(req)
-        if current_binding != initial_binding:
-            current_binding, current_error = None, '来源在起草期间已变化，请重新读取后起草'
-        return {"who": ownership["owner"], **ownership, "what": what, "task_context": task_context, **({"board": board} if board else {}),
+        if initial_binding != current_binding:
+            current_binding, current_error = None, "起草期间原话或人工核对已变化，请重新读取后起草"
+        return {"who": ownership["owner"], **ownership, "what": what, "task_context": task_context,
                 "source_binding": current_binding, "source_error": current_error or source_error,
+                "source_receipt": source_receipt,
+                "quality": quality, "review_candidates": [dict(what=t['what'], quality=t['quality']) for t in review_candidates],
+                **({"board": board} if board else {}),
                 "when": {"iso": iso.isoformat() if iso else None, "raw": when.group(0)} if when else None,
                 "constraint": constraint, "assignee_candidates": TEAM, "timing_ms": {"deepseek_ms": deepseek_ms}}
 
@@ -1870,6 +1931,11 @@ class Backend:
 
     def draft_source_binding(self, req):
         try:
+            if req.get('recording_mode') == 'daily':
+                path = self.meetings.path(req.get('session_id'))
+                if os.path.exists(path + '.deleted') or os.path.exists(path):
+                    raise SourceChanged('source_changed', '请从当前日常记录重新起草，不能复用已归档或删除的会话')
+                return self.sign_action_binding(self.daily_receipts.binding(req)), None
             rows = req.get('utterances') or []
             ids = [u.get('id', u.get('utterance_id')) for u in rows]
             if any(not isinstance(uid, str) for uid in ids):
@@ -1885,7 +1951,7 @@ class Backend:
                         {uid: u.get('text') for uid, u in zip(context_ids, context)},
                         {uid: u['speaker'] for uid, u in zip(context_ids, context) if 'speaker' in u})['sources']
                 return self.sign_action_binding(result), None
-        except (ActionSourceError, FileNotFoundError, ValueError, AttributeError) as error:
+        except (ActionSourceError, SourceChanged, FileNotFoundError, ValueError, AttributeError) as error:
             missing = '当前来源尚未保存或已不可用；日常临时原话未独立保存时不能创建带来源任务'
             return None, str(error) if isinstance(error, ActionSourceError) else missing
 
@@ -1927,7 +1993,20 @@ class Backend:
             proof = binding.get('proof')
             if not isinstance(proof, str) or not hmac.compare_digest(proof, self.action_binding_signature(binding)):
                 raise ActionSourceError('ACTION_SOURCE_INVALID', '来源合同不完整或已被修改，请重新读取后起草')
+            path = self.meetings.path(body.get('session_id'))
+            if os.path.exists(path + '.deleted'):
+                raise ActionSourceError('ACTION_SOURCE_UNAVAILABLE', '来源已删除，不能继续使用旧合同')
+            if binding.get('scope') == 'daily':
+                if os.path.exists(path):
+                    raise ActionSourceError('ACTION_SOURCE_INVALID', '日常短依据不能代替已归档会议的来源合同')
+                try:
+                    self.daily_receipts.validate(body)
+                except SourceChanged as error:
+                    raise ActionSourceError('SOURCE_CHANGED', str(error)) from None
+                return
             row = self.meetings.load(body.get('session_id'))
+            if row.get('private') or row.get('review_export_scope') in ('private', 'none', 'revoked'):
+                raise ActionSourceError('ACTION_SOURCE_REVOKED', '来源不允许对外使用，请重新核对共享范围')
             validate_binding(row, body)
         except (ActionSourceError, FileNotFoundError, ValueError) as error:
             code = error.code if isinstance(error, ActionSourceError) else 'ACTION_SOURCE_UNAVAILABLE'
@@ -1947,63 +2026,152 @@ class Backend:
                 except ActionSourceError as error:
                     task['source_binding'], task['source_error'] = None, str(error)
         return board
+    def action_source(self, body, expected=None):
+        """Read current evidence through the same signed contract as execution."""
+        with self.action_source_lock(body):
+            self.validate_action_source(body)
+            if not has_source(body):
+                return dict(kind='manual', status='manual')
+            binding = body['evidence']['source_binding']
+            if binding.get('scope') == 'daily':
+                return self.daily_receipts.validate(body, expected)
+            row = self.meetings.load(body['session_id'])
+            selected = binding['sources']
+            raw = {u['id']: u for u in row.get('utterances', [])}
+            kept = {u['id']: u for u in row.get('retained_evidence', [])}
+            lines = [raw.get(s['id']) if s['kind'] == 'transcript' and s['id'] in raw else kept[s['id']] for s in selected]
+            evidence = body['evidence']
+            if (('clip_start_ms' in evidence or 'clip_end_ms' in evidence)
+                    and (evidence.get('clip_start_ms') != min(u['start_ms'] for u in lines)
+                         or evidence.get('clip_end_ms') != max(u['end_ms'] for u in lines))):
+                raise ApiError(409, 'ACTION_SOURCE_CHANGED', '引用时间与当前原话不一致，请重新起草', no_external_write=True)
+            retained = any(s['kind'] == 'saved_excerpt' or s['id'] not in raw for s in selected)
+            return dict(kind='meeting', status='retained' if retained else 'current',
+                        fingerprint=fingerprint({k: v for k, v in binding.items() if k != 'proof'}))
+
+    def pending_source(self, op):
+        """A status read never retries writes or calls an unknown result failed."""
+        error = None
+        try:
+            self.action_source(op['request'], op.get('source_snapshot'))
+        except (ApiError, SourceChanged, ValueError, OSError) as failure:
+            error = failure
+        with self.ops.lock:
+            current = self.ops.load(op['op_id'])
+            if (current['status'] == 'created' or op['op_id'] in self.ops.running
+                    or current['status'] != 'pending' and not external_attempted(current)):
+                return result_of(current)
+            uncertain = external_attempted(current)
+            if error:
+                current['error_code'] = getattr(error, 'code', 'ACTION_SOURCE_UNAVAILABLE')
+            current['source_blocked'] = bool(error and uncertain)
+            current['status'] = 'pending' if uncertain or error is None else 'failed'
+            current['message'] = (
+                '原操作结果未知；来源许可已失效，已停止重发，请核实原任务，勿重复创建' if error and uncertain else
+                '原操作尚未对外执行；来源许可已失效，请重新核对并起草' if error else
+                '原操作结果尚未确认，已停止重发；请查询原操作或核实飞书任务' if uncertain else
+                '原操作尚未对外执行；查询不会触发创建，请明确确认原操作')
+            self.ops.save(current)
+            return result_of(current)
 
     def confirm(self, body):
-        op_id = body.get("op_id")
-        draft = body.get("draft") or {}
-        if not (isinstance(op_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{8,100}", op_id)):
-            raise ApiError(400, "BAD_REQUEST", "op_id 无效")
-        if not (isinstance(draft.get("who"), str) and draft["who"].strip() and
-                isinstance(draft.get("what"), str) and draft["what"].strip()):
-            raise ApiError(400, "BAD_REQUEST", "负责人和事项不能为空")
+        op_id = body.get('op_id')
+        if not isinstance(op_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', op_id):
+            raise ApiError(400, 'BAD_REQUEST', 'op_id 无效')
         canonical = json.dumps(body, ensure_ascii=False, sort_keys=True)
-        # Never acquire the meeting lock while holding ops.lock: Meetings.load reads the journal.
+        # Acquire source lock before ops.lock; Meetings.load also reads operations.
         with self.ops.lock:
             op = self.ops.load(op_id)
-            if op and op["request_canonical"] != canonical:
-                raise ApiError(409, "OP_PAYLOAD_CONFLICT", "同一操作编号的确认内容不一致")
-            if op and op['status'] == 'created': return result_of(op)
-        with self.action_source_lock(body):
-            with self.ops.lock:
-                op = self.ops.load(op_id)
-                if op and op['request_canonical'] != canonical:
-                    raise ApiError(409, 'OP_PAYLOAD_CONFLICT', '同一操作编号的确认内容不一致')
-                if op and op['status'] == 'created': return result_of(op)
-            try:
-                self.validate_action_source(body)
-            except ApiError as error:
-                # A previous external attempt can already exist even though the current source is invalid.
-                uncertain = op and (op.get('external_write_attempted') is True or
-                                    'external_write_attempted' not in op and op.get('attempts', 0) > 0)
-                if not uncertain: raise
-                with self.ops.lock:
-                    op.update(status='pending', source_blocked=True, error_code=error.code,
-                              message=error.message + '；上次外部创建结果仍待核实，已停止再次写入')
-                    self.ops.save(op)
+            if op and op['request_canonical'] != canonical:
+                raise ApiError(409, 'OP_PAYLOAD_CONFLICT', '同一操作编号的确认内容不一致')
+            if op and (op['status'] == 'created' or op_id in self.ops.running):
                 return result_of(op)
+            uncertain = op and external_attempted(op)
+        if uncertain:
+            return self.pending_source(op)
+        draft = body.get('draft') or {}
+        if not isinstance(draft.get('who'), str) or not draft['who'].strip() or not isinstance(draft.get('what'), str) or not draft['what'].strip():
+            raise ApiError(400, 'BAD_REQUEST', '负责人和事项不能为空')
+        with self.action_source_lock(body):
+            snapshot = self.action_source(body, (op or {}).get('source_snapshot'))
             with self.ops.lock:
                 op = self.ops.load(op_id)
                 if op and op['request_canonical'] != canonical:
                     raise ApiError(409, 'OP_PAYLOAD_CONFLICT', '同一操作编号的确认内容不一致')
+                if op and (op['status'] == 'created' or op_id in self.ops.running):
+                    return result_of(op)
+                if op and external_attempted(op):
+                    return result_of(op)
                 if not op:
-                    op = {"op_id": op_id, "request": body, "request_canonical": canonical, "status": "pending",
-                          "attempts": 0, "feishu_task": None, "message": None, "external_write_attempted": False,
-                          "created_at": dt.datetime.now().astimezone().isoformat(timespec="seconds")}
-                    self.ops.save(op)
+                    op = dict(op_id=op_id, request=body, request_canonical=canonical, status='pending',
+                              attempts=0, feishu_task=None, message=None, external_write_attempted=False,
+                              created_at=dt.datetime.now().astimezone().isoformat(timespec='seconds'))
+                op.update(source_snapshot=snapshot, source_blocked=False)
+                op.pop('error_code', None)
+                self.ops.save(op)
                 done = self.start_worker(op_id)
         done.wait(CONFIRM_WAIT_S)
         return result_of(self.ops.load(op_id))
 
     def status(self, op_id):
         with self.ops.lock:
-            op = self.ops.load(op_id) if re.fullmatch(r"[A-Za-z0-9_-]{8,100}", op_id) else None
+            op = self.ops.load(op_id) if re.fullmatch(r'[A-Za-z0-9_-]{8,100}', op_id) else None
             if not op:
-                raise ApiError(404, "OP_NOT_FOUND", "没有这个操作编号")
-            if op["status"] == "pending" and not op.get('source_blocked'):
-                self.start_worker(op_id)  # e.g. the backend restarted mid-creation: resume, same client_token
-            return result_of(op)
+                raise ApiError(404, 'OP_NOT_FOUND', '没有这个操作编号')
+            if (op['status'] == 'created' or op_id in self.ops.running
+                    or op['status'] != 'pending' and not external_attempted(op)):
+                return result_of(op)
+            guid = (op.get('feishu_task') or {}).get('guid')
+            reconcile_legacy_failure = op['status'] != 'pending'
+        if not guid or reconcile_legacy_failure:
+            return self.pending_source(op)
+        state = self.feishu_task_state(guid)
+        with self.ops.lock:
+            current = self.ops.load(op_id)
+            if current['status'] != 'pending' or op_id in self.ops.running:
+                return result_of(current)
+            if (current.get('feishu_task') or {}).get('guid') == guid and state.get('state') in ('open', 'done', 'deleted'):
+                current.update(status='created', source_blocked=False,
+                               message='已回读原任务创建回执' if state['state'] != 'deleted' else '原任务已删除；保留创建回执，不重新创建')
+                current.pop('error_code', None)
+                self.ops.save(current)
+                return result_of(current)
+        return self.pending_source(current)
 
     TASK_STATE_TTL_S = 300
+
+    def meeting_tasks(self):
+        """Human-confirmed native meeting actions, separate from Feishu receipts."""
+        values = []
+        with self.meetings.lock:
+            for name in os.listdir(self.meetings.dir):
+                if not name.endswith('.json'):
+                    continue
+                try:
+                    row = self.meetings.load(name[:-5])
+                except FileNotFoundError:
+                    continue
+                for item in minutes_items.confirmed(row, 'task'):
+                    saved, ids = item['review'], set(item['ids'])
+                    if item.get('owner') not in (*TEAM, minutes_items.COLLECTIVE):
+                        continue
+                    matches = [op for op in row.get('tasks', []) if op.get('item_id') == item['id']
+                        or (set((op.get('evidence') or {}).get('utterance_ids') or []) == ids
+                            and str(op.get('what') or '').strip() == item['title'].strip())]
+                    linked = next((op for op in matches if op.get('status') == 'created'), matches[0] if matches else None)
+                    linked = (dict(op_id=linked['op_id'], status=linked['status'], url=(linked.get('feishu_task') or {}).get('url'))
+                              if linked else None)
+                    sid = row['session_id']
+                    values.append(dict(id='meeting:' + sid + ':' + item['id'], item_id=item['id'],
+                        source='meeting_review', kind='task', session_id=sid,
+                        source_meeting=dict(id=sid, title=row['display_title'], started_at=row['started_at'], project=row.get('project')),
+                        title=item['title'], what=item['title'], detail=item.get('detail') or '', due=item.get('due') or '',
+                        owner=item['owner'], who=item['owner'], fingerprint=item['fingerprint'], evidence=item['evidence'],
+                        review=saved, reviews=[dict(saved, verdict='confirmed', updated_at=saved.get('at'))],
+                        source_status=item['source_status'], read_only=True, linked_operation=linked,
+                        linked_created=bool(linked and linked['status'] == 'created')))
+        values.sort(key=lambda value: value['source_meeting']['started_at'], reverse=True)
+        return values
 
     def tasks(self, assignee=None, status="all", now=None):
         """Created Feishu tasks with their current Feishu state; read on request, never polled."""
@@ -2013,7 +2181,7 @@ class Backend:
             raise ApiError(400, "BAD_REQUEST", "负责人不在团队名单里")
         with self.ops.lock:
             ops = [self.ops.load(n[:-5]) for n in os.listdir(self.ops.dir) if n.endswith(".json")]
-        ops = [op for op in ops if op and op.get("status") == "created" and (op.get("feishu_task") or {}).get("guid")]
+        ops = [op for op in ops if op and not op.get('archived_at') and op.get("status") == "created" and (op.get("feishu_task") or {}).get("guid")]
         with ThreadPoolExecutor(max_workers=4) as pool:
             states = dict(zip((op["op_id"] for op in ops), pool.map(lambda op: self.feishu_task_state(op["feishu_task"]["guid"]), ops)))
         now_ms = int((now or time.time()) * 1000)
@@ -2031,14 +2199,21 @@ class Backend:
             if isinstance(sid, str) and sid not in meetings:
                 meetings[sid] = self.meetings.brief(sid)
             due_ms = state.get("due_ms")
+            try:
+                source = self.action_source(req, op.get('source_snapshot'))
+                source_status, source_reason = source['status'], None
+            except (ApiError, SourceChanged, ValueError, OSError, KeyError, TypeError) as error:
+                source_reason = getattr(error, 'code', getattr(error, 'reason', 'source_unavailable'))
+                source_status = 'changed' if source_reason in ('SOURCE_CHANGED', 'ACTION_SOURCE_CHANGED', 'ACTION_SOURCE_REVOKED') else 'unavailable'
             items.append({"op_id": op["op_id"], "what": draft.get("what"), "who": who, "who_drafted": draft.get("who"),
-                          "when": draft.get("when"), "quote": evidence.get("quote"),
+                          "when": draft.get("when"), "quote": evidence.get("quote") if source_status in ('current', 'retained') else None,
+                          "source_status": source_status, "source_reason": source_reason,
                           "utterance_ids": evidence.get("utterance_ids", []), "session_id": sid,
                           "meeting": meetings.get(sid), "created_at": op.get("created_at"),
                           "url": op["feishu_task"].get("url"), "feishu": state,
                           "overdue": state["state"] == "open" and due_ms is not None and due_ms < now_ms})
         items.sort(key=lambda i: i["created_at"] or "", reverse=True)
-        return {"items": items}
+        return {"items": items, "meeting_items": self.meeting_tasks()}
 
     def feishu_task_state(self, guid):
         cache = self._state("feishu_task_states")
@@ -2084,24 +2259,36 @@ class Backend:
     def create_task(self, op_id, done):
         with self.ops.lock:
             op = self.ops.load(op_id)
-            op["status"], op["attempts"] = "pending", op["attempts"] + 1
-            self.ops.save(op)
         try:
+            if op.get('status') == 'created':
+                return
+            if external_attempted(op):
+                op.update(status='pending', message='原创建结果仍待核实，已停止重发，请查询原操作')
+                return
+            if op.get('archived_at'):
+                raise ApiError(409, 'ACTION_SOURCE_REVOKED', '原操作已归档，不能重新执行', no_external_write=True)
+            snapshot = self.action_source(op['request'], op.get('source_snapshot'))
+            with self.ops.lock:
+                op.update(status='pending', attempts=op.get('attempts', 0) + 1,
+                          source_snapshot=snapshot, external_write_attempted=False)
+                self.ops.save(op)
             op.update(self.write_feishu(op))
             op.pop('error_code', None); op.pop('source_blocked', None)
         except ApiError as error:
-            uncertain = (op.get('external_write_attempted') is True or
-                         'external_write_attempted' not in op and op.get('attempts', 0) > 1)
+            uncertain = external_attempted(op)
             op.update(status='pending' if uncertain else 'failed', error_code=error.code,
                       source_blocked=uncertain, message=(str(error.message) + '；上次外部创建结果仍待核实，已停止再次写入') if uncertain else error.message)
         except LarkError as e:
-            op.update(status="failed", feishu_task=None,
-                      message="飞书授权已失效：在 Mac 上运行 lark-cli auth login 后重试" if e.auth
-                      else f"飞书创建失败，可用同一操作重试：{e}")
+            if external_attempted(op):
+                op.update(status='pending', message='飞书创建或回读结果尚未确认；已停止重发，请查询原操作并核实飞书任务')
+            else:
+                op.update(status='failed', message='尚未对外执行：' + ('飞书授权不可用，请先恢复授权' if e.auth else str(e)))
         except subprocess.TimeoutExpired:
             op.update(status="pending", message="飞书响应超时，结果待查询")
         except Exception as e:  # noqa: BLE001
-            op.update(status="failed", feishu_task=None, message=f"本地后端出错：{type(e).__name__}")
+            uncertain = external_attempted(op)
+            op.update(status='pending' if uncertain else 'failed',
+                      message='结果尚未确认，已停止重发，请核实原操作' if uncertain else f'尚未对外执行：{type(e).__name__}')
         finally:
             with self.ops.lock:
                 self.ops.save(op)
@@ -2114,7 +2301,7 @@ class Backend:
     def write_feishu(self, op):
         # Mutations use this same lock: no correction/delete can slip between this check and creation.
         with self.action_source_lock(op['request']):
-            self.validate_action_source(op['request'])
+            self.action_source(op['request'], op.get('source_snapshot'))
             return self._write_feishu_verified(op)
 
     def _write_feishu_verified(self, op):
@@ -2142,6 +2329,7 @@ class Backend:
             log("dry-run task body: " + json.dumps(body, ensure_ascii=False))
             return {"status": "created", "message": "dry-run：没有写入飞书",
                     "feishu_task": {"guid": "dry-run-" + op["op_id"], "url": None}}
+        self.action_source(req, op.get('source_snapshot'))
         with self.ops.lock:
             op['external_write_attempted'] = True
             self.ops.save(op)
@@ -2150,6 +2338,9 @@ class Backend:
         if not created:
             raise LarkError("飞书没有返回任务编号")
         guid = created["guid"]
+        op['feishu_task'] = dict(guid=guid, url=created.get('url'))
+        with self.ops.lock:
+            self.ops.save(op)  # a crash during read-back can query this GUID, never re-create
         # Read the task back so "created" is never just our own claim.
         task = find_task(run_lark(self.lark, ["task", "tasks", "get", "--params",
                                               json.dumps({"task_guid": guid}), "--as", "user"]))
@@ -2209,6 +2400,7 @@ class Handler(BaseHTTPRequestHandler):
                          "self_owner_enabled": getattr(self.backend, "self_owner_enabled", False),
                          "named_owner_enabled": getattr(self.backend, "named_owner_enabled", False),
                          "notices": True, "meetings": True, "recordings": True, "archive_policy_version": 1, "action_source_binding_version": 1,
+                         "item_quality_version": 1, "asr_closure_version": 1,
                          "feishu_bot": getattr(self.backend, "feishu", None) is not None,
                          "mac_agent_online": bool(getattr(self.backend, "feishu", None) and self.backend.feishu.jobs.online())}
                 summary = "health"
@@ -2236,6 +2428,11 @@ class Handler(BaseHTTPRequestHandler):
             elif method == "GET" and urlsplit(self.path).path == "/v1/tasks":
                 query = parse_qs(urlsplit(self.path).query)
                 value = self.backend.tasks(query.get("assignee", [None])[0], query.get("status", ["all"])[0])
+                # Approved review-site candidates are read separately from
+                # Feishu receipts; reading does not confirm or assign a task.
+                from label_app_tasks import read_parsed_tasks
+                state_dir = getattr(getattr(self.backend, 'args', None), 'state_dir', None)
+                value.update(read_parsed_tasks(os.path.join(state_dir, 'label-app-tasks.json') if state_dir else None, TEAM))
                 summary = f"tasks={len(value['items'])}"
             elif method == "GET" and re.fullmatch(r"/v1/recordings/[^/]+", self.path):
                 value = self.backend.recording_call("status", self.path.rsplit("/", 1)[1])
@@ -2298,7 +2495,7 @@ class Handler(BaseHTTPRequestHandler):
                     _, _, _, sid, action = self.path.split("/")
                     value = self.backend.recording_call(action, sid, body)
                     summary = f"recording {action} complete={value.get('complete')}"
-                elif self.path in ('/v1/meetings/sync', '/v1/meetings/delete', '/v1/meetings/search', '/v1/meetings/review', '/v1/meetings/rename', '/v1/meetings/project', '/v1/meetings/retain'):
+                elif self.path in ('/v1/meetings/sync', '/v1/meetings/delete', '/v1/meetings/search', '/v1/meetings/review', '/v1/meetings/rename', '/v1/meetings/project', '/v1/meetings/retain', '/v1/meetings/items'):
                     value = self.backend.meeting_call(self.path.rsplit('/', 1)[1], body)
                     if self.path == '/v1/meetings/sync':
                         utterances = body.get('utterances')

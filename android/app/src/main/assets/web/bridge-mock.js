@@ -33,8 +33,9 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const id = (prefix) => `${prefix}-${crypto.randomUUID()}`;
   // Isolated fixture only: no real signature, server credential, or external write.
-  const mockBinding = (sessionId, rows) => ({ version: 1, session_id: sessionId,
-    sources: rows.map(row => ({id: row.id, kind: 'transcript', text_hash: '0'.repeat(64), source_revision: 'mock-v1', quote: row.text.slice(0, 280)})) });
+  const mockBinding = (sessionId, rows, daily = false) => ({ version: 1, session_id: sessionId,
+    ...(daily ? {scope: 'daily', proof: '0'.repeat(64)} : {}), context_sources: [],
+    sources: rows.map(row => ({id: row.id, kind: daily ? 'daily_excerpt' : 'transcript', text_hash: '0'.repeat(64), source_revision: 'mock-v1', quote: row.text.slice(0, 280), speaker: row.speaker || null, review: {}})) });
   let startedAt = 0, timer = null, transcript = [], cards = new Map(), drafts = new Map();
   let sessionTranscript = [], dailyCandidates = [];
   const emitted = new Set();
@@ -124,14 +125,17 @@
   async function draft(p) {
     const card = cards.get(p.cardId);
     if (!card) throw new Error('卡片已失效');
+    const session = state.sessionId || 'demo', mode = state.recordingMode;
     const chosen = card.pool.filter((u) => p.utteranceIds.includes(u.id)).map((u) => sessionTranscript.find((x) => x.id === u.id) || u);
     if (!chosen.length) throw new Error('没有选中原话');
     await sleep(250);
-    const d = { draftId: id('d'), cardId: card.id, who: '', what: chosen.map((u) => u.text).join(' '),
+    if (session !== (state.sessionId || 'demo') || mode !== state.recordingMode || !cards.has(p.cardId)) throw new Error('草稿来源已变化，请重新选择当前原话');
+    const daily = mode === 'daily';
+    const d = { draftId: id('d'), cardId: card.id, sessionId: session, who: '', what: chosen.map((u) => u.text).join(' '),
       whenIso: null, whenRaw: null, constraint: '预算不能超过10万', assigneeCandidates: team,
       evidence: { utteranceIds: chosen.map((u) => u.id), quote: chosen.map((u) => u.text).join(' '),
         startMs: chosen[0].startMs, endMs: chosen.at(-1).endMs,
-        sourceBinding: flow === 'task-source-missing' ? null : mockBinding(state.sessionId || 'demo', chosen) },
+        sourceBinding: flow === 'task-source-missing' || daily && Array.from(chosen.map(u => u.text).join(' ')).length > 280 ? null : mockBinding(session, chosen, daily) },
       ...(flow === 'task-source-changed' ? {sourceError: 'source_changed'} : {}) };
     drafts.set(d.draftId, d);emit('action.draft', d);
   }
@@ -159,6 +163,16 @@
     ...rows.filter((u) => u.tag === 'commitment' && !u.review?.verdict).map((u) => ({kind: 'commitment', id: u.id})),
     ...rows.filter((u) => u.tag === 'decision' && !u.review?.verdict).map((u) => ({kind: 'decision', id: u.id})),
     ...rows.filter((u) => !u.speaker && !u.review?.speaker && u.text.replace(/[^\p{L}\p{N}]/gu, '').length >= 4).map((u) => ({kind: 'speaker', id: u.id}))];
+  // Items the server builds from the meeting's minutes (minutes_items.py); reviews kept apart from sentences.
+  const mockItemReviews = {};
+  const mockItems = () => [
+    {id: 'mi-t1', kind: 'task', title: '核对并提交新方案', due: '周五前', owner_hint: '洪玉麟', priority: 'main', ids: ['u2']},
+    {id: 'mi-d1', kind: 'decision', title: '预算上限为10万', ids: ['u1']},
+    {id: 'mi-o1', kind: 'open', title: '13万的方案A如何压到10万以内？', detail: '方案A报价约13万，超出预算，会上没有结论', ids: ['u3']},
+  ].map((it) => ({...it, fingerprint: 'mock-' + it.id, stale: false, stale_review: false, task_status: null, task_url: null,
+    review: mockItemReviews[it.id] || null,
+    evidence: it.ids.map((id) => { const u = historicalRows.find((r) => r.id === id); return {id, text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}; })}));
+  const itemQueue = (items) => items.filter((i) => !i.review).map((i) => ({kind: 'item', id: i.id, item_kind: i.kind}));
   function handle(type, p) {
     const listFailure = flow === 'list-failure' && ['history.list', 'projects.list', 'project.open', 'tasks.list'].includes(type);
     const reviewFailure = flow === 'review-failure' && ['review.set', 'speaker.correct'].includes(type);
@@ -219,15 +233,15 @@
         retainedSummaries=[...retainedSummaries.filter(x=>!summaryIds.includes(x.id)),...(p.summaries || []).map(x=>({...x,confirmed:true,source_status:'available'}))];
         emit('meeting.retained',{sessionId:p.sessionId,session_id:p.sessionId,requestId:p.requestId,retained_evidence:retainedEvidence,retained_summaries:retainedSummaries});break;
       }
-      case 'history.list': emit('history.list', {count: mockMeetings.length, items: mockMeetings.map((m) => ({...m, title: m.manualTitle || m.goal, review_pending: {all: reviewQueue(historicalRows).length}}))}); break;
+      case 'history.list': emit('history.list', {requestId: p.requestId || '', count: mockMeetings.length, items: mockMeetings.map((m) => ({...m, title: m.manualTitle || m.goal, review_pending: {all: itemQueue(mockItems()).length}}))}); break;
       case 'history.open': {
         if (p.sessionId === state.sessionId) {
           const rows = sessionTranscript.map((u) => ({id: u.id, text: u.text, start_ms: u.startMs, end_ms: u.endMs, tag: u.tag, speaker: u.speaker || null}));
-          return emit('history.open', {session_id: state.sessionId, started_at: new Date().toISOString(), utterances: rows, review_queue: reviewQueue(rows),
+          return emit('history.open', {session_id: state.sessionId, sessionId: p.sessionId, requestId: p.requestId || '', started_at: new Date().toISOString(), utterances: rows, review_queue: reviewQueue(rows),
             digest: {constraint: [], commitment: [], decision: [], idea: []}, notices: []});
         }
-        const meeting = mockMeetings.find(i => i.session_id === p.sessionId); if (!meeting) return emit('error', {scope: 'history', message: '会议已删除'});
-        emit('history.open', {...meeting, project: meeting.project || null, display_title: meeting.manualTitle || meeting.goal, title_source: meeting.manualTitle ? 'manual' : 'generated', utterances: historicalRows, review_queue: reviewQueue(historicalRows),
+        const meeting = mockMeetings.find(i => i.session_id === p.sessionId); if (!meeting) return emit('error', {scope: 'history', operation: 'history.open', sessionId: p.sessionId, requestId: p.requestId || '', message: '会议已删除'});
+        emit('history.open', {...meeting, sessionId: p.sessionId, requestId: p.requestId || '', project: meeting.project || null, display_title: meeting.manualTitle || meeting.goal, title_source: meeting.manualTitle ? 'manual' : 'generated', utterances: historicalRows, items: mockItems(), review_queue: itemQueue(mockItems()),
           digest: {constraint: historicalRows.filter(u => u.tag === 'constraint'), commitment: historicalRows.filter(u => u.tag === 'commitment' && u.review?.verdict !== 'rejected'),
             decision: historicalRows.filter(u => u.tag === 'decision' && u.review?.verdict !== 'rejected'), idea: []}, notices: [],retained_evidence:retainedEvidence,retained_summaries:retainedSummaries}); break;
       }
@@ -239,7 +253,7 @@
         else Object.assign(payload, {status: 'ready', doc_url: null, minutes: {version: 4, substantive: true, theme: '首版上线方案与预算', overview: '首版围绕两周内上线展开，预算上限与方案成本需要核对。', decisions: [{text: '预算上限为10万', ids: ['u1']}], actions: [{owner: '洪玉麟', task: '核对并提交新方案', due: '周五前', priority: 'main', ids: ['u2']}, {owner: '', task: '预约下周评审会议室', due: '', priority: 'other', ids: ['u3']}], topics: [{topic: '上线计划与预算', points: ['先明确首版体验与预算范围']}], open_questions: [{question: '13万方案如何满足10万预算？', quote: historicalRows.find(u => u.id === 'u3').text, id: 'u3'}], follow_ups: []}, sources: Object.fromEntries(historicalRows.map(u => [u.id, {text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}]))});
         setTimeout(() => emit('history.minutes', payload), 220); break;
       }
-      case 'history.delete': if (p.confirm) {mockMeetings = mockMeetings.filter(i => i.session_id !== p.sessionId); emit('history.delete', {deleted: true});} break;
+      case 'history.delete': if (p.confirm) {mockMeetings = mockMeetings.filter(i => i.session_id !== p.sessionId); emit('history.delete', {deleted: true, sessionId: p.sessionId, session_id: p.sessionId, requestId: p.requestId || ''});} break;
       case 'projects.list': {
         const groups = {};
         mockMeetings.forEach((m) => { if (m.project) (groups[m.project] ||= []).push(m); });
@@ -265,7 +279,7 @@
         const title = p.title || '上线方案评审（模拟）';
         setTimeout(() => emit('history.renamed', { session_id: p.sessionId, title, title_source: p.title ? 'manual' : 'generated' }), 200); break;
       }
-      case 'history.search': emit('history.search', {query: p.query, engine: 'browser-mock', items: mockMeetings.length ? historicalRows.map(u => ({...u, id: 'h:demo:'+u.id, session_id: 'demo', started_at: '2026-10-06T09:00:00+08:00', prob: .9})) : []}); break;
+      case 'history.search': emit('history.search', {requestId: p.requestId || '', query: p.query, engine: 'browser-mock', items: mockMeetings.length ? historicalRows.map(u => ({...u, id: 'h:demo:'+u.id, session_id: 'demo', started_at: '2026-10-06T09:00:00+08:00', prob: .9})) : []}); break;
       case 'recall.trigger': void recall(p);break;
       case 'digest.open':
       case 'commitment.open': {
@@ -295,6 +309,23 @@
         if (h) { h.review = {...(h.review || {}), speaker: p.speaker}; if (p.speaker == null) delete h.review.speaker; }
         setTimeout(() => emit('speaker.corrected', { ...p, status: 'saved' }), 300); break;
       }
+      case 'items.review': {
+        const it = mockItems().find((x) => x.id === p.itemId);
+        if (!it) return emit('error', {scope: 'items', sessionId: p.sessionId, itemId: p.itemId, message: '纪要里没有这件事'});
+        const stamp = {fingerprint: it.fingerprint, by: state.selfName || null, at: new Date().toISOString()};
+        if (p.action === 'reopen') delete mockItemReviews[it.id];
+        else if (p.action === 'reject') mockItemReviews[it.id] = {status: 'rejected', ...stamp};
+        else if (p.action === 'merge') mockItemReviews[it.id] = {status: 'merged', into: p.into, ...stamp};
+        else if (p.action === 'confirm') {
+          const kind = p.kind || it.kind;
+          if (kind === 'task' && !p.owner) return emit('error', {scope: 'items', sessionId: p.sessionId, itemId: p.itemId, message: '待办需要先选负责人'});
+          const title = p.title || it.title, due = p.due ?? it.due ?? '';
+          mockItemReviews[it.id] = {status: 'confirmed', kind, title, due, owner: kind === 'task' ? p.owner : null,
+            edited: kind !== it.kind || title !== it.title || due !== (it.due || ''), ...stamp};
+        }
+        const items = mockItems();
+        setTimeout(() => emit('items.saved', {sessionId: p.sessionId, itemId: p.itemId, items, review_queue: itemQueue(items)}), 200); break;
+      }
       case 'review.set': {
         minutesChanged = true;
         const u = historicalRows.find((x) => x.id === p.utteranceId);
@@ -305,7 +336,7 @@
         if (p.mine && !state.selfName) throw new Error('请先在设置里选择本人');
         const selfName = state.selfName || '';
         const all = mockTasks.filter((t) => (!p.mine || t.who === state.selfName) && (p.status === 'all' || t.feishu.state === p.status || (p.status === 'open' && t.feishu.state === 'unknown')));
-        setTimeout(() => emit('tasks.list', { items: all, mine: p.mine, status: p.status, selfName }), 300); break;
+        setTimeout(() => emit('tasks.list', { items: all, parsed_items: [], meeting_items: [], parsed_status: {state: 'disabled', meetings: [], counts: {total: 0}}, requestId: p.requestId || '', mine: p.mine, status: p.status, selfName }), 300); break;
       }
       case 'recall.dismiss': cards.delete(p.cardId);break;
       case 'recall.save': {
@@ -342,10 +373,12 @@
         emit('state', {...state});break;
       case 'voiceprint.cancel': break;
       case 'settings.set':
-        state.source = p.source || state.source;state.backendUrl = p.backendBaseUrl || '';state.speakerInfo = !!p.speakerInfo;
+        state.source = p.source || state.source;
+        if ('backendBaseUrl' in p) state.backendUrl = p.backendBaseUrl || '';
+        if ('speakerInfo' in p) state.speakerInfo = !!p.speakerInfo;
         state.remoteAddress = p.remoteAddress || state.remoteAddress;
         ['voiceTrigger','noticeVibrate','memorySync','selfName'].forEach(k => { if (k in p) state[k] = p[k]; });
-        emit('state', { ...state });emit('toast', { message: '浏览器只模拟后端；真实配置请在 Android App 中设置' });break;
+        emit('state', { ...state });emit('settings.saved', {requestId: p.requestId || '', mock: true});emit('toast', { message: '浏览器只模拟后端；真实配置请在 Android App 中设置' });break;
       case 'testAudio.pick': emit('toast', { message: '外部 WAV 导入请在 Android App 中使用' });break;
       case 'testAudio.reset': state.testWavName = '内置合成对话（浏览器模拟）';emit('state', { ...state });break;
       case 'open.url': if (preview) emit('toast', {message: '模拟历史链接，没有打开真实文档或任务。'}); else if (/^https?:\/\//.test(p.url)) window.open(p.url, '_blank', 'noopener');break;

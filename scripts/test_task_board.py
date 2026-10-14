@@ -3,6 +3,7 @@
 import unittest
 
 import task_board as tb
+from test_item_quality import CLOUD, VERSION
 
 
 class Fake:
@@ -37,8 +38,71 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(["t1"], [t["id"] for t in board])
         self.assertFalse(board[0]["changed"])
 
+    def test_real_examples_and_generic_principles_never_become_open_tasks(self):
+        context = [dict(id='u15', text=CLOUD)]
+        model = Fake({'tasks': [dict(id='new', what=what, sources=['u15'], status='open')
+                                for what in ('如果那边有cloud就立马买', '有问题马上说，不要被问题卡壳')]})
+        self.assertEqual([], tb.update(model, [], [dict(what='候选', source='u15')], context))
+
+    def test_numeric_ambiguity_is_saved_only_as_a_review_candidate(self):
+        model = Fake({'tasks': [dict(id='new', what='将 OOPS 代码叠出一百版', sources=['u000032'], status='open')]})
+        board = tb.update(model, [], [dict(what='叠代码', source='u000032')], VERSION)
+        self.assertEqual('needs_review', board[0]['status'])
+        self.assertEqual('quantity_ambiguity', board[0]['quality']['reason'])
+
 
 class BoardsTest(unittest.TestCase):
+    def test_legacy_quality_read_is_derived_preserves_file_and_closed_history(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        rows = [dict(id='u15', text=CLOUD)] + VERSION
+        old = [dict(id='t1', what='有问题马上说，不要被问题卡壳', status='open', sources=['u15']),
+               dict(id='t2', what='将 OOPS 代码叠出一百版', status='open', sources=['u000032']),
+               dict(id='t3', what='如果那边有cloud就立马买', status='done', sources=['u15']),
+               dict(id='t4', what='有问题马上说', status='dropped', sources=['u15'])]
+        with tempfile.TemporaryDirectory() as folder:
+            boards = tb.Boards(folder, None, source_rows=lambda sid: rows)
+            path = Path(boards.path('sess-0001'))
+            path.write_text(json.dumps(dict(tasks=old, source_hashes=boards._hashes('sess-0001'))))
+            original = path.read_bytes()
+            view = boards.view('sess-0001')
+            self.assertEqual(old[2:], view['tasks'])
+            self.assertEqual(['t1', 't2'], [t['id'] for t in view['review_queue']])
+            self.assertEqual(['rejected', 'needs_review'], [t['quality']['status'] for t in view['review_queue']])
+            self.assertEqual(original, path.read_bytes())
+
+    def test_unknown_legacy_evidence_is_a_question_without_rewriting(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            boards = tb.Boards(folder, None)
+            path = Path(boards.path('sess-0001'))
+            path.write_text(json.dumps(dict(tasks=BOARD)))
+            original = path.read_bytes()
+            view = boards.view('sess-0001')
+            self.assertEqual([], view['tasks'])
+            self.assertEqual('evidence_missing', view['review_queue'][0]['quality']['reason'])
+            self.assertEqual(original, path.read_bytes())
+
+    def test_review_candidates_survive_later_model_batches_without_entering_tasks(self):
+        import tempfile
+        model = Fake({'tasks': [dict(id='new', what='将 OOPS 代码叠出一百版', sources=['u000032'], status='open')]})
+        with tempfile.TemporaryDirectory() as folder:
+            boards = tb.Boards(folder, model, source_rows=lambda sid: VERSION)
+            boards.queues['sess-0001'] = [([dict(what='叠代码', source='u000032')], VERSION)]
+            boards.running.add('sess-0001')
+            boards._work('sess-0001')
+            self.assertEqual([], boards.view('sess-0001')['tasks'])
+            self.assertEqual(1, len(boards.view('sess-0001')['review_queue']))
+            model.answer = {'tasks': []}
+            boards.queues['sess-0001'] = [([dict(what='更新 UI', source='u000033')], VERSION)]
+            boards.running.add('sess-0001')
+            boards._work('sess-0001')
+            self.assertEqual([], boards.view('sess-0001')['tasks'])
+            self.assertEqual(1, len(boards.view('sess-0001')['review_queue']))
+
     def test_new_conversation_during_generation_does_not_cancel_supported_tasks(self):
         import tempfile
         rows = list(CONTEXT)
