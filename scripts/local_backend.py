@@ -2018,7 +2018,9 @@ class Backend:
         with self.meetings.lock:
             try: row = self.meetings.load(sid)
             except (FileNotFoundError, ValueError): row = None
-            for task in board.get('tasks', []):
+            # Candidates held back for review (e.g. missing evidence) still carry their sources, so a person
+            # can check and confirm them under the same signed contract as ready tasks.
+            for task in board.get('tasks', []) + board.get('review_queue', []):
                 try:
                     if row is None: raise ActionSourceError('ACTION_SOURCE_UNAVAILABLE', '当前来源不可用')
                     task['source_binding'] = self.sign_action_binding(binding_for(row, task.get('sources')))

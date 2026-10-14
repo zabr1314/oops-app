@@ -19,8 +19,8 @@ function ui() {
     return elements.get(id);
   }
   const native = { postMessage(raw) { messages.push(JSON.parse(raw)); } };
-  const context = { window: { OopsNative: native }, location: { search: '' }, URLSearchParams,
-    document: { getElementById: el, createElement: () => el(Symbol()), querySelectorAll: () => [], documentElement: { dataset: {} } },
+  const context = { window: { OopsNative: native, addEventListener() {} }, location: { search: '' }, URLSearchParams,
+    document: { addEventListener() {}, getElementById: el, createElement: () => el(Symbol()), querySelectorAll: () => [], documentElement: { dataset: {} } },
     console: { ...console, error(error) { errors.push(error); } }, setTimeout: () => 1, clearTimeout() {} };
   for (const file of ['device-listening-demo.js', 'app.js']) vm.runInNewContext(fs.readFileSync(path.join(web, file), 'utf8'), context);
   const receive = (type, payload) => native.onmessage({ data: JSON.stringify({ type, payload }) });

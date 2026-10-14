@@ -15,8 +15,8 @@ function ui() {
   }
   const native = {postMessage(raw) {messages.push(JSON.parse(raw));}};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../main/assets/web/app.js'), 'utf8'), {
-    window: {OopsNative: native}, location: {search: ''}, URLSearchParams,
-    document: {getElementById: el, createElement: () => el(Symbol('node')), querySelectorAll: () => [], documentElement: {dataset: {}}},
+    window: {OopsNative: native, addEventListener() {}}, location: {search: ''}, URLSearchParams,
+    document: {addEventListener() {}, getElementById: el, createElement: () => el(Symbol('node')), querySelectorAll: () => [], documentElement: {dataset: {}}},
     console: {...console, error(error) {errors.push(error);}}, setTimeout: () => 1, clearTimeout() {},
   });
   const receive = (type, payload) => native.onmessage({data: JSON.stringify({type, payload})});
@@ -83,7 +83,7 @@ test('history list failure is persistent, retry clears failure, and refresh keep
 });
 
 test('out-of-order task filters never overwrite visible filter or homepage identity', () => {
-  const u = ui(); u.click('go', {route: 'tasks'}); u.click('tasks-scope', {value: 'all'});
+  const u = ui(); u.click('go', {route: 'tasks'}); u.click('tasks-scope', {value: 'all'}); u.click('tasks-status-cycle');
   u.receive('tasks.list', {mine: true, status: 'open', selfName: 'Alice', items: [task('我的工作')]});
   assert.doesNotMatch(u.screen(), /我的工作<\/h3>/);
   u.receive('tasks.list', {mine: false, status: 'open', items: [task('团队工作', 'Bob')]}); assert.match(u.screen(), /团队工作/);
@@ -96,7 +96,7 @@ test('out-of-order task filters never overwrite visible filter or homepage ident
 });
 
 test('failed task reads preserve matching cached rows and identity changes reject old person replies', () => {
-  const u = ui(); u.click('go', {route: 'tasks'});
+  const u = ui(); u.click('go', {route: 'tasks'}); u.click('tasks-scope', {value:'mine'}); u.click('tasks-status-cycle');
   u.receive('tasks.list', {mine: true, status: 'open', selfName: 'Alice', items: [task('Alice的任务')]});
   u.click('tasks-retry'); u.receive('error', {scope: 'tasks', mine: true, status: 'open', selfName: 'Alice', message: '刷新失败'});
   assert.match(u.screen(), /Alice的任务/); assert.match(u.screen(), /刷新未成功/);
@@ -232,6 +232,6 @@ test('undoing manual identity restores unknown-speaker review only when the mode
   assert.match(u.screen(), /会后核对 1/);
   const v = ui(), known = meeting(); known.review_queue = []; known.utterances[1].speaker = 'Alice'; known.utterances[1].review = {speaker: 'Bob'};
   v.receive('history.open', known); v.receive('speaker.corrected', {sessionId: 's1', utteranceId: 'u1', speaker: null, status: 'saved'});
-  assert.doesNotMatch(v.screen(), /会后核对 1/); assert.match(v.screen(), /已保存 · 已核对/);
+  assert.doesNotMatch(v.screen(), /会后核对 1/); assert.match(v.screen(), /已保存/); assert.doesNotMatch(v.screen(), /已保存 · 已核对/);
   assert.deepEqual(u.errors, []); assert.deepEqual(v.errors, []);
 });

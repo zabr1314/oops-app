@@ -169,7 +169,7 @@ class ArchivePolicyTest(unittest.TestCase):
         decision = self.meetings.project('Oops')['decisions'][0]
         self.assertEqual(self.quote, decision['text'])
         self.assertEqual('saved_excerpt', decision['source_kind'])
-        self.assertEqual('expired', decision['source_status'])
+        self.assertEqual('retained', decision['source_status'])  # independently retained, still usable as evidence
 
     def test_changed_source_does_not_turn_old_confirmation_into_new_summary(self):
         self.meetings.sync(self.body)
@@ -386,6 +386,8 @@ class ArchivePolicyTest(unittest.TestCase):
     def test_authenticated_http_refuses_daily_sync_and_returns_contract(self):
         backend = Backend.__new__(Backend)
         backend.meetings, backend.recordings, backend.jev = self.meetings, self.recordings, None
+        backend.speaker_state_lock = threading.RLock()
+        backend.manual_speakers = {}
         class Protected(Handler): api_token = 'offline-test-key'
         Protected.backend = backend
         server = ThreadingHTTPServer(('127.0.0.1', 0), Protected)

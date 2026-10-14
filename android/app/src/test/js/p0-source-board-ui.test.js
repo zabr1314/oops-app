@@ -15,8 +15,8 @@ function ui() {
     return nodes.get(id);
   }
   const native = {postMessage(raw) {messages.push(JSON.parse(raw));}};
-  const context = {window: {OopsNative: native}, location: {search: ''}, URLSearchParams,
-    document: {getElementById: el, createElement: () => el(Symbol()), querySelectorAll: () => [], documentElement: {dataset: {}}},
+  const context = {window: {OopsNative: native, addEventListener() {}}, location: {search: ''}, URLSearchParams,
+    document: {addEventListener() {}, getElementById: el, createElement: () => el(Symbol()), querySelectorAll: () => [], documentElement: {dataset: {}}},
     console: {...console, error(e) {errors.push(e);}}, setTimeout: () => 1, clearTimeout() {}};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(directory, 'draft-state.js'), 'utf8'), context);
@@ -72,10 +72,12 @@ test('pending external outcome can still be queried even without current evidenc
 test('definite source conflict does not retry the old operation and offers current source review', () => {
   const u=ui();u.receive('action.draft',draft());u.confirm();
   u.receive('action.result',{draftId:'d1',opId:'op1',status:'failed',sourceInvalidated:true,message:'原话已变化，本次未创建'});
-  assert.match(u.sheet(),/重新核对原话/);u.confirm();
+  // The old draft is withdrawn: review goes back to the current sentences instead of re-running the old evidence.
+  assert.match(u.sheet(),/重新核对当前原话/);u.confirm();
   assert.equal(u.messages.filter(m=>m.type==='action.confirm').length,1);
-  u.click('draft-source-reload',{},true);assert.equal(u.messages.at(-1).type,'digest.open');
-  assert.equal(u.messages.at(-1).payload.utteranceId,'u1');
+  u.click('draft-source-reopen',{},true);
+  assert.equal(u.messages.filter(m=>m.type==='action.confirm').length,1);
+  assert.equal(u.el('sheet').hidden,true);
 });
 test('new invalidation revision clears board and rejects older responses on same service', () => {
   const u=ui();u.actions();u.receive('tasks.board',board());assert.match(u.screen(),/当前任务/);
