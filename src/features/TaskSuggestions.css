@@ -1,7 +1,7 @@
 .task-suggestions-page { gap: 14px; }
-.task-suggestions-hero { background: linear-gradient(135deg, #f0eaff, #faf8ff); border-color: #e6dcfa; padding: 20px; }
+.task-suggestions-hero { background: linear-gradient(135deg, var(--canvas), var(--surface)); border-color: var(--line); padding: 20px; }
 .task-suggestions-hero-top, .task-suggestions-hero-meta, .task-suggestion-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.task-suggestions-symbol { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: #e2d5fb; }
+.task-suggestions-symbol { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: var(--primary-soft); }
 .task-suggestions-hero h2 { margin: 15px 0 6px; font-size: 22px; letter-spacing: -.5px; }
 .task-suggestions-hero p { margin: 0; font-size: 12px; line-height: 1.65; color: var(--muted); }
 .task-suggestions-hero-meta { margin-top: 15px; color: var(--brand); font-size: 11px; }
@@ -15,20 +15,20 @@
 .task-suggestion-fields > div { display: flex; gap: 13px; align-items: baseline; }
 .task-suggestion-fields dt { width: 42px; flex: none; font-size: 11px; color: var(--muted); }
 .task-suggestion-fields dd { margin: 0; min-width: 0; font-size: 12px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
-.task-suggestion-original { border-left: 2px solid #d8c8f3; padding-left: 12px; }
+.task-suggestion-original { border-left: 2px solid var(--line); padding-left: 12px; }
 .task-suggestion-original > small { font-size: 10px; color: var(--brand); }
 .task-suggestion-original > p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-suggestion-original .source-link { margin: 7px 0; }
 .task-suggestion-actions { display: flex; gap: 8px; margin-top: 14px; }
 .task-suggestion-actions .button { flex: 1; width: auto; min-width: 0; min-height: 38px; padding: 8px 10px; font-size: 12px; }
 .task-suggestion-actions .button.quiet { flex: 0 0 auto; }
-.task-suggestions-hero { padding: 17px; background: white; border-color: #e8e1f0; }
+.task-suggestions-hero { padding: 17px; background: white; border-color: var(--line); }
 .task-suggestions-hero h2 { margin-top: 12px; font-size: 23px; }
-.task-suggestions-caption { margin: -5px 1px 0; color: #9a8ca9; font-size: 10px; line-height: 1.6; }
-.task-suggestion-card { border-left: 3px solid #b18cde; }
-.task-suggestion-requirement { padding: 10px 12px; background: #faf7fe; border-radius: 10px; color: #6c5b7c; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0; }
-.task-suggestion-evidence { margin-top: 12px; border-top: 1px solid #f0eaf6; padding-top: 10px; }
-.task-suggestion-evidence > summary { display: flex; justify-content: space-between; gap: 7px; align-items: center; color: #a092ac; font-size: 10px; list-style: none; cursor: pointer; padding: 3px 0; }
+.task-suggestions-caption { margin: -5px 1px 0; color: var(--ink-3); font-size: 10px; line-height: 1.6; }
+.task-suggestion-card { border-left: 3px solid var(--primary); }
+.task-suggestion-requirement { padding: 10px 12px; background: var(--surface); border-radius: 10px; color: var(--ink-2); font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0; }
+.task-suggestion-evidence { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.task-suggestion-evidence > summary { display: flex; justify-content: space-between; gap: 7px; align-items: center; color: var(--ink-3); font-size: 10px; list-style: none; cursor: pointer; padding: 3px 0; }
 .task-suggestion-evidence > summary::-webkit-details-marker { display: none; }
 .task-suggestion-evidence[open] > summary { margin-bottom: 10px; }
 .task-suggestion-evidence[open] > summary .icon { transform: rotate(180deg); }

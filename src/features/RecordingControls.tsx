@@ -29,6 +29,14 @@ function snapshotOf(data: AppData, id: string): EndSnapshot | undefined {
   return { session: { ...s, transcript: s.transcript.map(t => ({ ...t })), privateNotes: [...s.privateNotes], summary: [...s.summary], participants: [...s.participants], agenda: [...s.agenda], attachments: [...s.attachments] }, marks: readMarks(data, id).map(m => ({ ...m })), space: data.settings.space };
 }
 
+/** Pause or continue the active record, only while it is still the visible active record. Shared by the strip and the
+    record button in the tab bar (Prototype.tsx). */
+export function setRecordingPaused(current: AppData, id: string, paused: boolean): AppData {
+  const latest = current.sessions.find(s => s.id === id);
+  if (!latest || !sessionVisible(current, latest.id) || current.activeSessionId !== latest.id || !['进行中', '暂停'].includes(latest.status)) return current;
+  return { ...current, sessions: current.sessions.map(s => s.id === latest.id ? { ...s, status: paused ? '暂停' : '进行中' } : s) };
+}
+
 export function recordingControlContext(sessionId: string | undefined, space: string, route: Route, tab: string) {
   const onsite = !!sessionId && route.view === 'session-detail' && route.id === sessionId && ['现场', '概览', '复盘'].includes(tab);
   return { onsite, key: JSON.stringify([sessionId, space, route.view, route.id, route.mode, tab]) };
@@ -49,15 +57,12 @@ export function RecordingControls() {
   useEffect(() => { if (!visible || editing && editing.sessionId !== session?.id) { setEditing(null); setShowMarks(false); } }, [visible, session?.id, editing?.sessionId]);
   const marks = session && visible ? readMarks(data, session.id) : [];
   const selected = editing ? marks.find(m => m.id === editing.markId) : undefined;
+  const paused = session?.status === '暂停';
   const source = selected ? session?.transcript.find(t => t.id === selected.sourceId && !t.private) : undefined;
   function togglePause() {
     if (!session || !visible) return;
     const resume = session.status === '暂停';
-    update(current => {
-      const latest = current.sessions.find(s => s.id === session.id);
-      if (!latest || !sessionVisible(current, latest.id) || current.activeSessionId !== latest.id || !['进行中', '暂停'].includes(latest.status)) return current;
-      return { ...current, sessions: current.sessions.map(s => s.id === latest.id ? { ...s, status: resume ? '进行中' : '暂停' } : s) };
-    });
+    update(current => setRecordingPaused(current, session.id, !resume));
     toast(resume ? '继续当前示例记录' : '记录已暂停，助手任务保持原状态');
   }
   function markNow() {
@@ -88,8 +93,10 @@ export function RecordingControls() {
   }
   return <>
     {session && visible && !isKeyboardVisible && <aside className={`recording-controls ${expanded ? 'is-expanded' : 'is-compact'}`} data-expanded={expanded} aria-label="当前记录控制">
-      <div className="rc-heading"><span className={`rc-dot ${session.status === '暂停' ? 'paused' : ''}`} /><div className="rc-session"><strong>{session.title}</strong><span>{session.status === '暂停' ? '已暂停' : '示例记录中'} · <time>{session.duration || '00:00'}</time></span></div>{expanded ? <button className="rc-scene" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: '现场' })}>现场<Icon name="caret-right" size={13} /></button> : <div className="rc-compact-actions"><button aria-label={session.status === '暂停' ? '继续当前记录' : '暂停当前记录'} onClick={togglePause}><Icon name={session.status === '暂停' ? 'play' : 'pause'} size={18} /></button><button className="rc-end" aria-label="结束当前记录并检查保存范围" onClick={() => requestEnd(session.id)}><Icon name="stop" size={18} /></button></div>}{!context.onsite && <button className="rc-expand" aria-label={expanded ? '收起记录控制' : '展开记录控制'} aria-expanded={expanded} onClick={() => setExpandedContext(expanded ? null : context.key)}><Icon name={expanded ? 'caret-down' : 'caret-up'} size={16} /></button>}</div>
-      {expanded && <><div className="rc-actions"><button onClick={togglePause}><Icon name={session.status === '暂停' ? 'play' : 'pause'} size={19} /><span>{session.status === '暂停' ? '继续' : '暂停'}</span></button><button onClick={markNow}><Icon name="bookmark-simple" size={19} /><span>标记重点</span></button><button className="rc-end" onClick={() => requestEnd(session.id)}><Icon name="stop" size={19} /><span>结束</span></button></div>
+      {/* 设计语言: the status reads like RecIndicator (red dot only while recording). The tab bar's record button ends a
+          running record and continues a paused one, so the compact strip offers the other action: pause, or end. */}
+      <div className="rc-heading"><div className="rc-session"><strong>{session.title}</strong><span className={`rec-indicator${paused ? ' is-paused' : ''}`}><i aria-hidden="true" />{paused ? '已暂停' : '示例记录中'}<time>{session.duration || '00:00'}</time></span></div>{expanded ? <button className="rc-scene" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: '现场' })}>现场<Icon name="caret-right" size={13} /></button> : <div className="rc-compact-actions">{paused ? <button className="rc-end" aria-label="结束当前记录并检查保存范围" onClick={() => requestEnd(session.id)}><Icon name="stop" size={18} /></button> : <button aria-label="暂停当前记录" onClick={togglePause}><Icon name="pause" size={18} /></button>}</div>}{!context.onsite && <button className="rc-expand" aria-label={expanded ? '收起记录控制' : '展开记录控制'} aria-expanded={expanded} onClick={() => setExpandedContext(expanded ? null : context.key)}><Icon name={expanded ? 'caret-down' : 'caret-up'} size={16} /></button>}</div>
+      {expanded && <><div className="rc-actions"><button onClick={togglePause}><span className="rc-action-icon"><Icon name={paused ? 'play' : 'pause'} size={20} /></span><span>{paused ? '继续' : '暂停'}</span></button><button className="rc-mark" onClick={markNow}><span className="rc-action-icon"><Icon name="bookmark-simple" size={20} /></span><span>标记重点</span></button><button className="rc-end" onClick={() => requestEnd(session.id)}><span className="rc-action-icon"><Icon name="stop" size={20} /></span><span>结束</span></button></div>
       {!!marks.length && <button className="rc-mark-count" onClick={() => setShowMarks(true)}>{marks.length} 个重点<Icon name="caret-right" size={11} /></button>}</>}
     </aside>}
     <Sheet open={!!editing && visible && !!selected} onClose={() => setEditing(null)} title="记下这个重点">

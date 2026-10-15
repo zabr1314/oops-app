@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { MobileScroll, useKeyboard, useKeyboardInsets, useMobileDevice, useScreenPortal } from './mobile';
 import { initialData, OopsContext, useOops, type AppData, type Route } from './store';
-import { Icon, isTextEntryTarget } from './ui';
+import { Icon, RecordButton, isTextEntryTarget } from './ui';
+import { Pupu } from './Pupu';
 import { Assistant, Home, homeTitle, homeTaskAttentionQueue, Notifications, SearchScreen, Voice, Welcome, taskVisible, sessionVisible, notificationVisible } from './features/Home';
 import Tasks, { TaskTabBar, TaskPrimaryFooter, taskTitle } from './features/Tasks';
 import Sessions, { SessionTabBar, sessionTitle, useSessionRecorder } from './features/Sessions';
 import { MemoryScreens, SettingsScreens, memoryTitle, settingsTitle } from './features/MemorySettings';
-import { RecordingControls, EndRecordingSheet } from './features/RecordingControls';
+import { RecordingControls, EndRecordingSheet, setRecordingPaused } from './features/RecordingControls';
 import { clearViewState } from './viewState';
 import { migrateStoredData } from './stateMigrations';
 import { boardPreviewData } from './boardPreview';
@@ -17,12 +18,21 @@ import { reconcileDeviceStartupHolds } from './deviceStartupLogic';
 
 
 const roots=['home','sessions','tasks','memory','settings'];
-const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'},{view:'settings',title:'设置',icon:'gear'}];
+// Four entries around the record button (设计语言 TabBar, 2 | ● | 2); Settings opens from the home header (2026-10-13).
+const tabs=[{view:'home',title:'首页',icon:'house'},{view:'sessions',title:'会话',icon:'chat-circle'},{view:'tasks',title:'任务',icon:'check-square'},{view:'memory',title:'记忆',icon:'bookmark-simple'}];
+const settingsEntry={view:'settings',title:'设置',icon:'gear'};
 function initialRoute():Route{const p=window.location.hash.slice(1).split('/').map(x=>{try{return decodeURIComponent(x)}catch{return x}});return {view:p[0]||'home',id:p[1]||undefined,mode:p[2]||undefined}}
 function routeHash(r:Route){return '#'+[r.view,r.id||'',r.mode||''].map(encodeURIComponent).join('/').replace(/\/+$/,'')}
 const previewScene=new URLSearchParams(window.location.search).get('board-preview');
 function readData(){if(previewScene!==null)return boardPreviewData(previewScene||'default');try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return archiveSafeData(migrateStoredData(d as AppData))}catch{}return initialData()}
 type EndRequest = { id: string; resume: boolean };
+// 设计语言 Toast: a small slip ("先…再…", missing input, a changed source) gets Pupu's oops; a finished save gets happy.
+// Deleting, clearing, undoing and plain notices stay neutral, without the mascot.
+function toastTone(text: string): 'oops' | 'success' | 'neutral' {
+  if (/^(先|请|选择)|填写|不能|不允许|不在|不可|失效|已变化|缺失|无法/.test(text)) return 'oops';
+  if (/删除|移除|移入|撤销|撤回|关闭|清除|清空|退出|取消|解除|忽略|回收站|需要|重新|待|未/.test(text)) return 'neutral';
+  return /已保存|保存$|已确认|已核对|已生成|已创建|已建立|已添加|已附|已同步|已就绪|已加入|已更新|已应用|已记录|已开始|已整理|已复制|已下载|已恢复|已采纳|已纠正|已标记|已按/.test(text) ? 'success' : 'neutral';
+}
 
 export default function Prototype() {
   const keyboard = useKeyboard();
@@ -64,7 +74,7 @@ export default function Prototype() {
   const toast = (text: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setMessage(text);
-    toastTimer.current = setTimeout(() => setMessage(''), 2800);
+    toastTimer.current = setTimeout(() => setMessage(''), 4000);
   };
   const requestEnd = (id: string) => {
     keyboard.hide();
@@ -184,7 +194,7 @@ function useAppFocusGuard(route: Route) {
 }
 
 function AppShell({ message, endRequest, onCloseEnd }: { message: string; endRequest: EndRequest | null; onCloseEnd: () => void }) {
-  const { data, route, navigate, back, update } = useOops();
+  const { data, route, navigate, back, update, toast, requestEnd } = useOops();
   const { bottomInset, isKeyboardVisible } = useKeyboardInsets();
   const { device } = useMobileDevice();
   const [attentionTime,setAttentionTime]=useState(Date.now);
@@ -192,7 +202,7 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   useAppFocusGuard(route);
   useSessionRecorder();
   const active = route.view.startsWith('task') ? 'tasks' : route.view.startsWith('session') ? 'sessions' : route.view.startsWith('memory') ? 'memory' : route.view.startsWith('settings') ? 'settings' : 'home';
-  const isRoot = roots.includes(route.view);
+  const isRoot = tabs.some(t => t.view === route.view);
   const isHome = route.view === 'home';
   const title = route.view === 'settings-listening' ? '聆听设置' : active === 'tasks' ? taskTitle(route) : active === 'sessions' ? sessionTitle(route) : active === 'memory' ? memoryTitle(route) : active === 'settings' ? settingsTitle(route) : homeTitle(route);
   const session = data.sessions.find(s => s.id === data.activeSessionId && !s.archived && sessionVisible(data, s.id) && ['进行中', '暂停'].includes(s.status));
@@ -203,19 +213,30 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
   const hasTaskTabs = route.view === 'task-detail' && !!visibleTask;
   const hasTaskPrimary = hasTaskTabs && !isKeyboardVisible;
   const pendingTasks = homeTaskAttentionQueue(data,attentionTime).length;
+  // 设计语言 TabBar: a floating capsule whose selected item is a soft pill with a duotone icon, two entries on each side of
+  // the RecordButton raised in the middle. It starts a record, ends a running one (the save-range sheet pauses first)
+  // and continues a paused one.
+  const navTab = (t: typeof tabs[number]) => <button key={t.view} aria-label={t.title} aria-current={active === t.view ? 'page' : undefined} className={active === t.view ? 'selected' : ''} onClick={() => navigate({ view: t.view })}><Icon name={active === t.view ? t.icon + '-duotone' : t.icon} size={24} /><span>{t.title}</span>{t.view === 'tasks' && pendingTasks > 0 && <b>{pendingTasks}</b>}</button>;
+  const recordState = !session ? 'idle' : session.status === '暂停' ? 'paused' : 'recording';
+  const onRecord = () => {
+    if (!session) { navigate({ view: 'session-mode' }); return; }
+    if (session.status !== '暂停') { requestEnd(session.id); return; }
+    update(current => setRecordingPaused(current, session.id, false));
+    toast('继续当前示例记录');
+  };
   const content = route.view === 'settings-listening' ? <ListeningScreen /> : active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
   return <div className={`oops-root ${isHome ? 'is-home' : ''} ${hasRecordingControls ? 'has-recording-controls' : ''} ${hasPrepareFooter ? 'has-prepare-footer' : ''} ${hasSessionTabs ? 'has-session-tabs' : ''} ${hasTaskTabs ? 'has-task-tabs' : ''} ${hasTaskPrimary ? 'has-task-primary' : ''}`} data-route={route.view} style={{ '--mobile-status-bar-height': `${device.geometry.safeArea.top}px`, '--mobile-safe-area-height': `${device.platform === 'android' || isKeyboardVisible ? 0 : device.geometry.safeArea.bottom}px` } as CSSProperties}>
     <header className={`app-header ${isHome ? 'home-header' : ''}`}>
-      {isHome ? <><img className="wordmark" src="/brand/wordmark.png" alt="Oops" /><div className="header-tools">{data.settings.space !== '我的空间' && <button className="home-scope-return" aria-label={'当前查看' + data.settings.space + '，回到我的内容'} onClick={() => update(current => ({ ...current, settings: { ...current.settings, space: '我的空间' } }))}><span>{data.settings.space}</span><small>回到我的内容</small></button>}<button className="icon-button notification-button" aria-label="通知" onClick={() => navigate({ view: 'notifications' })}><Icon name="bell" size={25} />{data.notifications.some(n => !n.read && notificationVisible(data, n.route)) && <i />}</button></div></> : <><button className="icon-button" aria-label={isRoot ? '搜索全部内容' : '返回上一页'} onClick={isRoot ? () => navigate({ view: 'search' }) : back}><Icon name={isRoot ? 'magnifying-glass' : 'caret-left'} size={23} /></button><h1>{title}</h1><button className="icon-button" aria-label={active === 'sessions' ? '新建记录' : active === 'tasks' ? '新建任务' : '回到首页'} onClick={() => navigate({ view: active === 'sessions' ? 'session-mode' : active === 'tasks' ? 'task-edit' : 'home' })}><Icon name={['sessions', 'tasks'].includes(active) ? 'plus' : 'house'} size={22} /></button></>}
+      {isHome ? <><img className="wordmark" src="/brand/wordmark.png" alt="Oops" /><div className="header-tools">{data.settings.space !== '我的空间' && <button className="home-scope-return" aria-label={'当前查看' + data.settings.space + '，回到我的内容'} onClick={() => update(current => ({ ...current, settings: { ...current.settings, space: '我的空间' } }))}><span>{data.settings.space}</span><small>回到我的内容</small></button>}<button className="icon-button notification-button" aria-label="通知" onClick={() => navigate({ view: 'notifications' })}><Icon name="bell" size={25} />{data.notifications.some(n => !n.read && notificationVisible(data, n.route)) && <i />}</button><button className="icon-button" aria-label={settingsEntry.title} onClick={() => navigate({ view: settingsEntry.view })}><Icon name={settingsEntry.icon} size={24} /></button></div></> : <><button className="icon-button" aria-label={isRoot ? '搜索全部内容' : '返回上一页'} onClick={isRoot ? () => navigate({ view: 'search' }) : back}><Icon name={isRoot ? 'magnifying-glass' : 'caret-left'} size={23} /></button><h1>{title}</h1><button className="icon-button" aria-label={active === 'sessions' ? '新建记录' : active === 'tasks' ? '新建任务' : '回到首页'} onClick={() => navigate({ view: active === 'sessions' ? 'session-mode' : active === 'tasks' ? 'task-edit' : 'home' })}><Icon name={['sessions', 'tasks'].includes(active) ? 'plus' : 'house'} size={22} /></button></>}
     </header>
     {hasSessionTabs && <div className="session-fixed-tabs"><SessionTabBar /></div>}
     {hasTaskTabs && <div className="task-fixed-tabs"><TaskTabBar /></div>}
     <MobileScroll key={`${data.settings.space}:${route.view}:${route.id || ''}`} className="oops-scroll"><main className={`screen-content ${isHome ? 'home-main' : ''}`} aria-label={title}>{content}</main></MobileScroll>
-    {!isKeyboardVisible && <nav className="app-nav" aria-label="主导航">{tabs.map(t => <button key={t.view} aria-label={t.title} aria-current={active === t.view ? 'page' : undefined} className={active === t.view ? 'selected' : ''} onClick={() => navigate({ view: t.view })}><Icon name={t.icon} size={25} /><span>{t.title}</span>{t.view === 'tasks' && pendingTasks > 0 && <b>{pendingTasks}</b>}</button>)}</nav>}
-    {hasPrepareFooter && <div className="session-prepare-footer" style={{ bottom: bottomInset + (isKeyboardVisible ? 12 : 78) }}><button className="button primary" type="submit" form="oops-session-prepare-form"><Icon name="play" size={20} /><span>{data.sessions.find(s => s.id === route.id)?.status === '已结束' ? '开始后续示例记录' : '开始示例记录'}</span></button></div>}
-    {hasTaskTabs && <aside className={`task-fixed-actions ${isKeyboardVisible ? 'keyboard-open' : ''}`} aria-label="任务下一步" style={{ bottom: bottomInset + (hasRecordingControls ? 244 : 78) }}><TaskPrimaryFooter /></aside>}
+    {!isKeyboardVisible && <nav className="app-nav" aria-label="主导航">{tabs.slice(0, 2).map(navTab)}<span className="app-nav-center"><RecordButton size={64} state={recordState} label={recordState === 'recording' ? '结束记录' : recordState === 'paused' ? '继续记录' : '开始记录'} onClick={onRecord} /></span>{tabs.slice(2).map(navTab)}</nav>}
+    {hasPrepareFooter && <div className="session-prepare-footer" style={{ bottom: bottomInset + (isKeyboardVisible ? 12 : 112) }}><button className="button primary" type="submit" form="oops-session-prepare-form"><Icon name="play" size={20} /><span>{data.sessions.find(s => s.id === route.id)?.status === '已结束' ? '开始后续示例记录' : '开始示例记录'}</span></button></div>}
+    {hasTaskTabs && <aside className={`task-fixed-actions ${isKeyboardVisible ? 'keyboard-open' : ''}`} aria-label="任务下一步" style={{ bottom: bottomInset + (hasRecordingControls ? 282 : 112) }}><TaskPrimaryFooter /></aside>}
     <RecordingControls />
     <EndRecordingSheet request={endRequest} onClose={onCloseEnd} />
-    {message && <div className="app-toast" style={{ bottom: bottomInset + (isKeyboardVisible ? 20 : hasRecordingControls ? hasTaskPrimary ? 338 : 248 : hasTaskPrimary ? 176 : hasPrepareFooter ? 146 : 88) }} role="status">{message}</div>}
+    {message && <div className={`app-toast is-${toastTone(message)}`} style={{ bottom: bottomInset + (isKeyboardVisible ? 20 : hasRecordingControls ? hasTaskPrimary ? 376 : 286 : hasTaskPrimary ? 210 : hasPrepareFooter ? 180 : 122) }} role={toastTone(message) === 'oops' ? 'alert' : 'status'}>{toastTone(message) !== 'neutral' && <Pupu mood={toastTone(message) === 'oops' ? 'oops' : 'happy'} still className="toast-pupu" />}<span>{message}</span></div>}
   </div>;
 }

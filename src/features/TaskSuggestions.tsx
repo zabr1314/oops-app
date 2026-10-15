@@ -61,7 +61,7 @@ export function TaskSuggestions({ session }: { session: Session }) {
     if (result) { setOpenId(null); if (create) setTab('已整理'); }
   }
 
-  if (!current) return <Empty title="这条会话已移除" body="返回会话列表继续查看。" action="会话列表" onAction={() => navigate({ view: 'sessions' })} />;
+  if (!current) return <Empty mood="oops" title="这条会话已移除" body="返回会话列表继续查看。" action="会话列表" onAction={() => navigate({ view: 'sessions' })} />;
   if (!personal) return <Empty icon="lock-simple" title="请在我的空间核对任务建议" body="已建立的任务可从本次行动查看。" action="查看本次行动" onAction={() => navigate({ view: 'session-detail', id: session.id, mode: '行动' })} />;
 
   return <div className="stack task-suggestions-page">
@@ -70,7 +70,7 @@ export function TaskSuggestions({ session }: { session: Session }) {
     {route.mode && read.generated && !targeted && <Notice tone="warning">这项草稿的来源已变化，当前不再显示。请核对下方最新草稿。</Notice>}
     {read.staleCount > 0 && <Notice tone="warning">{read.staleCount}项建议的原话已变化，旧内容暂不显示。更新后重新核对。</Notice>}
     <Tabs items={['待确认', '已整理', '已忽略']} value={tab} onChange={setTab} />
-    {!filtered.length ? <Empty icon="check-square" title={tab === '已整理' ? '还没有整理为任务' : tab === '已忽略' ? '还没有忽略的建议' : '当前没有待确认行动草稿'} body={tab === '待确认' ? '记录具体要做的事后，再更新草稿；遗漏的行动可以手工补充。' : '继续核对任务建议，或查看本次行动。'} action={tab === '待确认' ? '查看本次行动' : '查看待确认'} onAction={() => tab === '待确认' ? navigate({ view: 'session-detail', id: session.id, mode: '行动' }) : setTab('待确认')} /> : filtered.map(value => {
+    {!filtered.length ? <Empty mood="sleepy" icon="check-square" title={tab === '已整理' ? '还没有整理为任务' : tab === '已忽略' ? '还没有忽略的建议' : '当前没有待确认行动草稿'} body={tab === '待确认' ? '记录具体要做的事后，再更新草稿；遗漏的行动可以手工补充。' : '继续核对任务建议，或查看本次行动。'} action={tab === '待确认' ? '查看本次行动' : '查看待确认'} onAction={() => tab === '待确认' ? navigate({ view: 'session-detail', id: session.id, mode: '行动' }) : setTab('待确认')} /> : filtered.map(value => {
       const task = value.taskId ? data.tasks.find(item => item.id === value.taskId) : undefined;
       const owner = owners.find(item => item.id === value.ownerId);
       const title = task?.title || value.title;

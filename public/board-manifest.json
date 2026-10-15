@@ -22,8 +22,8 @@
       "settings-sharing",
       "settings-spaces"
     ],
-    "capturedAt": "2026-10-13T02:26:14.920Z",
-    "capturedFrom": "2026-10-12T13:54:13.404Z",
+    "capturedAt": "2026-10-14T06:32:29.991Z",
+    "capturedFrom": "2026-10-14T06:26:58.880Z",
     "app": "https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/",
     "screenshots": 194,
     "coverage": 217
@@ -2556,7 +2556,7 @@
         "view": "home"
       },
       "scene": "default",
-      "note": "五个主导航的首页；私人提问、轻量开始记录、待我处理与最近内容。",
+      "note": "四个主导航的首页，中间是录音按钮，设置在右上角；私人提问、轻量开始记录、待我处理与最近内容。",
       "key": "H01",
       "group": "首页",
       "shot": "h01-home"
@@ -3964,7 +3964,7 @@
         "view": "settings"
       },
       "scene": "default",
-      "note": "设置主入口，账户、身份、助理偏好、声音、设备、连接、隐私与共享、通知及用量。",
+      "note": "设置主入口，从首页右上角进入；账户、身份、助理偏好、声音、设备、连接、隐私与共享、通知及用量。",
       "key": "U01",
       "group": "设置",
       "shot": "u01-settings"

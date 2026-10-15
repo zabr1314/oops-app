@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Pupu (the Oops mascot) for themed launcher icons: body with the eyes cut out, and the three "oops" lines. -->
+    <group android:scaleX="0.5435" android:scaleY="0.5435" android:translateX="18.3478" android:translateY="23.0217">
+        <path android:fillColor="#FF000000" android:fillType="evenOdd" android:pathData="M57.9 30.6C52.9 30.8 47.8 32.9 43.1 34.9C38.4 36.9 33.9 39.6 29.8 42.7C25.7 45.8 21.6 49.3 18.8 53.5C16 57.7 13.4 62.9 13.1 67.7C12.8 72.5 14.5 78.2 17 82.4C19.5 86.6 23.8 90.3 28 93.1C32.2 95.8 37.3 97.6 42.3 99C47.2 100.3 52.4 101.1 57.5 101.3C62.7 101.6 67.9 101.6 72.9 100.7C77.9 99.7 83.3 98.3 87.5 95.6C91.7 93 96.3 89.2 98.3 84.9C100.4 80.6 100.6 74.7 99.8 69.8C99.1 64.9 96.3 60.1 93.8 55.6C91.4 51.1 88.4 46.7 84.9 42.9C81.5 39.2 77.5 35.3 73 33.3C68.5 31.2 62.9 30.3 57.9 30.6ZM52.32,67.19L54.23,74.55A3.85,3.85 0 0 0 61.68,72.61L59.77,65.25A3.85,3.85 0 0 0 52.32,67.19ZM74.12,61.09L76.03,68.45A3.85,3.85 0 0 0 83.48,66.51L81.57,59.15A3.85,3.85 0 0 0 74.12,61.09Z" />
+        <path android:fillColor="#FF000000" android:pathData="M92.43,21.89L87.64,35.92A3,3 0 0 0 93.16,38.28L99.97,25.11A4.1,4.1 0 0 0 92.43,21.89ZM109.93,33.15L97.57,43.25A3,3 0 0 0 101.03,48.15L114.67,39.85A4.1,4.1 0 0 0 109.93,33.15ZM112.91,53.5L103.49,53.8A2.7,2.7 0 0 0 103.31,59.2L112.69,60.1A3.3,3.3 0 0 0 112.91,53.5Z" />
+    </group>
+</vector>

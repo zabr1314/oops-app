@@ -1,4 +1,8 @@
-.oops-root{--canvas:#f2efff;--ink:#231f4a;--muted:#81789f;--brand:#795cf4;--line:#e5def4;--soft:#e9e3ff;position:absolute;inset:0;background:var(--canvas);color:var(--ink);font-family:"PingFang SC",-apple-system,BlinkMacSystemFont,"Noto Sans SC",sans-serif;font-size:14px;line-height:1.5;isolation:isolate}.oops-root *{box-sizing:border-box}.oops-root button,.oops-root input,.oops-root textarea,.oops-root select{font:inherit;color:inherit}.oops-root button{touch-action:manipulation}.oops-root button:focus-visible,.oops-root input:focus-visible,.oops-root textarea:focus-visible,.oops-root select:focus-visible{outline:2px solid var(--brand);outline-offset:3px}.oops-root p{margin:7px 0;color:var(--muted);line-height:1.65}.oops-root h2,.oops-root h3{line-height:1.45;margin:0}.oops-root h2{font-size:19px}.oops-root h3{font-size:16px}.oops-root .icon{display:block;flex:none;object-fit:contain;opacity:.86}.oops-root .icon-button{border:0;background:transparent;width:36px;height:38px;display:flex;align-items:center;justify-content:center;padding:5px;flex:none}.app-header{position:absolute;top:var(--mobile-status-bar-height,54px);left:0;right:0;height:62px;display:flex;align-items:center;gap:8px;padding:8px 18px;background:var(--canvas);z-index:10}.app-header h1{margin:0;font-size:18px;font-weight:650;flex:1;text-align:center;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.app-header .wordmark{width:110px;height:38px;object-fit:contain}.header-tools{margin-left:auto;display:flex;align-items:center;gap:12px}.space-pill{display:flex;gap:6px;align-items:center;font-size:12px!important;border:0;padding:10px 12px;border-radius:99px;background:var(--soft);max-width:152px;white-space:nowrap}.notification-button{position:relative}.notification-button i{position:absolute;right:2px;top:1px;width:7px;height:7px;background:var(--brand);border-radius:50%;border:2px solid var(--canvas)}.oops-scroll{position:absolute;inset:calc(var(--mobile-status-bar-height,54px) + 62px) 0 0!important;background:var(--canvas)}.screen-content{padding:10px 22px calc(var(--mobile-safe-area-height) + 112px);min-height:100%;background:var(--canvas)}.stack{display:flex;flex-direction:column;gap:16px;width:100%;min-width:0}.home-main{padding:10px 22px calc(var(--mobile-safe-area-height) + 116px)}.home-date{font-size:13px;color:var(--muted);margin:5px 0 9px}.home-hero{display:flex;align-items:center;margin:0 0 22px;min-height:93px}.home-hero h1{font-size:29px;letter-spacing:-.8px;line-height:1.35;margin:0;font-weight:780;flex:1;white-space:nowrap;position:relative;z-index:1}.home-hero img{width:110px;height:95px;object-fit:contain;margin-left:-12px;align-self:flex-end}.ask-card{border-radius:26px;background:white;padding:21px 16px 13px;min-height:163px;margin-bottom:12px;border:1px solid #fff}.ask-card textarea{width:100%;border:0;outline:0!important;resize:none;display:block;min-height:73px;font-size:16px;line-height:1.6;background:transparent}.ask-card textarea::placeholder{color:#a095bb}.ask-footer{display:flex;gap:10px;align-items:center;min-height:43px}.ask-footer small{display:flex;gap:5px;align-items:center;flex:1;font-size:11px;color:var(--muted)}.input-text{font-size:12px!important;background:none;border:0;color:var(--muted)!important;padding:6px}.mic-button{width:46px;height:46px;border-radius:50%;border:0;background:#b592ee;display:grid;place-items:center;flex:none}.mic-button img,.button.primary .icon,.voice-record .icon{filter:brightness(0) invert(1);opacity:1}.button{width:100%;border-radius:99px;min-height:48px;padding:13px 19px;display:flex;align-items:center;justify-content:center;gap:9px;border:1px solid transparent;font-size:15px!important;font-weight:600!important;line-height:1.5;text-align:center;flex:none;transition:opacity .15s,transform .15s}.button:active{transform:scale(.98)}.button.primary{background:linear-gradient(105deg,#7e91ff,#bc7dec);color:white;box-shadow:0 5px 14px #a496e721}.button.secondary{background:#fff;border-color:var(--line)}.button.danger{background:#fae7ee;color:#a43d61;border-color:#efc8d8}.button.quiet{background:transparent;color:var(--muted);min-height:38px;box-shadow:none}.button:disabled{opacity:.4;cursor:default}.record-under{display:flex;align-items:center;justify-content:space-between;margin:11px 7px 24px;color:var(--muted);font-size:12px}.record-under button{display:flex;align-items:center;gap:7px;border:0;background:transparent;border-left:1px solid var(--line);padding-left:18px;font-size:13px;font-weight:550}.section-title{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:22px 0 7px}.stack>.section-title{margin:4px 0 -4px}.section-title h2{font-size:17px;font-weight:700}.text-action{display:flex;gap:3px;align-items:center;border:0;background:transparent;color:var(--muted)!important;font-size:12px!important;white-space:nowrap;padding:4px}.list-row{display:flex;gap:12px;align-items:center;width:100%;padding:16px 0;text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);min-height:69px}.row-icon{display:grid;place-items:center;flex:none;width:43px;height:43px;border-radius:16px;background:var(--soft)}.row-copy{flex:1;min-width:0}.row-copy strong{font-size:15px;font-weight:600;display:block;line-height:1.45}.row-copy small{display:block;font-size:12px;color:var(--muted);margin-top:5px;line-height:1.5}.home-recent .list-row{padding:14px 0;min-height:75px}.home-content .section-title{margin-top:22px}.home-content .quiet-link{margin:22px auto 0;display:block}.quiet-link{border:0;background:transparent;color:var(--muted)!important;text-align:center;font-size:12px!important;padding:9px}.card{background:white;border-radius:20px;border:1px solid #ebe4f5;padding:18px;display:block;min-width:0;text-align:left;width:100%;color:inherit}.card.clickable{cursor:pointer}.card.clickable:active{background:#fdfbff}.card h3{margin:0 0 7px}.card p{font-size:13px;margin:6px 0}.recall-entry{display:flex;gap:12px;align-items:center;padding:17px 15px}.recall-entry>div{flex:1}.recall-entry strong{font-size:14px}.recall-entry p{font-size:11px;margin:4px 0 0}.app-nav{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;z-index:12;border-top:1px solid var(--line);background:#fbfaff;padding:10px 12px calc(var(--mobile-safe-area-height) + 4px);min-height:77px}.app-nav button{border:0;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:58px;min-height:46px;font-size:11px;position:relative;color:var(--muted)}.app-nav button.selected{color:var(--brand);font-weight:650}.app-nav button.selected .icon{filter:invert(40%) sepia(80%) saturate(1740%) hue-rotate(224deg) brightness(97%);opacity:1}.app-nav button.selected:before{content:'';position:absolute;inset:-4px 3px;background:var(--soft);border-radius:15px;z-index:-1}.app-nav button b{position:absolute;top:-5px;right:8px;font-size:9px;font-weight:500;width:14px;height:14px;background:var(--brand);color:white;border-radius:50%;display:grid;place-items:center}.badge{font-size:10px;line-height:1.3;padding:4px 7px;border-radius:99px;display:inline-flex;align-items:center;white-space:nowrap;background:var(--soft);color:#7355d6;flex:none;font-weight:550}.badge.muted,.badge.gray{background:#eeedf4;color:#817d8d}.badge.green,.badge.success{background:#e6f4eb;color:#408258}.badge.danger,.badge.red{background:#fae5ec;color:#b14868}.badge.orange,.badge.warning{background:#fff0dd;color:#a97630}.meta{font-size:12px;color:var(--muted);line-height:1.6}.title{font-size:22px;font-weight:700;line-height:1.45}.divider{height:1px;background:var(--line);margin:4px 0}.action-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.action-grid .button{font-size:13px!important;padding:11px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat{background:white;border:1px solid var(--line);border-radius:15px;padding:14px 9px;text-align:center;font-size:12px}.stat strong{display:block;font-size:22px;font-weight:650;color:var(--brand);margin-bottom:3px}.stat span,.stat small{font-size:11px;color:var(--muted)}.form-field{display:block;min-width:0}.form-field>span{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 7px}.form-field input,.form-field textarea,.form-field select{display:block;width:100%;min-height:47px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:#fff;outline-color:var(--brand);font-size:14px;line-height:1.5}.form-field textarea{resize:none}.form-field small{display:block;font-size:11px;line-height:1.55;color:var(--muted);margin:6px 3px 0}.toggle-row{display:flex;align-items:center;gap:16px;padding:10px 0;min-height:47px}.toggle-row>span{flex:1}.toggle-row strong{font-size:14px;font-weight:550}.toggle-row small{display:block;font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px}.toggle-row input{appearance:none;-webkit-appearance:none;background:#d5cee2;border-radius:99px;width:44px;height:26px;position:relative;flex:none;border:0;cursor:pointer}.toggle-row input:after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:white;transition:left .15s;box-shadow:0 1px 3px #241a4618}.toggle-row input:checked{background:var(--brand)}.toggle-row input:checked:after{left:21px}.check-row{display:flex;align-items:flex-start;gap:9px;font-size:13px;line-height:1.55;padding:9px 0}.check-row input{accent-color:var(--brand);width:17px;height:17px;flex:none;margin:1px 0 0}.segmented{display:flex;background:#e8e2f4;border-radius:14px;padding:4px;gap:3px;width:100%}.segmented button{border:0;background:transparent;border-radius:11px;flex:1;font-size:12px;min-height:35px;padding:7px 6px;white-space:nowrap;color:var(--muted)}.segmented button[aria-selected=true]{color:var(--ink);background:white;box-shadow:0 2px 5px #2c185310;font-weight:600}.chip-track{gap:8px;padding:2px 0}.chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:7px 13px;font-size:12px!important;white-space:nowrap;min-height:33px}.chip.selected{background:var(--soft);border-color:#c6b8f5;color:var(--brand);font-weight:600}.search-input{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:14px;background:white;padding:10px 13px;min-height:46px}.search-input input{border:0;outline:0!important;min-width:0;flex:1;background:transparent;line-height:1.5;font-size:13px}.search-input input::placeholder{color:#a094b9}.search-input button{border:0;background:transparent;padding:3px}.search-hints{display:flex;flex-wrap:wrap;gap:8px}.empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:38px 18px;gap:8px}.empty-state>span{background:var(--soft);border-radius:22px;padding:20px;margin-bottom:10px}.empty-state p{font-size:13px;max-width:245px}.empty-state .button{margin-top:10px;max-width:230px}.notice{border-radius:14px;background:var(--soft);padding:12px 14px;font-size:12px;line-height:1.6;color:#6e5da1}.notice.warning{background:#fff0d9;color:#956323}.notice.danger{background:#f8e8ed;color:#a24360}.sheet-content{padding:6px 3px 24px;display:flex;flex-direction:column;gap:14px;color:var(--ink);font-family:"PingFang SC",sans-serif}.sheet-content .list-row{padding:12px 0}.source-link{display:flex;align-items:center;gap:6px;width:100%;border:0;background:#f5f2ff;border-radius:10px;padding:10px 11px;color:var(--brand);text-align:left;font-size:11px!important;margin-top:10px}.source-link span{flex:1}.avatar{display:grid;place-items:center;width:42px;height:42px;flex:none;border-radius:50%;background:var(--soft);color:var(--brand);font-size:16px;font-weight:600}.timeline{border-left:2px solid var(--line);padding-left:18px;margin:6px 7px;display:flex;flex-direction:column;gap:18px}.timeline>div{position:relative}.timeline p{font-size:13px}.error-text{font-size:12px;color:#b04769;padding:8px 2px;line-height:1.6}.danger-text{color:#b04769!important}.live-return{position:absolute;bottom:calc(var(--mobile-safe-area-height) + 69px);left:20px;right:20px;display:flex;align-items:center;gap:10px;background:#302956;color:white;padding:10px 14px;border-radius:14px;border:0;z-index:15;box-shadow:0 6px 20px #21184620;text-align:left}.live-return>span{flex:1;font-size:12px}.live-return small{display:block;opacity:.65;font-size:10px}.live-return .icon{filter:brightness(0) invert(1)}.app-toast{position:absolute;left:25px;right:25px;border-radius:14px;background:#292044ed;color:white;padding:12px 15px;font-size:12px;line-height:1.6;z-index:90;text-align:center;box-shadow:0 5px 20px #2b214530;pointer-events:none}.private-caption{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}.private-caption .badge{margin-left:auto}.assistant-welcome{padding:20px 0 10px;text-align:center}.assistant-welcome img{width:135px;height:105px;object-fit:contain}.assistant-welcome h2{font-size:23px;margin:8px 0}.assistant-welcome p{font-size:13px}.suggestion-grid{display:flex;flex-direction:column;gap:10px}.suggestion-grid button{display:flex;align-items:center;justify-content:space-between;background:white;border:1px solid var(--line);border-radius:15px;padding:15px;text-align:left;font-size:13px}.chat-bubble{padding:17px;border-radius:20px;background:white;font-size:14px}.chat-bubble.user{margin-left:35px;background:var(--soft)}.chat-bubble p{color:var(--ink);margin:6px 0 0;font-size:14px;line-height:1.75;white-space:pre-wrap}.chat-bubble small{font-size:10px;color:var(--muted)}.voice-stage{text-align:center;padding:20px 5px}.voice-stage>img{width:170px;height:140px;object-fit:contain}.voice-stage h2{font-size:22px;margin:14px 0 8px}.voice-stage p{font-size:12px}.voice-record{display:grid;place-items:center;width:90px;height:90px;border:0;border-radius:50%;background:var(--brand);margin:30px auto 4px;box-shadow:0 0 0 12px var(--soft)}.voice-record.listening{animation:listening-pulse 1.4s ease-in-out infinite}@keyframes listening-pulse{50%{box-shadow:0 0 0 19px #d3c6ff66;transform:scale(1.03)}}.notification-card>div{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}.notification-card.unread{border-color:#c9b8f0}.onboarding-head{text-align:center;padding:16px 0 14px}.onboarding-head img{display:block;object-fit:contain;width:150px;height:120px;margin:0 auto 8px}.onboarding-head h2{font-size:23px;margin:14px 0 8px}.onboarding-head p{font-size:13px}.card-head{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:11px}.card-foot{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:15px;font-size:11px;color:var(--muted)}.status-line{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:11px}.transcript-item{background:white;border-radius:17px;padding:16px;margin-bottom:10px;border:1px solid var(--line)}.transcript-item .speaker{display:flex;gap:8px;justify-content:space-between;align-items:center;font-size:12px;color:var(--brand)}.transcript-item p{color:var(--ink);font-size:14px;line-height:1.75}.material-card{background:white;border:1px solid var(--line);border-radius:17px;padding:16px}.material-card p{font-size:12px}.recording-banner{display:flex;align-items:center;gap:10px;border-radius:17px;padding:17px;background:var(--soft)}.recording-banner>div{flex:1}.recording-banner strong{display:block}.recording-banner small{font-size:11px;color:var(--muted)}.mini-button{border:1px solid var(--line);background:white;padding:7px 12px;border-radius:99px;font-size:12px!important}.progress-track{background:#e8e1f5;height:7px;border-radius:99px;overflow:hidden}.progress-track>span{display:block;height:100%;background:var(--brand);border-radius:99px}.profile-card{display:flex;align-items:center;gap:14px;padding:20px}.profile-card .avatar{width:56px;height:56px;font-size:22px}.settings-group{background:white;border-radius:20px;padding:0 16px;border:1px solid var(--line)}.settings-group .list-row:last-child{border-bottom:0}.settings-group .row-icon{background:#f2effb;width:34px;height:34px;border-radius:11px}.settings-group .row-copy strong{font-size:14px}.summary-list{margin:0;padding-left:21px;display:flex;flex-direction:column;gap:11px;font-size:14px;line-height:1.7}.tag-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.inline-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.receipt-success{text-align:center;padding:25px 10px}.receipt-success>.icon{margin:0 auto 15px}.receipt-success h2{font-size:23px}.document-preview{background:white;border:1px solid var(--line);padding:24px 20px;border-radius:12px;min-height:330px;font-size:13px;line-height:1.8;white-space:pre-wrap}.slide-preview{aspect-ratio:4/3;background:white;border:1px solid var(--line);border-radius:17px;padding:23px;display:flex;flex-direction:column;justify-content:center}.slide-preview h2{font-size:23px}.slide-preview p{font-size:12px}.row-actions{display:flex;gap:9px}.row-actions button{border:0;background:#eee8fc;border-radius:9px;padding:8px 11px}.budget-number{font-size:30px;letter-spacing:-1px;font-weight:650;color:var(--brand)}
+/* Oops design language — tokens (2026-10-13). Same values as the Android H5 (android/.../web/oops-design.css).
+   Defined on :root because bottom sheets render beside .oops-root, not inside it. */
+@font-face{font-family:"Nunito";font-style:normal;font-weight:200 1000;font-display:swap;src:url(/fonts/nunito-latin-wght-normal.woff2) format("woff2-variations"),url(/fonts/nunito-latin-wght-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+:root{--canvas:#f2efff;--surface:#fff;--surface-raised:#fff;--fill:#eceaf7;--fill-strong:#dedbf0;--line:#e6e3f5;--line-strong:#8580a8;--ink:#121130;--ink-2:#4b4869;--ink-3:#686589;--ink-disabled:#aaa6c6;--primary:#6449ea;--primary-text:#6449ea;--primary-soft:#ece8ff;--on-primary:#fff;--success:#087568;--success-soft:#ddf6f1;--warning:#985700;--warning-soft:#fff0d4;--danger:#c9183f;--danger-soft:#ffe4ea;--on-danger:#fff;--info:#2f55d6;--info-soft:#e5ecff;--inverse:#121130;--on-inverse:#fff;--rec:#e11d48;--rec-soft:#ffe5eb;--speaker-1:#6449ea;--speaker-2:#0b7285;--speaker-3:#c2410c;--speaker-4:#b4237a;--speaker-5:#4d7c0f;--speaker-6:#56598a;--gradient-action:linear-gradient(75deg,#4361ee 0%,#7048e8 100%);--radius-xs:6px;--radius-sm:10px;--radius-md:16px;--radius-lg:24px;--radius-xl:32px;--radius-full:9999px;--shadow-1:0 1px 2px #1211300d,0 2px 8px #3b2fb00f;--shadow-2:0 2px 6px #1211300f,0 8px 24px #3b2fb01f;--shadow-3:0 4px 12px #12113014,0 20px 48px #3b2fb033;--shadow-glow:0 6px 16px #6449ea4d;--focus-ring:0 0 0 2px #fff,0 0 0 4px #6449ea;--dur-instant:100ms;--dur-fast:160ms;--dur-base:240ms;--dur-slow:360ms;--ease-standard:cubic-bezier(.2,0,0,1);--ease-bounce:cubic-bezier(.34,1.56,.64,1);--font-sans:"Nunito","PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans CJK SC","Noto Sans SC",system-ui,sans-serif;--muted:var(--ink-3);--brand:var(--primary);--soft:var(--primary-soft)}
+.oops-root{position:absolute;inset:0;background:var(--canvas);color:var(--ink);font-family:var(--font-sans);font-size:14px;line-height:1.5;isolation:isolate}.oops-root *{box-sizing:border-box}.oops-root button,.oops-root input,.oops-root textarea,.oops-root select{font:inherit;color:inherit}.oops-root button{touch-action:manipulation}.oops-root button:focus-visible,.oops-root input:focus-visible,.oops-root textarea:focus-visible,.oops-root select:focus-visible{outline:2px solid var(--brand);outline-offset:3px}.oops-root p{margin:7px 0;color:var(--muted);line-height:1.65}.oops-root h2,.oops-root h3{line-height:1.45;margin:0}.oops-root h2{font-size:19px}.oops-root h3{font-size:16px}.oops-root .icon{display:block;flex:none;object-fit:contain;opacity:.86}.oops-root .icon-button{border:0;background:transparent;width:36px;height:38px;display:flex;align-items:center;justify-content:center;padding:5px;flex:none}.app-header{position:absolute;top:var(--mobile-status-bar-height,54px);left:0;right:0;height:62px;display:flex;align-items:center;gap:8px;padding:8px 18px;background:var(--canvas);z-index:10}.app-header h1{margin:0;font-size:18px;font-weight:650;flex:1;text-align:center;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.app-header .wordmark{width:110px;height:38px;object-fit:contain}.header-tools{margin-left:auto;display:flex;align-items:center;gap:12px}.space-pill{display:flex;gap:6px;align-items:center;font-size:12px!important;border:0;padding:10px 12px;border-radius:99px;background:var(--soft);max-width:152px;white-space:nowrap}.notification-button{position:relative}.notification-button i{position:absolute;right:2px;top:1px;width:7px;height:7px;background:var(--brand);border-radius:50%;border:2px solid var(--canvas)}.oops-scroll{position:absolute;inset:calc(var(--mobile-status-bar-height,54px) + 62px) 0 0!important;background:var(--canvas)}.screen-content{padding:10px 22px calc(var(--mobile-safe-area-height) + 140px);min-height:100%;background:var(--canvas)}.stack{display:flex;flex-direction:column;gap:16px;width:100%;min-width:0}.home-main{padding:10px 22px calc(var(--mobile-safe-area-height) + 144px)}.home-date{font-size:13px;color:var(--muted);margin:5px 0 9px}.home-hero{display:flex;align-items:center;margin:0 0 22px;min-height:93px}.home-hero h1{font-size:29px;letter-spacing:-.8px;line-height:1.35;margin:0;font-weight:780;flex:1;white-space:nowrap;position:relative;z-index:1}.home-hero img{width:110px;height:95px;object-fit:contain;margin-left:-12px;align-self:flex-end}.ask-card{border-radius:26px;background:white;padding:21px 16px 13px;min-height:163px;margin-bottom:12px;border:1px solid var(--line)}.ask-card textarea{width:100%;border:0;outline:0!important;resize:none;display:block;min-height:73px;font-size:16px;line-height:1.6;background:transparent}.ask-card textarea::placeholder{color:var(--ink-3)}.ask-footer{display:flex;gap:10px;align-items:center;min-height:43px}.ask-footer small{display:flex;gap:5px;align-items:center;flex:1;font-size:11px;color:var(--muted)}.input-text{font-size:12px!important;background:none;border:0;color:var(--muted)!important;padding:6px}.mic-button{width:46px;height:46px;border-radius:50%;border:0;background:var(--primary);display:grid;place-items:center;flex:none}.mic-button img,.button.primary .icon,.voice-record .icon{filter:brightness(0) invert(1);opacity:1}.button{width:100%;border-radius:99px;min-height:48px;padding:13px 19px;display:flex;align-items:center;justify-content:center;gap:9px;border:1px solid transparent;font-size:15px!important;font-weight:600!important;line-height:1.5;text-align:center;flex:none;transition:opacity .15s,transform .15s}.button:active{transform:scale(.98)}.button.primary{background:linear-gradient(105deg,var(--primary),var(--primary));color:white;box-shadow:0 5px 14px #a496e721}.button.secondary{background:var(--surface);border-color:var(--line)}.button.danger{background:var(--danger-soft);color:var(--danger);border-color:var(--danger-soft)}.button.quiet{background:transparent;color:var(--muted);min-height:38px;box-shadow:none}.button:disabled{opacity:.4;cursor:default}.record-under{display:flex;align-items:center;justify-content:space-between;margin:11px 7px 24px;color:var(--muted);font-size:12px}.record-under button{display:flex;align-items:center;gap:7px;border:0;background:transparent;border-left:1px solid var(--line);padding-left:18px;font-size:13px;font-weight:550}.section-title{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:22px 0 7px}.stack>.section-title{margin:4px 0 -4px}.section-title h2{font-size:17px;font-weight:700}.text-action{display:flex;gap:3px;align-items:center;border:0;background:transparent;color:var(--muted)!important;font-size:12px!important;white-space:nowrap;padding:4px}.list-row{display:flex;gap:12px;align-items:center;width:100%;padding:16px 0;text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);min-height:69px}.row-icon{display:grid;place-items:center;flex:none;width:43px;height:43px;border-radius:16px;background:var(--soft)}.row-copy{flex:1;min-width:0}.row-copy strong{font-size:15px;font-weight:600;display:block;line-height:1.45}.row-copy small{display:block;font-size:12px;color:var(--muted);margin-top:5px;line-height:1.5}.home-recent .list-row{padding:14px 0;min-height:75px}.home-content .section-title{margin-top:22px}.home-content .quiet-link{margin:22px auto 0;display:block}.quiet-link{border:0;background:transparent;color:var(--muted)!important;text-align:center;font-size:12px!important;padding:9px}.card{background:white;border-radius:20px;border:1px solid var(--line);padding:18px;display:block;min-width:0;text-align:left;width:100%;color:inherit}.card.clickable{cursor:pointer}.card.clickable:active{background:var(--surface)}.card h3{margin:0 0 7px}.card p{font-size:13px;margin:6px 0}.recall-entry{display:flex;gap:12px;align-items:center;padding:17px 15px}.recall-entry>div{flex:1}.recall-entry strong{font-size:14px}.recall-entry p{font-size:11px;margin:4px 0 0}.app-nav{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;z-index:12;border-top:1px solid var(--line);background:var(--surface);padding:10px 12px calc(var(--mobile-safe-area-height) + 4px);min-height:77px}.app-nav button{border:0;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:58px;min-height:46px;font-size:11px;position:relative;color:var(--muted)}.app-nav button.selected{color:var(--brand);font-weight:650}.app-nav button.selected .icon{filter:invert(40%) sepia(80%) saturate(1740%) hue-rotate(224deg) brightness(97%);opacity:1}.app-nav button.selected:before{content:'';position:absolute;inset:-4px 3px;background:var(--soft);border-radius:15px;z-index:-1}.app-nav button b{position:absolute;top:-5px;right:8px;font-size:9px;font-weight:500;width:14px;height:14px;background:var(--brand);color:white;border-radius:50%;display:grid;place-items:center}.badge{font-size:10px;line-height:1.3;padding:4px 7px;border-radius:99px;display:inline-flex;align-items:center;white-space:nowrap;background:var(--soft);color:var(--primary-text);flex:none;font-weight:550}.badge.muted,.badge.gray{background:var(--fill);color:var(--ink-3)}.badge.green,.badge.success{background:var(--success-soft);color:var(--success)}.badge.danger,.badge.red{background:var(--danger-soft);color:var(--danger)}.badge.orange,.badge.warning{background:var(--warning-soft);color:var(--warning)}.meta{font-size:12px;color:var(--muted);line-height:1.6}.title{font-size:22px;font-weight:700;line-height:1.45}.divider{height:1px;background:var(--line);margin:4px 0}.action-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.action-grid .button{font-size:13px!important;padding:11px}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat{background:white;border:1px solid var(--line);border-radius:15px;padding:14px 9px;text-align:center;font-size:12px}.stat strong{display:block;font-size:22px;font-weight:650;color:var(--brand);margin-bottom:3px}.stat span,.stat small{font-size:11px;color:var(--muted)}.form-field{display:block;min-width:0}.form-field>span{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 7px}.form-field input,.form-field textarea,.form-field select{display:block;width:100%;min-height:47px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);outline-color:var(--brand);font-size:14px;line-height:1.5}.form-field textarea{resize:none}.form-field small{display:block;font-size:11px;line-height:1.55;color:var(--muted);margin:6px 3px 0}.toggle-row{display:flex;align-items:center;gap:16px;padding:10px 0;min-height:47px}.toggle-row>span{flex:1}.toggle-row strong{font-size:14px;font-weight:550}.toggle-row small{display:block;font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px}.toggle-row input{appearance:none;-webkit-appearance:none;background:var(--fill-strong);border-radius:99px;width:44px;height:26px;position:relative;flex:none;border:0;cursor:pointer}.toggle-row input:after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:white;transition:left .15s;box-shadow:0 1px 3px #241a4618}.toggle-row input:checked{background:var(--brand)}.toggle-row input:checked:after{left:21px}.check-row{display:flex;align-items:flex-start;gap:9px;font-size:13px;line-height:1.55;padding:9px 0}.check-row input{accent-color:var(--brand);width:17px;height:17px;flex:none;margin:1px 0 0}.segmented{display:flex;background:var(--fill);border-radius:14px;padding:4px;gap:3px;width:100%}.segmented button{border:0;background:transparent;border-radius:11px;flex:1;font-size:12px;min-height:35px;padding:7px 6px;white-space:nowrap;color:var(--muted)}.segmented button[aria-selected=true]{color:var(--ink);background:white;box-shadow:0 2px 5px #2c185310;font-weight:600}.chip-track{gap:8px;padding:2px 0}.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 13px;font-size:12px!important;white-space:nowrap;min-height:33px}.chip.selected{background:var(--soft);border-color:var(--line);color:var(--brand);font-weight:600}.search-input{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:14px;background:white;padding:10px 13px;min-height:46px}.search-input input{border:0;outline:0!important;min-width:0;flex:1;background:transparent;line-height:1.5;font-size:13px}.search-input input::placeholder{color:var(--ink-3)}.search-input button{border:0;background:transparent;padding:3px}.search-hints{display:flex;flex-wrap:wrap;gap:8px}.empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:38px 18px;gap:8px}.empty-state>span{background:var(--soft);border-radius:22px;padding:20px;margin-bottom:10px}.empty-state p{font-size:13px;max-width:245px}.empty-state .button{margin-top:10px;max-width:230px}.notice{border-radius:14px;background:var(--soft);padding:12px 14px;font-size:12px;line-height:1.6;color:var(--ink-3)}.notice.warning{background:var(--warning-soft);color:var(--warning)}.notice.danger{background:var(--danger-soft);color:var(--danger)}.sheet-content{padding:6px 3px 24px;display:flex;flex-direction:column;gap:14px;color:var(--ink);font-family:"PingFang SC",sans-serif}.sheet-content .list-row{padding:12px 0}.source-link{display:flex;align-items:center;gap:6px;width:100%;border:0;background:var(--canvas);border-radius:10px;padding:10px 11px;color:var(--brand);text-align:left;font-size:11px!important;margin-top:10px}.source-link span{flex:1}.avatar{display:grid;place-items:center;width:42px;height:42px;flex:none;border-radius:50%;background:var(--soft);color:var(--brand);font-size:16px;font-weight:600}.timeline{border-left:2px solid var(--line);padding-left:18px;margin:6px 7px;display:flex;flex-direction:column;gap:18px}.timeline>div{position:relative}.timeline p{font-size:13px}.error-text{font-size:12px;color:var(--danger);padding:8px 2px;line-height:1.6}.danger-text{color:var(--danger)!important}.live-return{position:absolute;bottom:calc(var(--mobile-safe-area-height) + 69px);left:20px;right:20px;display:flex;align-items:center;gap:10px;background:var(--inverse);color:white;padding:10px 14px;border-radius:14px;border:0;z-index:15;box-shadow:0 6px 20px #21184620;text-align:left}.live-return>span{flex:1;font-size:12px}.live-return small{display:block;opacity:.65;font-size:10px}.live-return .icon{filter:brightness(0) invert(1)}.app-toast{position:absolute;left:25px;right:25px;border-radius:14px;background:#292044ed;color:white;padding:12px 15px;font-size:12px;line-height:1.6;z-index:90;text-align:center;box-shadow:0 5px 20px #2b214530;pointer-events:none}.private-caption{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}.private-caption .badge{margin-left:auto}.assistant-welcome{padding:20px 0 10px;text-align:center}.assistant-welcome img{width:135px;height:105px;object-fit:contain}.assistant-welcome h2{font-size:23px;margin:8px 0}.assistant-welcome p{font-size:13px}.suggestion-grid{display:flex;flex-direction:column;gap:10px}.suggestion-grid button{display:flex;align-items:center;justify-content:space-between;background:white;border:1px solid var(--line);border-radius:15px;padding:15px;text-align:left;font-size:13px}.chat-bubble{padding:17px;border-radius:20px;background:white;font-size:14px}.chat-bubble.user{margin-left:35px;background:var(--soft)}.chat-bubble p{color:var(--ink);margin:6px 0 0;font-size:14px;line-height:1.75;white-space:pre-wrap}.chat-bubble small{font-size:10px;color:var(--muted)}.voice-stage{text-align:center;padding:20px 5px}.voice-stage>img{width:170px;height:140px;object-fit:contain}.voice-stage h2{font-size:22px;margin:14px 0 8px}.voice-stage p{font-size:12px}.voice-record{display:grid;place-items:center;width:90px;height:90px;border:0;border-radius:50%;background:var(--brand);margin:30px auto 4px;box-shadow:0 0 0 12px var(--soft)}.voice-record.listening{animation:listening-pulse 1.4s ease-in-out infinite}@keyframes listening-pulse{50%{box-shadow:0 0 0 19px #d3c6ff66;transform:scale(1.03)}}.notification-card>div{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}.notification-card.unread{border-color:var(--line)}.onboarding-head{text-align:center;padding:16px 0 14px}.onboarding-head img{display:block;object-fit:contain;width:150px;height:120px;margin:0 auto 8px}.onboarding-head h2{font-size:23px;margin:14px 0 8px}.onboarding-head p{font-size:13px}.card-head{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:11px}.card-foot{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:15px;font-size:11px;color:var(--muted)}.status-line{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:11px}.transcript-item{background:white;border-radius:17px;padding:16px;margin-bottom:10px;border:1px solid var(--line)}.transcript-item .speaker{display:flex;gap:8px;justify-content:space-between;align-items:center;font-size:12px;color:var(--brand)}.transcript-item p{color:var(--ink);font-size:14px;line-height:1.75}.material-card{background:white;border:1px solid var(--line);border-radius:17px;padding:16px}.material-card p{font-size:12px}.recording-banner{display:flex;align-items:center;gap:10px;border-radius:17px;padding:17px;background:var(--soft)}.recording-banner>div{flex:1}.recording-banner strong{display:block}.recording-banner small{font-size:11px;color:var(--muted)}.mini-button{border:1px solid var(--line);background:white;padding:7px 12px;border-radius:99px;font-size:12px!important}.progress-track{background:var(--fill);height:7px;border-radius:99px;overflow:hidden}.progress-track>span{display:block;height:100%;background:var(--brand);border-radius:99px}.profile-card{display:flex;align-items:center;gap:14px;padding:20px}.profile-card .avatar{width:56px;height:56px;font-size:22px}.settings-group{background:white;border-radius:20px;padding:0 16px;border:1px solid var(--line)}.settings-group .list-row:last-child{border-bottom:0}.settings-group .row-icon{background:var(--canvas);width:34px;height:34px;border-radius:11px}.settings-group .row-copy strong{font-size:14px}.summary-list{margin:0;padding-left:21px;display:flex;flex-direction:column;gap:11px;font-size:14px;line-height:1.7}.tag-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.inline-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.receipt-success{text-align:center;padding:25px 10px}.receipt-success>.icon{margin:0 auto 15px}.receipt-success h2{font-size:23px}.document-preview{background:white;border:1px solid var(--line);padding:24px 20px;border-radius:12px;min-height:330px;font-size:13px;line-height:1.8;white-space:pre-wrap}.slide-preview{aspect-ratio:4/3;background:white;border:1px solid var(--line);border-radius:17px;padding:23px;display:flex;flex-direction:column;justify-content:center}.slide-preview h2{font-size:23px}.slide-preview p{font-size:12px}.row-actions{display:flex;gap:9px}.row-actions button{border:0;background:var(--primary-soft);border-radius:9px;padding:8px 11px}.budget-number{font-size:30px;letter-spacing:-1px;font-weight:650;color:var(--brand)}
 
 @media (prefers-reduced-motion:reduce){.oops-root .voice-record{animation:none}.oops-root .button,.oops-root .toggle-row input:after{transition:none}}
 /* Reserve native safe areas while keeping the first review action on the home screen. */
@@ -30,8 +34,8 @@
 .has-recording-controls .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + var(--recording-controls-reserve))}
 .has-recording-controls .task-fixed-actions{bottom:calc(var(--mobile-safe-area-height) + var(--recording-footer-offset))!important}
 .has-recording-controls .app-toast{bottom:calc(var(--mobile-safe-area-height) + var(--recording-toast-offset))!important}.has-task-primary.has-recording-controls .app-toast{bottom:calc(var(--mobile-safe-area-height) + var(--recording-toast-offset) + 90px)!important}
-.has-prepare-footer .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 200px)}
-.session-prepare-footer{position:absolute;left:20px;right:20px;z-index:16;padding:10px;border-radius:24px;background:#fbfaff;box-shadow:0 4px 24px #37226016;border:1px solid var(--line)}
+.has-prepare-footer .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 234px)}
+.session-prepare-footer{position:absolute;left:20px;right:20px;z-index:16;padding:10px;border-radius:24px;background:var(--surface);box-shadow:0 4px 24px #37226016;border:1px solid var(--line)}
 
 .session-fixed-tabs{position:absolute;top:calc(var(--mobile-status-bar-height,54px) + 62px);left:0;right:0;height:57px;padding:2px 22px 10px;background:var(--canvas);z-index:10;border-bottom:1px solid var(--line)}
 .session-fixed-tabs .segmented{height:44px}
@@ -42,13 +46,543 @@
 .task-fixed-tabs .task-tab-bar{padding:0;background:transparent}
 .task-fixed-tabs .segmented button{min-height:36px}
 .has-task-tabs .oops-scroll{top:calc(var(--mobile-status-bar-height,54px) + 119px)!important}
-.task-fixed-actions{position:absolute;left:16px;right:16px;z-index:16;padding:10px;border-radius:24px;background:#fbfaff;border:1px solid var(--line);box-shadow:0 4px 24px #37226016}
+.task-fixed-actions{position:absolute;left:16px;right:16px;z-index:16;padding:10px;border-radius:24px;background:var(--surface);border:1px solid var(--line);box-shadow:0 4px 24px #37226016}
 .task-fixed-actions.keyboard-open{padding:0;border:0;background:transparent;box-shadow:none;pointer-events:none}
 .task-fixed-actions.keyboard-open .task-primary-actions{display:none}
-.has-task-primary .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 212px)}
+.has-task-primary .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + 246px)}
 .has-task-primary.has-recording-controls .screen-content{padding-bottom:calc(var(--mobile-safe-area-height) + var(--recording-controls-reserve) + 114px)}
-.badge.amber{background:#fff0dd;color:#a97630}
+.badge.amber{background:var(--warning-soft);color:var(--warning)}
 .home-scope-return{border:0;border-radius:12px;background:var(--soft);padding:5px 10px;display:flex;flex-direction:column;align-items:flex-start;max-width:146px;min-width:0;min-height:42px;text-align:left;line-height:1.45}
 .home-scope-return span{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;color:var(--muted)}
 .home-scope-return small{font-size:11px;color:var(--brand);font-weight:600}
 .content-scope-screen .card>h2{margin-top:9px}
+
+/* ======================================================================================================
+   Oops 设计语言 · 网页端（2026-10-13；同日按组件规范补齐效果）
+   Restyles the app; never changes behaviour. Ported from the design system's own component styles (components/bundle.css):
+   TabBar with the RecordButton raised in the middle (two entries each side), RecIndicator, Button, IconButton, Chip, SegmentedControl, Switch,
+   Checkbox, Tag, TextField, ListItem, Toast, EmptyState, Loader, ProgressBar and the waveform.
+   One gradient highlight per screen: on pages it is the tab bar's record button, so a page's own main action is ink and
+   buttons in cards are secondary; sheets cover the tab bar and keep the gradient for their main action.
+   Red only means "recording"; Pupu only at emotional moments (src/Pupu.tsx); every press answers with a jelly rebound;
+   everything respects prefers-reduced-motion. Scoped to .device-screen so bottom sheets (rendered beside .oops-root)
+   get the same components.
+   ====================================================================================================== */
+
+:root {
+  --brand-ink: #121130; --brand-indigo: #24298f; --brand-royal: #3e42da; --brand-jelly: #446df4; --brand-lilac: #966cf2; --brand-mist: #e5d3fa;
+  --inverse-accent: #b4a6ff; --mark: #fff0b8; --scrim: #1211308c; --on-dusk: #ffffff; --on-dusk-2: #e9e6ff;
+  --gradient-dusk: linear-gradient(110deg, #121130 0%, #24298f 45%, #3e42da 75%, #6449ea 100%);
+  --dur-celebrate: 600ms; --ease-exit: cubic-bezier(.4, 0, 1, 1);
+  --control-lg: 52px; --control-md: 44px; --control-sm: 32px; --tabbar-h: 64px; --record-lg: 80px; --record-md: 64px;
+}
+
+.oops-root { font-family: var(--font-sans); color: var(--ink); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.device-screen .bottom-sheet { font-family: var(--font-sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+.device-screen .sheet-content { font-family: inherit; color: var(--ink); }
+.device-screen h1, .device-screen h2 { font-weight: 800; letter-spacing: -.01em; }
+.device-screen h3 { font-weight: 800; }
+.device-screen strong { font-weight: 700; }
+.device-screen time { font-variant-numeric: tabular-nums; }
+.device-screen ::selection { background: var(--primary-soft); }
+.device-screen button:focus-visible, .device-screen input:focus-visible, .device-screen textarea:focus-visible,
+.device-screen select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ---------- icons: Phosphor files drawn as masks so they take the text colour (ui.tsx Icon) ---------- */
+.icon { width: var(--icon-size, 22px); height: var(--icon-size, 22px); }
+.device-screen .icon {
+  display: block; flex: none; opacity: 1; filter: none !important;
+  background-color: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat;
+}
+
+/* ---------- header: IconButton "surface" on the canvas (设计语言 IconButton) ---------- */
+.device-screen .app-header h1 { font-size: 18px; font-weight: 800; color: var(--ink); }
+.device-screen .app-header .wordmark { width: 104px; height: 36px; }
+.device-screen .icon-button {
+  width: 44px; height: 44px; padding: 0; border-radius: var(--radius-full); color: var(--ink);
+  transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast) var(--ease-standard);
+}
+.device-screen .app-header .icon-button { background: var(--surface); box-shadow: var(--shadow-1); }
+.device-screen .notification-button i { background: var(--danger); border: 0; width: 10px; height: 10px; top: 9px; right: 10px; box-shadow: 0 0 0 2px var(--surface); animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1; }
+.device-screen .home-scope-return { background: var(--primary-soft); border-radius: var(--radius-sm); }
+.device-screen .home-scope-return span { color: var(--ink-2); }
+.device-screen .home-scope-return small { color: var(--primary-text); font-weight: 800; }
+
+/* ---------- buttons (设计语言 Button: primary / secondary / ghost / ink / danger; lg 52, md 44, sm 32) ---------- */
+:where(.device-screen) .button {
+  min-height: var(--control-md); padding: 10px 20px; gap: 8px; border: 0; border-radius: var(--radius-full);
+  font-family: var(--font-sans); font-size: 15px !important; font-weight: 800 !important; letter-spacing: .01em;
+  transition: transform var(--dur-slow) var(--ease-bounce), box-shadow var(--dur-base) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), opacity var(--dur-fast);
+}
+:where(.device-screen) .button .icon { width: 20px; height: 20px; }
+/* Sheets cover the tab bar, so their main action is the screen's one gradient. */
+.device-screen .button.primary { background: var(--gradient-action); color: var(--on-primary); box-shadow: var(--shadow-glow); }
+:where(.device-screen) .bottom-sheet .button.primary { min-height: var(--control-lg); font-size: 16px !important; }
+/* On pages the tab bar's record button is the gradient: a page's own main action is ink, buttons in cards are secondary. */
+.oops-root .button.primary { background: var(--inverse); color: var(--on-inverse); box-shadow: none; }
+:where(.oops-root) .task-fixed-actions .button.primary, :where(.oops-root) .session-prepare-footer .button.primary { min-height: var(--control-lg); font-size: 16px !important; }
+.oops-root .card .button.primary, .device-screen .bottom-sheet .card .button.primary { background: var(--primary-soft); color: var(--primary-text); box-shadow: none; }
+.device-screen .button.secondary { background: var(--primary-soft); color: var(--primary-text); border: 0; }
+.device-screen .button.quiet { background: transparent; color: var(--primary-text); }
+.device-screen .button.danger { background: var(--danger); color: var(--on-danger); border: 0; }
+/* Solid danger only confirms inside a sheet; on a page a destructive button is tinted and asks again. */
+.oops-root .button.danger { background: var(--danger-soft); color: var(--danger); }
+.device-screen .button:disabled { opacity: 1; background: var(--fill); color: var(--ink-disabled); box-shadow: none; }
+/* A button beside a section heading stays its own (small) size instead of squeezing the heading into a column. */
+.device-screen .section-title > .button { width: auto; flex: none; min-height: var(--control-sm); padding: 6px 12px; font-size: 13px !important; }
+.device-screen .section-title > h2 { flex: 1 1 auto; min-width: 0; }
+:where(.device-screen) .action-grid .button { padding: 10px 12px; }
+.device-screen .quiet-link { color: var(--primary-text) !important; font-weight: 800; font-size: 13px !important; }
+.device-screen .text-action { color: var(--primary-text) !important; font-size: 13px !important; font-weight: 800; min-height: 32px; }
+.device-screen .mini-button { border: 0; background: var(--fill); color: var(--ink-2); font-weight: 800; }
+
+/* ---------- cards, lists (设计语言 Card, ListItem: dividers start at the text) ---------- */
+:where(.device-screen) .card { background: var(--surface); border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
+.device-screen .card h3 { color: var(--ink); }
+.device-screen .card.clickable { transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast); }
+.device-screen .card.clickable:active { background: var(--surface); }
+:where(.device-screen) .card .card, :where(.device-screen) .bottom-sheet .card { box-shadow: none; border: 0; background: var(--fill); }
+:where(.device-screen) .bottom-sheet .card .card { background: var(--surface); }
+.device-screen .section-title h2 { font-size: 18px; font-weight: 800; color: var(--ink); }
+:where(.device-screen) .list-row { border-bottom: 1px solid var(--line); color: var(--ink); transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast); }
+.device-screen .card .list-row, .device-screen .settings-group .list-row { position: relative; border-bottom: 0; }
+.device-screen .card .list-row + .list-row::before { content: ""; position: absolute; top: 0; right: 0; left: 52px; border-top: 1px solid var(--line); }
+.device-screen .settings-group .list-row + .list-row::before { left: 48px; }
+:where(.device-screen) .row-icon { width: 40px; height: 40px; border-radius: var(--radius-sm); background: var(--primary-soft); color: var(--primary-text); }
+.device-screen .row-copy strong { font-size: 16px; line-height: 22px; font-weight: 700; color: var(--ink); }
+.device-screen .row-copy small { font-size: 13px; line-height: 18px; color: var(--ink-3); }
+.device-screen .list-row > .icon:last-child { color: var(--ink-3); }
+:where(.device-screen) .settings-group { border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
+:where(.device-screen) .settings-group .row-icon { width: 36px; height: 36px; border-radius: var(--radius-sm); }
+.device-screen .settings-group .row-copy strong { font-size: 15px; }
+/* Category colours for the settings groups' icon blocks, as ListItem's toned icons. */
+.device-screen .settings-group:nth-of-type(5n+2) .row-icon { background: var(--info-soft); color: var(--info); }
+.device-screen .settings-group:nth-of-type(5n+3) .row-icon { background: var(--success-soft); color: var(--success); }
+.device-screen .settings-group:nth-of-type(5n+4) .row-icon { background: var(--warning-soft); color: var(--warning); }
+.device-screen .settings-group:nth-of-type(5n+5) .row-icon { background: var(--fill); color: var(--ink-2); }
+:where(.device-screen) .material-card, :where(.device-screen) .transcript-item { border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-1); }
+:where(.device-screen) .stat { border: 0; background: var(--surface); box-shadow: var(--shadow-1); border-radius: var(--radius-md); }
+.device-screen .stat strong { color: var(--ink); font-weight: 900; }
+.device-screen .divider { background: var(--line); }
+
+/* ---------- tags (设计语言 Tag: 24px, radius-xs, status tones carry an icon — ui.tsx Badge) ---------- */
+:where(.device-screen) .badge {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--radius-xs);
+  font-size: 12px; line-height: 16px; font-weight: 800; letter-spacing: .01em; background: var(--primary-soft); color: var(--primary-text);
+}
+.device-screen .badge .icon { width: 13px; height: 13px; }
+.device-screen .badge.purple { background: var(--primary-soft); color: var(--primary-text); }
+.device-screen .badge.gray, .device-screen .badge.muted { background: var(--fill); color: var(--ink-2); }
+.device-screen .badge.green, .device-screen .badge.success { background: var(--success-soft); color: var(--success); }
+.device-screen .badge.red, .device-screen .badge.danger { background: var(--danger-soft); color: var(--danger); }
+.device-screen .badge.amber, .device-screen .badge.orange, .device-screen .badge.warning { background: var(--warning-soft); color: var(--warning); }
+
+/* ---------- chips (设计语言 Chip: fill → primary, and a check pops in) ---------- */
+:where(.device-screen) .chip {
+  display: inline-flex; align-items: center; gap: 6px; height: var(--control-sm); min-height: var(--control-sm); padding: 0 16px;
+  border: 0; border-radius: var(--radius-full); font-size: 14px !important; font-weight: 700;
+  transition: background-color var(--dur-base) var(--ease-standard), color var(--dur-base) var(--ease-standard), transform var(--dur-slow) var(--ease-bounce);
+}
+.device-screen .chip { background: var(--fill); color: var(--ink-2); }
+.device-screen .chip.selected, .device-screen .chip[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 700; padding-left: 12px; }
+.device-screen .chip:disabled { background: var(--fill); color: var(--ink-disabled); }
+.device-screen .chip-check { display: inline-grid; place-items: center; animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1; }
+.device-screen .chip-check .icon { width: 14px; height: 14px; }
+
+/* ---------- segmented control (设计语言 SegmentedControl: a raised thumb slides over with a jelly overshoot) ---------- */
+:where(.device-screen) .segmented {
+  position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%;
+  height: 40px; padding: 4px; gap: 0; border-radius: var(--radius-full); background: var(--fill);
+}
+.device-screen .segmented-thumb {
+  position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / var(--n));
+  border-radius: var(--radius-full); background: var(--surface-raised); box-shadow: var(--shadow-1);
+  transform: translateX(calc(100% * var(--i))); transition: transform var(--dur-slow) var(--ease-bounce);
+}
+:where(.device-screen) .segmented button {
+  position: relative; z-index: 1; min-width: 0; min-height: 0; height: 32px; padding: 0 10px; border: 0; border-radius: var(--radius-full);
+  background: transparent; color: var(--ink-2); font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--dur-base) var(--ease-standard), transform var(--dur-slow) var(--ease-bounce);
+}
+.device-screen .segmented button[aria-selected="true"] { background: transparent; box-shadow: none; color: var(--ink); font-weight: 800; }
+.device-screen .session-fixed-tabs, .device-screen .task-fixed-tabs { border-bottom: 0; }
+.device-screen .session-fixed-tabs .segmented, .device-screen .task-fixed-tabs .segmented { height: 40px; }
+.device-screen .session-fixed-tabs .segmented button, .device-screen .task-fixed-tabs .segmented button { min-height: 0; }
+
+/* ---------- forms (设计语言 TextField: 52px, 16px text; Switch; Checkbox) ---------- */
+.device-screen .form-field > span { color: var(--ink-2); font-size: 13px; line-height: 18px; font-weight: 700; }
+:where(.device-screen) .form-field input, :where(.device-screen) .form-field textarea, :where(.device-screen) .form-field select {
+  min-height: var(--control-lg); border: 1.5px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface);
+  color: var(--ink); font-size: 16px; line-height: 24px; padding: 12px 16px;
+  transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
+}
+:where(.device-screen) .form-field select {
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23686589' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9.5 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center; padding-right: 44px;
+}
+.device-screen .form-field input:focus, .device-screen .form-field textarea:focus, .device-screen .form-field select:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft);
+}
+.device-screen .form-field input::placeholder, .device-screen .form-field textarea::placeholder { color: var(--ink-3); opacity: 1; }
+.device-screen .form-field small { color: var(--ink-3); font-size: 13px; line-height: 18px; }
+:where(.device-screen) .search-input {
+  min-height: 48px; border: 1.5px solid var(--line); border-radius: var(--radius-full); background: var(--surface);
+  padding: 10px 16px; color: var(--ink-3);
+}
+.device-screen .search-input:focus-within { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
+.device-screen .search-input input { font-size: 16px; color: var(--ink); }
+.device-screen .search-input input::placeholder, .device-screen .ask-card textarea::placeholder { color: var(--ink-3); opacity: 1; }
+.device-screen .toggle-row strong { font-weight: 700; color: var(--ink); }
+.device-screen .toggle-row small { color: var(--ink-3); }
+/* Switch: 52×32 track; on fades in the action gradient; the thumb squashes wider while pressed and springs across. */
+:where(.device-screen) .toggle-row input {
+  position: relative; flex: none; width: 52px; height: 32px; margin: 0; border: 0; border-radius: var(--radius-full);
+  background: var(--line-strong); cursor: pointer; transition: box-shadow var(--dur-fast);
+}
+.device-screen .toggle-row input::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--gradient-action);
+  opacity: 0; transition: opacity var(--dur-base) var(--ease-standard);
+}
+.device-screen .toggle-row input::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: var(--radius-full);
+  background: var(--on-primary); box-shadow: var(--shadow-2);
+  transition: transform var(--dur-slow) var(--ease-bounce), width var(--dur-base) var(--ease-bounce);
+}
+.device-screen .toggle-row input:checked { background: var(--line-strong); }
+.device-screen .toggle-row input:checked::before { opacity: 1; }
+.device-screen .toggle-row input:checked::after { left: 3px; transform: translateX(20px); }
+.device-screen .toggle-row input:active::after { width: 32px; }
+.device-screen .toggle-row input:checked:active::after { transform: translateX(14px); }
+.device-screen .toggle-row input:disabled { opacity: .45; cursor: not-allowed; }
+/* Checkbox: rounded square; checked fills with primary and the check pops in. */
+.device-screen .check-row { color: var(--ink); }
+:where(.device-screen) .check-row input {
+  -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 22px; height: 22px; margin: 0;
+  border: 2px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--surface); cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), transform var(--dur-slow) var(--ease-bounce);
+}
+.device-screen .check-row input::after {
+  content: ""; position: absolute; left: 1px; top: 1px; width: 16px; height: 16px; background: var(--on-primary);
+  -webkit-mask: url(/icons/check-bold.svg) center / contain no-repeat; mask: url(/icons/check-bold.svg) center / contain no-repeat;
+  transform: scale(0); transition: transform var(--dur-base) var(--ease-bounce);
+}
+.device-screen .check-row input:checked { background: var(--primary); border-color: var(--primary); }
+.device-screen .check-row input:checked::after { transform: scale(1); }
+.device-screen .check-row:active input { transform: scale(.86); transition-duration: var(--dur-instant); }
+.device-screen .check-row input:disabled { opacity: .45; cursor: not-allowed; }
+.device-screen .check-row > span { padding-top: 1px; }
+
+/* ---------- tab bar (设计语言 TabBar: floating capsule, 2 | record button raised in the middle | 2) ---------- */
+.oops-root .app-nav {
+  left: 16px; right: 16px; bottom: calc(var(--mobile-safe-area-height, 0px) + 16px);
+  height: var(--tabbar-h); min-height: 0; padding: 0 8px; gap: 4px; align-items: center; justify-content: stretch;
+  border: 0; border-radius: var(--radius-full); background: var(--surface); box-shadow: var(--shadow-2);
+}
+.oops-root .app-nav > button {
+  flex: 1 1 0; width: auto; min-width: 0; height: 52px; min-height: 0; padding: 0; gap: 2px; border-radius: var(--radius-full);
+  color: var(--ink-3); font-weight: 700;
+  transition: background-color var(--dur-base) var(--ease-standard), color var(--dur-base) var(--ease-standard), transform var(--dur-slow) var(--ease-bounce);
+}
+.oops-root .app-nav > button > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: .02em; }
+.oops-root .app-nav > button .icon { width: 24px; height: 24px; }
+.oops-root .app-nav > button.selected { background: var(--primary-soft); color: var(--primary-text); font-weight: 700; }
+.oops-root .app-nav > button.selected::before { content: none; }
+.oops-root .app-nav > button.selected .icon { animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1; }
+/* Count badge: danger with a 2px surface ring, pinned to the icon's corner; it pops once and then stays still. */
+.oops-root .app-nav > button b {
+  display: block; position: absolute; top: 2px; right: calc(50% - 18px); min-width: 18px; width: auto; height: 18px; padding: 0 5px;
+  border-radius: var(--radius-full); background: var(--danger); color: var(--on-danger); box-shadow: 0 0 0 2px var(--surface);
+  font-size: 11px; line-height: 18px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums;
+  animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1;
+}
+.oops-root .app-nav-center { flex: none; display: grid; place-items: center; width: var(--record-md); height: var(--record-md); margin: -40px 4px 0; }
+
+/* ---------- record button (设计语言 RecordButton) ---------- */
+.device-screen .record-button {
+  --size: var(--record-lg); --level: 0;
+  -webkit-appearance: none; appearance: none; position: relative; display: inline-grid; place-items: center; flex: none;
+  grid-template: 100% / 100%; place-content: normal; gap: 0; min-width: 0; min-height: 0;
+  width: var(--size); height: var(--size); margin: 0; padding: 0; border: 0; border-radius: var(--radius-full); background: transparent;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; transition: transform var(--dur-slow) var(--ease-bounce);
+}
+.device-screen .record-button-core {
+  position: relative; z-index: 1; width: 100%; height: 100%; display: grid; place-items: center;
+  border-radius: var(--radius-full); background: var(--gradient-action); color: var(--on-primary); box-shadow: var(--shadow-glow);
+}
+.device-screen .record-button-ring {
+  position: absolute; inset: 0; border-radius: var(--radius-full); background: var(--primary-soft);
+  transform: scale(calc(1.14 + var(--level) * .22)); transition: transform var(--dur-fast) var(--ease-standard);
+}
+.device-screen .record-button-ring.outer { opacity: 0; transform: scale(calc(1.3 + var(--level) * .4)); }
+.device-screen .record-button.is-recording .record-button-ring.outer { opacity: .55; }
+.device-screen .record-button.is-paused .record-button-ring { background: var(--fill); }
+.device-screen .record-button.is-auto .record-button-ring { animation: oo-rec-ring 1600ms var(--ease-standard) infinite; }
+.device-screen .record-button.is-auto .record-button-ring.outer { animation: oo-rec-ring-outer 1600ms var(--ease-standard) infinite; }
+.device-screen .record-button-stop { width: 34%; height: 34%; border-radius: var(--radius-xs); background: var(--on-primary); }
+.device-screen .record-button:active { transform: scale(.92); transition-duration: var(--dur-instant); }
+.device-screen .record-button:focus-visible { outline: none; box-shadow: none; }
+.device-screen .record-button:focus-visible .record-button-core { box-shadow: var(--focus-ring), var(--shadow-glow); }
+
+/* ---------- fixed footers that float above the tab bar and its raised record button ---------- */
+.oops-root .task-fixed-actions, .oops-root .session-prepare-footer {
+  border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-2);
+}
+.oops-root .task-fixed-actions.keyboard-open { background: transparent; box-shadow: none; }
+.oops-root .live-return { background: var(--inverse); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
+/* The strip floats 116px up, clear of the raised record button; compact it is 68px tall, expanded up to 186px (measured),
+   so footers and toasts sit above it. */
+.oops-root.has-recording-controls { --recording-controls-reserve: 212px; --recording-footer-offset: 192px; --recording-toast-offset: 196px; }
+.oops-root.has-recording-controls:has(.recording-controls[data-expanded="true"]) { --recording-controls-reserve: 330px; --recording-footer-offset: 310px; --recording-toast-offset: 314px; }
+
+/* ---------- recording strip: status reads like RecIndicator; full controls when expanded ---------- */
+.oops-root .recording-controls {
+  bottom: calc(var(--mobile-safe-area-height, 0px) + 116px); left: 16px; right: 16px;
+  border: 0; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-2); padding: 12px 12px 14px 16px;
+}
+.oops-root .rc-heading { gap: 8px; margin-bottom: 14px; min-height: 52px; }
+.oops-root .rc-session { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.oops-root .rc-session strong { max-width: 100%; font-size: 15px; line-height: 20px; font-weight: 800; color: var(--ink); }
+.oops-root .rec-indicator, .device-screen .rec-indicator {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; border-radius: var(--radius-full);
+  background: var(--rec-soft); color: var(--ink); font-size: 13px; line-height: 18px; font-weight: 800; white-space: nowrap;
+}
+.device-screen .rec-indicator > i { flex: none; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--rec); animation: oo-rec-blink 1200ms var(--ease-standard) infinite; }
+.device-screen .rec-indicator time { font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.device-screen .rec-indicator.is-paused { background: var(--fill); }
+.device-screen .rec-indicator.is-paused > i { animation: none; background: var(--ink-3); }
+.oops-root .rc-scene { display: flex; align-items: center; gap: 2px; min-height: 36px; padding: 0 6px 0 10px; border-radius: var(--radius-full); color: var(--primary-text) !important; font-size: 13px !important; font-weight: 800; }
+.oops-root .rc-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.oops-root .rc-actions > button {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; min-height: 0; padding: 0;
+  border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink-2) !important;
+  font-size: 12px !important; line-height: 16px; font-weight: 700 !important;
+}
+.oops-root .rc-actions > button:active { background: transparent; }
+.oops-root .rc-action-icon {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--radius-full); background: var(--fill); color: var(--ink);
+  transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast);
+}
+.oops-root .rc-actions > .rc-mark .rc-action-icon { background: var(--primary-soft); color: var(--primary-text); }
+.oops-root .rc-actions > .rc-end .rc-action-icon { background: var(--inverse); color: var(--on-inverse); }
+.oops-root .rc-actions .icon { opacity: 1; }
+.oops-root .rc-mark-count { color: var(--primary-text) !important; font-size: 12px !important; font-weight: 800; margin-top: 8px; }
+.oops-root .recording-controls.is-compact { padding: 8px 8px 8px 16px; border-radius: var(--radius-xl); }
+.oops-root .is-compact .rc-heading { margin-bottom: 0; min-height: 52px; }
+.oops-root .rc-compact-actions { gap: 6px; }
+.oops-root .rc-compact-actions > button, .oops-root .rc-expand {
+  width: 44px; height: 44px; min-width: 0; min-height: 0; padding: 0; border-radius: var(--radius-full);
+  background: var(--fill); color: var(--ink); transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast);
+}
+.oops-root .rc-compact-actions > .rc-end { background: var(--inverse); color: var(--on-inverse); }
+.oops-root .rc-expand { width: 36px; background: transparent; color: var(--ink-3); }
+.oops-root .rc-expand[aria-expanded="true"] { background: var(--fill); }
+.oops-root .rc-compact-actions .icon { width: 19px; height: 19px; }
+.device-screen .rc-retention-counts > div { border: 0; background: var(--fill); border-radius: var(--radius-md); }
+.device-screen .rc-retention-counts strong { color: var(--ink); font-weight: 900; }
+/* The live scene's own status line (Sessions.tsx) uses the same indicator. */
+.device-screen .session-recording-compact > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+
+/* ---------- home: the header card is the screen's hero (设计语言 Card "dusk") ---------- */
+.oops-root .home-date { color: var(--ink-3); font-size: 13px; font-weight: 700; }
+.oops-root .home-positioning { color: var(--ink-2); font-size: 14px; }
+.oops-root .home-record-card {
+  position: relative; overflow: hidden; padding: 20px !important; border: 0 !important; border-radius: var(--radius-xl);
+  background: var(--gradient-dusk) !important; color: var(--on-dusk); box-shadow: var(--shadow-2);
+}
+/* No glow on the card itself: the design language keeps jelly gloss for Pupu and illustrations only. */
+.oops-root .home-record-card::before { content: none; }
+.oops-root .home-record-card > * { position: relative; }
+.oops-root .home-record-card h1, .oops-root .home-record-card h2 { color: var(--on-dusk); }
+.oops-root .home-record-title h1 { font-size: 25px; line-height: 1.32; font-weight: 900; letter-spacing: -.01em; }
+.oops-root .home-record-title p, .oops-root .home-record-card > p { color: var(--on-dusk-2); font-size: 13px; }
+.oops-root .home-record-title .home-eyebrow { color: var(--on-dusk-2); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.oops-root .home-record-head time { font-size: 32px; line-height: 1.1; font-weight: 900; letter-spacing: -.01em; color: var(--on-dusk); }
+.oops-root .home-record-card .badge { background: #ffffff26; color: var(--on-dusk); }
+.oops-root .home-record-card .rec-indicator { background: var(--rec-soft); color: var(--ink); }
+.oops-root .home-record-people { color: var(--on-dusk-2); font-size: 13px; }
+.oops-root .home-record-card .button.primary, .oops-root .home-record-card .button.secondary { background: var(--primary-soft); color: var(--primary-text); box-shadow: none; }
+.oops-root .home-record-card .button.quiet { color: var(--on-dusk); }
+.oops-root .home-record-actions .button { min-height: 40px; font-size: 13px !important; }
+.oops-root .home-start-secondary { color: var(--on-dusk-2); font-size: 12px; font-weight: 700; }
+.oops-root .home-start-secondary button { color: var(--on-dusk); font-size: 13px; font-weight: 800; border-radius: var(--radius-full); }
+/* Waveform (设计语言): 3px round bars, 3px apart, brand-jelly → primary across the strip; they sway while recording. */
+.oops-root .home-record-signal { gap: 3px; min-height: 44px; }
+.oops-root .home-record-signal i {
+  flex: none; width: 3px; max-width: none; border-radius: 2px; opacity: 1; transform-origin: 50% 50%;
+  background: color-mix(in srgb, #9fb4ff calc(100% - var(--t, 0) * 100%), #d9c8ff);
+}
+.oops-root .home-record-card:not(.is-paused) .home-record-signal i { animation: oo-wave-live 900ms var(--ease-standard) infinite alternate; animation-delay: calc(var(--t, 0) * -2.7s); }
+.oops-root .home-record-card.is-paused .home-record-signal i { background: #ffffff40; opacity: 1; }
+.device-screen .listen-wave i, .device-screen .vi-waveform span {
+  width: 3px; border-radius: 2px; opacity: 1;
+  background: color-mix(in srgb, var(--brand-jelly) calc(100% - var(--t, 0) * 100%), var(--primary));
+}
+.device-screen .listen-wave, .device-screen .vi-waveform { gap: 3px; }
+.oops-root .home-device-summary { color: var(--ink-3); font-size: 12px; font-weight: 600; }
+.oops-root .home-ask-heading strong { font-size: 16px; font-weight: 800; color: var(--ink); }
+.oops-root .home-ask-heading span { color: var(--ink-3); font-size: 12px; }
+.oops-root .ask-card, .oops-root .home-ask-card { border: 0 !important; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-1) !important; }
+.oops-root .ask-card textarea { color: var(--ink); }
+.oops-root .ask-footer small { color: var(--ink-3); font-weight: 600; }
+.oops-root .input-text { color: var(--primary-text) !important; font-weight: 800; border-radius: var(--radius-full); }
+.oops-root .mic-button {
+  width: 42px; height: 42px; background: var(--primary-soft); color: var(--primary-text);
+  transition: transform var(--dur-slow) var(--ease-bounce), background-color var(--dur-fast);
+}
+.oops-root .home-ask-card .mic-button { width: 40px; height: 40px; }
+.oops-root .home-empty-work { color: var(--ink-3); font-size: 13px; }
+.oops-root .home-footer-links button { color: var(--ink-2); font-size: 12px; font-weight: 700; }
+.oops-root .home-mascot-caption { color: var(--on-dusk-2); font-size: 11px; font-weight: 700; }
+.oops-root .home-mascot .pupu { width: 96px; height: 96px; }
+.oops-root .home-mascot[data-state=failed] .home-mascot-caption { color: var(--on-dusk); }
+
+/* ---------- notices, sources, avatars, misc ---------- */
+:where(.device-screen) .notice { border-radius: var(--radius-md); background: var(--primary-soft); color: var(--ink-2); font-size: 13px; }
+.device-screen .notice.warning { background: var(--warning-soft); color: var(--warning); }
+.device-screen .notice.danger { background: var(--danger-soft); color: var(--danger); }
+:where(.device-screen) .source-link { background: var(--primary-soft); color: var(--primary-text); border-radius: var(--radius-sm); font-weight: 800; font-size: 12px !important; }
+.device-screen .avatar { background: var(--primary-soft); color: var(--primary-text); font-weight: 800; }
+.device-screen .error-text, .device-screen .danger-text { color: var(--danger) !important; font-weight: 700; }
+/* ProgressBar: 10px track, the action gradient with a soft highlight line. */
+.device-screen .progress-track { height: 10px; background: var(--fill); }
+.device-screen .progress-track > span { position: relative; background: var(--gradient-action); }
+.device-screen .progress-track > span::after { content: ""; position: absolute; left: 4px; right: 4px; top: 2px; height: 2px; border-radius: var(--radius-full); background: var(--on-primary); opacity: .35; }
+.device-screen .timeline { border-left-color: var(--line); }
+:where(.device-screen) .chat-bubble { border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-1); }
+.device-screen .chat-bubble.user { background: var(--primary-soft); box-shadow: none; }
+.device-screen .chat-bubble p { color: var(--ink); }
+.device-screen .chat-bubble small { color: var(--ink-3); font-weight: 700; font-size: 11px; }
+.device-screen .chat-bubble.is-waiting { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-weight: 700; }
+:where(.device-screen) .suggestion-grid button { border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-1); color: var(--ink); font-weight: 700; }
+/* The tab bar's record button is this page's gradient too, so "talk to Oops" is a white jelly circle with a lavender halo. */
+.device-screen .voice-record { background: var(--surface); color: var(--primary-text); box-shadow: 0 0 0 12px var(--primary-soft), var(--shadow-2); }
+.device-screen .voice-record .icon { filter: none; }
+/* Transcript lines (设计语言 TranscriptLine): speaker colour beside the name, 16/26 text, the active line on primary-soft. */
+.device-screen .session-speaker .avatar { width: 28px; height: 28px; font-size: 12px; font-weight: 800; background: var(--fill); color: var(--ink-2); }
+.device-screen .session-speaker .avatar.spk-1 { background: var(--speaker-1); color: #fff; }
+.device-screen .session-speaker .avatar.spk-2 { background: var(--speaker-2); color: #fff; }
+.device-screen .session-speaker .avatar.spk-3 { background: var(--speaker-3); color: #fff; }
+.device-screen .session-speaker .avatar.spk-4 { background: var(--speaker-4); color: #fff; }
+.device-screen .session-speaker .avatar.spk-5 { background: var(--speaker-5); color: #fff; }
+.device-screen .session-speaker .avatar.spk-6 { background: var(--speaker-6); color: #fff; }
+.device-screen .session-speaker strong { font-size: 13px; font-weight: 800; color: var(--ink-2); }
+.device-screen .session-transcript p { color: var(--ink); font-size: 16px; line-height: 26px; }
+.device-screen .session-transcript.highlighted { background: var(--primary-soft); box-shadow: none; }
+.device-screen .session-chapter-body .session-transcript p { font-size: 13px; line-height: 20px; }
+.device-screen .notification-card.unread { box-shadow: 0 0 0 2px var(--primary-soft), var(--shadow-1); }
+.device-screen .document-preview, .device-screen .slide-preview { border: 0; box-shadow: var(--shadow-1); }
+.device-screen .budget-number { color: var(--ink); font-weight: 900; }
+.device-screen .row-actions button { background: var(--fill); color: var(--ink-2); font-weight: 800; }
+
+/* ---------- sheets (runtime BottomSheet; only its surface is restyled, its motion is the runtime's) ---------- */
+.device-screen .sheet-overlay { background: var(--scrim); }
+.device-screen .bottom-sheet { border-radius: var(--radius-xl) var(--radius-xl) 0 0; box-shadow: var(--shadow-3); }
+.device-screen .sheet-handle { width: 40px; background: var(--fill-strong); }
+.device-screen .sheet-title { font-size: 22px; line-height: 30px; font-weight: 800; color: var(--ink); letter-spacing: -.01em; }
+.device-screen .sheet-description { color: var(--ink-3); font-size: 13px; }
+
+/* ---------- toast (设计语言 Toast: inverse capsule; oops and success bring a small Pupu) ---------- */
+.oops-root .app-toast {
+  left: 16px; right: 16px; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px;
+  border-radius: var(--radius-lg); background: var(--inverse); color: var(--on-inverse); box-shadow: var(--shadow-2);
+  font-size: 15px; font-weight: 700; line-height: 22px; text-align: left;
+}
+.oops-root .app-toast.is-oops, .oops-root .app-toast.is-success { padding-left: 10px; }
+.oops-root .app-toast .toast-pupu { flex: none; width: 36px; height: 36px; }
+.oops-root .app-toast > span { flex: 1; min-width: 0; }
+
+/* ---------- empty, not found, done, waiting: Pupu's moments (设计语言 EmptyState; ui.tsx Empty mood) ---------- */
+:where(.device-screen) .empty-state { gap: 6px; }
+.device-screen .empty-state h3 { font-size: 18px; line-height: 26px; font-weight: 800; color: var(--ink); }
+.device-screen .empty-state p { color: var(--ink-3); }
+.device-screen .empty-state > span:first-child { background: var(--primary-soft); color: var(--primary-text); border-radius: var(--radius-lg); }
+.device-screen .empty-state.is-brand { gap: 8px; padding: 28px 20px 32px; }
+.device-screen .empty-state > .empty-art:first-child {
+  display: grid; place-items: center; width: 120px; height: 120px; margin: 0; padding: 0; border-radius: 0; background: none;
+}
+.device-screen .empty-state.is-brand h3 { margin-top: 4px; font-size: 24px; line-height: 32px; font-weight: 900; letter-spacing: -.01em; text-wrap: balance; }
+.device-screen .empty-state.is-brand p { font-size: 15px; line-height: 22px; margin: 0 0 8px; }
+.device-screen .bottom-sheet .empty-state > .empty-art:first-child, .device-screen .card .empty-state > .empty-art:first-child { width: 96px; height: 96px; }
+.device-screen .bottom-sheet .empty-state.is-brand h3, .device-screen .card .empty-state.is-brand h3 { font-size: 20px; line-height: 28px; }
+.device-screen .empty-art .pupu { width: 100%; height: 100%; }
+
+/* ---------- loader (设计语言 Loader: three jelly dots hop in turn and squash as they land) ---------- */
+.device-screen .jelly-loader { display: inline-flex; align-items: flex-end; gap: 6px; height: 22px; vertical-align: middle; }
+.device-screen .jelly-loader i { display: block; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--brand-jelly); transform-origin: 50% 100%; animation: oo-jelly 900ms var(--ease-standard) infinite; }
+.device-screen .jelly-loader i:nth-child(2) { background: var(--primary); animation-delay: 120ms; }
+.device-screen .jelly-loader i:nth-child(3) { background: var(--brand-lilac); animation-delay: 240ms; }
+.device-screen .jelly-loader.is-current i { background: currentColor; }
+
+/* ---------- inline Pupu ---------- */
+.device-screen .pupu { display: block; overflow: visible; }
+.device-screen .pupu .pupu-body { transform-box: fill-box; transform-origin: 50% 100%; animation: oo-breathe 2.8s var(--ease-standard) infinite; }
+.device-screen .pupu-oops .pupu-body { animation: oo-wobble var(--dur-celebrate) var(--ease-standard) 1, oo-breathe 2.8s var(--ease-standard) var(--dur-celebrate) infinite; }
+.device-screen .pupu-cheer .pupu-body { animation: oo-hop 1200ms var(--ease-bounce) infinite; }
+.device-screen .pupu-listening .pupu-sound path { animation: oo-sound 1400ms var(--ease-standard) infinite; }
+.device-screen .pupu-listening .pupu-sound path:nth-child(even) { animation-delay: 220ms; }
+.device-screen .pupu-thinking .pupu-dots circle { animation: oo-blink 1.4s var(--ease-standard) infinite; }
+.device-screen .pupu-thinking .pupu-dots circle:nth-child(2) { animation-delay: 200ms; }
+.device-screen .pupu-thinking .pupu-dots circle:nth-child(3) { animation-delay: 400ms; }
+.device-screen .pupu-surprised .pupu-lines path, .device-screen .pupu-oops .pupu-lines path {
+  transform-box: fill-box; transform-origin: 0% 100%; animation: oo-lines-pop var(--dur-slow) var(--ease-bounce) both;
+}
+.device-screen .pupu .pupu-lines path:nth-child(2) { animation-delay: 60ms; }
+.device-screen .pupu .pupu-lines path:nth-child(3) { animation-delay: 120ms; }
+.device-screen .pupu.is-still *, .device-screen .pupu.is-still .pupu-body { animation: none !important; }
+
+/* ---------- motion (设计语言 动效) ---------- */
+/* Press: squeeze fast, rebound with a jelly overshoot — buttons .96, chips .94, cards .98, icon buttons .9. */
+.device-screen .button:active:not(:disabled) { transform: scale(.96); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
+.device-screen .chip:active:not(:disabled), .device-screen .segmented button:active { transform: scale(.94); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
+.device-screen .icon-button:active, .oops-root .rc-compact-actions > button:active, .oops-root .rc-expand:active,
+.oops-root .rc-actions > button:active .rc-action-icon, .oops-root .mic-button:active { transform: scale(.9); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
+.oops-root .app-nav > button:active { transform: scale(.92); transition-duration: var(--dur-instant); transition-timing-function: var(--ease-standard); }
+.device-screen .card.clickable:active, .device-screen .list-row:active { transform: scale(.98); transition-duration: var(--dur-instant); }
+/* Each page rises in once: MobileScroll remounts per route. Fixed chrome (header, tabs, tab bar) stays still. */
+.oops-root .oops-scroll .screen-content { animation: oo-route-in 280ms var(--ease-standard) both; }
+.oops-root .app-toast { animation: oo-toast-in var(--dur-slow) var(--ease-bounce) both; }
+.oops-root .recording-controls { animation: oo-toast-in var(--dur-slow) var(--ease-bounce) both; }
+.device-screen .is-new { animation: oo-line-in var(--dur-slow) var(--ease-bounce) both; }
+
+@keyframes oo-route-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes oo-pop-in { 0% { transform: scale(.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes oo-toast-in { 0% { opacity: 0; transform: translateY(12px) scale(.96); } 100% { opacity: 1; transform: none; } }
+@keyframes oo-line-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes oo-rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@keyframes oo-rec-ring { 0%, 100% { transform: scale(1.12); } 50% { transform: scale(1.26); } }
+@keyframes oo-rec-ring-outer { 0%, 100% { transform: scale(1.26); opacity: .45; } 50% { transform: scale(1.5); opacity: 0; } }
+@keyframes oo-wave-live { 0% { transform: scaleY(.5); } 100% { transform: scaleY(1); } }
+@keyframes oo-jelly { 0%, 60%, 100% { transform: translateY(0) scale(1.18, .82); } 30% { transform: translateY(-9px) scale(.9, 1.1); } }
+@keyframes oo-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.03, .96); } }
+@keyframes oo-wobble { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-7deg); } 40% { transform: rotate(6deg); } 60% { transform: rotate(-4deg); } 80% { transform: rotate(2deg); } }
+@keyframes oo-hop { 0%, 100% { transform: translateY(0) scale(1.04, .96); } 45% { transform: translateY(-8px) scale(.97, 1.04); } }
+@keyframes oo-blink { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes oo-sound { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes oo-lines-pop { 0% { transform: scale(.2); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .oops-root *, .oops-root *::before, .oops-root *::after, .device-screen .sheet-content *, .device-screen .sheet-content *::before, .device-screen .sheet-content *::after {
+    animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important;
+  }
+  .device-screen .pupu *, .device-screen .rec-indicator > i, .device-screen .record-button-ring, .device-screen .jelly-loader i,
+  .oops-root .home-record-signal i, .device-screen .home-mascot img { animation: none !important; }
+  .device-screen .jelly-loader i:nth-child(2) { opacity: .7; }
+  .device-screen .jelly-loader i:nth-child(3) { opacity: .45; }
+  .device-screen .button:active, .device-screen .chip:active, .device-screen .card.clickable:active, .device-screen .list-row:active,
+  .device-screen .segmented button:active, .device-screen .icon-button:active, .device-screen .record-button:active, .device-screen .check-row:active input,
+  .oops-root .rc-compact-actions > button:active, .oops-root .rc-expand:active, .oops-root .rc-actions > button:active .rc-action-icon,
+  .oops-root .mic-button:active, .oops-root .app-nav > button:active { transform: none !important; }
+  .device-screen .toggle-row input:active::after { width: 26px; }
+  .device-screen .toggle-row input:checked:active::after { transform: translateX(20px); }
+}
+
+/* Content scrolls under the floating tab bar; a canvas fade keeps the last row legible behind it and its record button. */
+.oops-root:has(> .app-nav)::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; z-index: 11; pointer-events: none;
+  height: calc(var(--mobile-safe-area-height, 0px) + 112px);
+  background: linear-gradient(to top, var(--canvas) 40%, rgb(242 239 255 / 0) 100%);
+}
+.oops-root.has-recording-controls:has(> .app-nav)::after { height: calc(var(--mobile-safe-area-height, 0px) + 124px); background: linear-gradient(to top, var(--canvas) 86%, rgb(242 239 255 / 0) 100%); }
