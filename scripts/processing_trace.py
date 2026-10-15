@@ -6,11 +6,28 @@ only when every piece is bound unambiguously to a current sentence.
 """
 import copy
 import datetime as dt
+import os
 import threading
 import time
 from collections import OrderedDict
 
+from meeting_features import read_json
 from replay_history import source_hash, transcript_expired
+
+
+def effective_utterances(row):
+    """Copies of the stored sentences with each sentence's current review, as the history reader sees them."""
+    reviews = row.get('reviews') or {}
+    result = []
+    for source in row.get('utterances') or []:
+        source = dict(source)
+        review = reviews.get(source['id'])
+        if review and not review.get('source_changed_at'):
+            source['review'] = review
+        else:
+            source.pop('review', None)
+        result.append(source)
+    return result
 
 
 def sanitize_for_storage(row):
@@ -20,16 +37,7 @@ def sanitize_for_storage(row):
     if transcript_expired(row):
         row.pop('processing_trace', None)
         return
-    reviews = row.get('reviews') or {}
-    current = {}
-    for source in row.get('utterances') or []:
-        source = dict(source)
-        review = reviews.get(source['id'])
-        if review and not review.get('source_changed_at'):
-            source['review'] = review
-        else:
-            source.pop('review', None)
-        current[source['id']] = source_hash(source)
+    current = {source['id']: source_hash(source) for source in effective_utterances(row)}
     events = []
     for event in row['processing_trace']:
         if not isinstance(event, dict) or current.get(event.get('id')) != event.get('source_hash'):
@@ -80,13 +88,16 @@ class ProcessingTrace:
         """Under the owning store's lock, so delete/sync cannot race a trace write."""
         self.prune()
         with meetings.lock:
-            try:
-                row = meetings.load(sid)
-            except FileNotFoundError:
+            # Read the stored row, never load()'s presentation copy: writing that
+            # back would freeze merged reviews and derived hints into the source.
+            path = meetings.path(sid)
+            if os.path.exists(path + '.deleted') or not os.path.isfile(path):
                 return 0
+            row = read_json(path)
             if transcript_expired(row):
                 return 0
-            current = {u['id']: u for u in row['utterances']}
+            utterances = effective_utterances(row)
+            current = {u['id']: u for u in utterances}
             events = {event['id']: event for event in row.get('processing_trace') or []
                       if isinstance(event, dict) and event.get('id') in current
                       and event.get('source_hash') == source_hash(current[event['id']])}
@@ -108,7 +119,7 @@ class ProcessingTrace:
                         text = part if isinstance(part, str) else part.get('text') if isinstance(part, dict) else None
                         if not isinstance(text, str) or not text:
                             break
-                        matches = [u for u in row['utterances'] if u['id'] != source['id']
+                        matches = [u for u in utterances if u['id'] != source['id']
                                    and u.get('end_ms', 0) <= source.get('start_ms', 0)
                                    and (u.get('text') == text or u.get('text', '').endswith(text))]
                         if len(matches) != 1:

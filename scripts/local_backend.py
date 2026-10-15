@@ -1633,12 +1633,8 @@ class Backend:
                     final_tag=result['tag'], latency_ms=int((time.monotonic() - quality_started) * 1000)))
         trace = getattr(self, 'processing_trace', None)
         if trace and computed:
+            # Memory only: the next meeting sync attaches it, keeping disk writes off the phone's 10 s path.
             trace.record_tag(req, result, trace_stages)
-            meetings = getattr(self, 'meetings', None)
-            if meetings:
-                try: trace.attach(meetings, req['session_id'])
-                except (OSError, ValueError, KeyError, TypeError):
-                    log('处理观察记录暂未保存；分类回执不受影响')
         return result
 
     def _shared(self, name, factory):

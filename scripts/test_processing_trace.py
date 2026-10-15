@@ -71,6 +71,28 @@ class ProcessingTraceTest(unittest.TestCase):
         self.meetings.review(dict(session_id='safe', utterance_id='u1', speaker='丁'))
         self.assertFalse(self.stored()['processing_trace'])
 
+    def test_attach_keeps_reviews_out_of_stored_sentences(self):
+        self.sync()
+        self.meetings.review(dict(session_id='safe', utterance_id='u1', verdict='rejected'))
+        self.trace.record_tag(self.request, self.result)
+        self.assertEqual(1, self.trace.attach(self.meetings, 'safe'))
+        stored = self.stored()
+        self.assertTrue(all(set(u) <= {'id', 'text', 'start_ms', 'end_ms', 'tag', 'speaker'} for u in stored['utterances']))
+        self.assertNotIn('digest', stored)
+        self.meetings.review(dict(session_id='safe', utterance_id='u1', verdict=None))
+        self.assertEqual(['u1'], [u['id'] for u in self.meetings.load('safe')['digest']['commitment']])
+
+    def test_tag_records_in_memory_without_touching_the_archive(self):
+        self.sync()
+        before = os.path.getmtime(self.meetings.path('safe'))
+        backend = Backend.__new__(Backend)
+        backend.jev, backend.tags, backend.processing_trace, backend.meetings = None, TagCache(), self.trace, self.meetings
+        with patch('local_backend.assess_item', return_value=dict(status='accepted', reason='grounded')):
+            backend.tag(self.request)
+        self.assertNotIn('processing_trace', self.stored())
+        self.assertEqual(before, os.path.getmtime(self.meetings.path('safe')))
+        self.assertEqual(1, self.trace.attach(self.meetings, 'safe'))
+
     def test_transcript_expiry_clears_trace_from_disk_and_delete_removes_archive(self):
         self.trace.record_tag(self.request, self.result)
         self.sync()
