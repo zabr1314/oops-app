@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 ID = re.compile(r'[A-Za-z0-9_-]{1,100}')
 STATIC = {'funnel.html', 'funnel.css', 'funnel.js', 'funnel-after.js', 'funnel-sample.json',
-          'funnel-web.js', 'funnel-crawler.js', 'funnel-dashboard.js', 'funnel-studio.css', 'funnel-studio.js', 'funnel-after-studio.js', 'funnel-after-studio.css', 'brand/mascot.png'}
+          'funnel-web.js', 'funnel-crawler.js', 'funnel-dashboard.js', 'funnel-spider.js', 'funnel-studio.css', 'funnel-studio.js', 'funnel-after-studio.js', 'funnel-after-studio.css', 'brand/mascot.png'}
 STATIC.update('funnel-desks/desk-%d.png' % n for n in range(1, 7))
 STATIC.update('icons/' + name + '.svg' for name in ('desk', 'desktop', 'file-text', 'microphone',
               'magnifying-glass', 'note-pencil', 'paper-plane-tilt', 'check-circle'))
@@ -162,7 +162,7 @@ class StoredHistory:
             return None
         value = read_json(path)
         if not isinstance(value, dict) or value.get('version') != 2 or not isinstance(value.get('sentences'), list) \
-                or (value.get('source') or {}).get('kind') != 'replay':
+                or (value.get('source') or {}).get('kind') not in ('replay', 'reanalysis'):
             raise HistoryError(503, 'replay_invalid')
         return value
 

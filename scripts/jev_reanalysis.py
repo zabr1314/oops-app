@@ -61,11 +61,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Ledger:
-    def __init__(self, path, config):
+    def __init__(self, path, config, cap=CAP):
         self.path = Path(path)
         if self.path.exists():
             raise Stop('job_already_started_read_existing_checkpoint')
-        self.value = dict(version=1, config=config, cap_nanos=CAP, spent_nanos=0, reserved_nanos=0, requests=[])
+        if type(cap) is not int or not 0 < cap:
+            raise Stop('invalid_budget_cap')
+        self.cap = cap
+        self.value = dict(version=1, config=config, cap_nanos=cap, spent_nanos=0, reserved_nanos=0, requests=[])
         self.save()
 
     def save(self): atomic(self.path, self.value)
@@ -75,7 +78,7 @@ class Ledger:
         fingerprint = hashlib.sha256(encoded).hexdigest()
         if any(r['fingerprint'] == fingerprint and r['status'] != 'settled' for r in self.value['requests']):
             raise Stop('duplicate_submission_forbidden')
-        if self.value['spent_nanos'] + self.value['reserved_nanos'] + RESERVATION > CAP:
+        if self.value['spent_nanos'] + self.value['reserved_nanos'] + RESERVATION > self.cap:
             raise Stop('budget_exposure_limit')
         record = dict(id=uuid.uuid4().hex, fingerprint=fingerprint, status='pending',
             reserved_nanos=RESERVATION, started_at=now(), **context)
@@ -104,7 +107,7 @@ class Ledger:
         self.save()
 
     def summary(self):
-        return dict(approved_cny=.10, spent_cny=self.value['spent_nanos'] / 1e9,
+        return dict(approved_cny=self.cap / 1e9, spent_cny=self.value['spent_nanos'] / 1e9,
             actual_cny=self.value['spent_nanos'] / 1e9, reserved_cny=self.value['reserved_nanos'] / 1e9,
             exposure_cny=(self.value['spent_nanos'] + self.value['reserved_nanos']) / 1e9,
             request_count=len(self.value['requests']),

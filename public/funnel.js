@@ -38,6 +38,7 @@
   let selected = null, userScrolledAt = 0, lastStudioTick = 0;
   const openCallDetails = new Set();
   const spider = { x: 0, y: 0, ready: false };
+  const neon = window.OopsSpider ? window.OopsSpider.create({ scale: 0.55, tone: '#3fd9a0' }) : null;
 
   // ---------------------------------------------------------------- data
   function validate(raw) {
@@ -436,7 +437,7 @@
   }
 
   function placeSpider(g, i) {
-    if (i < 0) { spider.ready = false; return null; }
+    if (i < 0) { spider.ready = false; if (neon) neon.reset(); return null; }
     const s = sentences[i];
     if (s.row.hidden) return null;
     let node;
@@ -456,7 +457,8 @@
     return spider;
   }
 
-  function drawSpider(p, realNow) {
+  function drawSpider(p, realNow, tips) {
+    if (neon) { neon.draw(ctx, p, realNow, { playing, reduce: reduceMotion, tendrils: tips }); return; }
     const t = reduceMotion || !playing ? 0 : realNow / 120;
     ctx.save();
     ctx.translate(p.x, p.y);
@@ -521,8 +523,13 @@
     ctx.globalAlpha = 1;
 
     fresh.sort((a, b) => (a.e.real || 0) - (b.e.real || 0));
+    const tips = [];
     fresh.forEach((o, idx) => {
       const { e, P, len } = o;
+      const tip = { x: P.x + P.ux * len, y: P.y + P.uy * len };
+      if (e.i === active) tips.push(tip);
+      // A newly reached judgement lands with a burst at the end of its strand.
+      if (neon && !e.landed && o.age < 0.25 && playing && !reduceMotion) { e.landed = true; neon.land(tip.x, tip.y, LAYERS[e.f.layer].color); }
       const a = o.sel ? 1 : Math.max(0, 1 - o.age / 1.6);
       const O = sp && e.i === active ? sp : rowOrigin(g, e.i) || fractionOrigin(g, e.i);
       ctx.globalAlpha = 0.3 + 0.7 * a;
@@ -535,7 +542,7 @@
       if (showLabel) label(g, P, e, ctx.globalAlpha);
     });
     ctx.globalAlpha = 1;
-    if (sp) drawSpider(sp, realNow);
+    if (sp) drawSpider(sp, realNow, tips);
   }
 
   function label(g, P, e, alpha) {

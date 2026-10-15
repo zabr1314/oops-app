@@ -114,3 +114,4 @@ test('the rules panel shows the current sentence path and where it ended only on
   const done = rules(replay(row.doneAt), index);
   assert.equal(done.path.filter(step => step.state === 'end').length, 1);
 });
+

@@ -28,6 +28,8 @@
   let at = 0, playing = false, speed = 1, lastFrame = 0, started = false, total = 1, lastPublished = 0;
   let here = -1, grabUntil = 0, flyers = [], phases = [0, 0, 0, 0], ends = [0, 0, 0, 0];
   const spider = { x: 0, y: 0, ready: false, feet: [] };
+  const neon = window.OopsSpider ? window.OopsSpider.create({ scale: 0.6, tone: '#5cc3ff' }) : null;
+  let lastGrab = 0;
 
   // ---------------------------------------------------------------- build
   function clauses(text) {
@@ -384,7 +386,7 @@
     }
 
     if (here >= 0) drawSpider(base, doc, realNow);
-    else spider.ready = false;
+    else { spider.ready = false; if (neon) neon.reset(); }
 
     flyers = flyers.filter((f) => {
       if (at < f.start) return true;
@@ -431,6 +433,13 @@
     const k = reduceMotion ? 1 : 0.2;
     spider.x += (tx - spider.x) * k; spider.y += (ty - spider.y) * k;
     const grabbing = at < grabUntil && r.items.length;
+    if (neon) {
+      // Legs grab the cited sentence pieces while an item is being pulled out of them.
+      const grab = grabbing ? segRects.slice(0, 8).map((q, n) => ({ x: q.x + Math.min(q.w - 4, 10 + ((n * 37) % Math.max(8, q.w))), y: q.y + q.h / 2 })) : [];
+      if (grabbing && grabUntil !== lastGrab) { lastGrab = grabUntil; if (playing && !reduceMotion) neon.land(spider.x, spider.y + 6, PINK); }
+      neon.draw(ctx, spider, realNow, { playing, reduce: reduceMotion, grab, tendrils: grab, headTone: grabbing ? PINK : '#3fd9a0' });
+      return;
+    }
     const wob = reduceMotion || !playing ? 0 : realNow / 110;
     for (let n = 0; n < 8; n++) {
       const side = n < 4 ? -1 : 1, j = n % 4;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 const html = readFileSync('public/funnel.html', 'utf8');
 const css = readFileSync('public/funnel.css', 'utf8');
@@ -9,7 +10,7 @@ const engine = readFileSync('public/funnel.js', 'utf8');
 test('the restored page loads only the terminal and fan replay engines', () => {
   const scripts = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map(match => match[1]);
   const styles = [...html.matchAll(/<link\b[^>]*\bhref="([^"]+\.css)"/g)].map(match => match[1]);
-  assert.deepEqual(scripts, ['./funnel.js', './funnel-after.js']);
+  assert.deepEqual(scripts, ['./funnel-spider.js', './funnel.js', './funnel-after.js']);
   assert.deepEqual(styles, ['./funnel.css']);
   assert.doesNotMatch(html, /funnel-(?:studio|after-studio|web|crawler|dashboard|reference)\.(?:js|css)/);
 });
@@ -36,4 +37,16 @@ test('restoring the layout retains the current scoped history recovery and full 
   assert.match(engine, /function geometry\(\)/);
   assert.match(engine, /function arcPoint\(/);
   assert.match(engine, /function drawSpider\(/);
+});
+
+test('only the spider is replaced: a neon crawler both replays draw through, with the old one as fallback', () => {
+  assert.ok(html.indexOf('funnel-spider.js') < html.indexOf('funnel.js"'));
+  const context = vm.createContext({ window: {}, performance: { now: () => 0 } });
+  vm.runInContext(readFileSync('public/funnel-spider.js', 'utf8'), context);
+  assert.equal(context.window.OopsSpider.footTargets(0, 0, 0, 40).length, 8);
+  for (const file of ['public/funnel.js', 'public/funnel-after.js']) {
+    const source = readFileSync(file, 'utf8');
+    assert.match(source, /window\.OopsSpider \? window\.OopsSpider\.create/);
+    assert.match(source, /function drawSpider\(/);
+  }
 });

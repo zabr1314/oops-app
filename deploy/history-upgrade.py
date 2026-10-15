@@ -21,7 +21,7 @@ LOCATIONS = Path('/etc/oops-meeting/locations.conf')
 HISTORY_LOCATION = Path('/etc/oops-meeting/history-locations.conf')
 CODE = ('replay_history.py', 'funnel_replay.py')
 ASSETS = ('funnel.html', 'funnel.js', 'funnel-after.js', 'funnel.css', 'funnel-sample.json',
-          'funnel-web.js', 'funnel-crawler.js', 'funnel-dashboard.js',
+          'funnel-web.js', 'funnel-crawler.js', 'funnel-dashboard.js', 'funnel-spider.js',
           *('funnel-desks/desk-%d.png' % n for n in range(1, 7)),
           'funnel-studio.js', 'funnel-studio.css', 'funnel-after-studio.js', 'funnel-after-studio.css', 'brand/mascot.png',
           'icons/desk.svg', 'icons/desktop.svg', 'icons/file-text.svg', 'icons/microphone.svg',
