@@ -297,7 +297,6 @@ test('source invalidation clears the actual after studio items, selected detail 
   assert.ok(!b.ids.get('after-inspector-content').textContent.includes(fixture.post.items[0].title));
   assert.ok(!b.ids.get('after-result-copy').textContent.includes(fixture.post.overview));
   assert.equal(b.ids.get('after-studio-room').classList.contains('is-handoff'), false);
-  assert.equal(b.ids.get('after-delivery-link').classList.contains('after-handoff-available'), false);
   assert.equal(engine.state().playing, false);
 });
 

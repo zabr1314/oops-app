@@ -43,6 +43,7 @@
   const PHASES = ['纪要成果', '对回原话', '规则复核', '待核对顺序'];
   let snapshot = {}, currentData = null, selectedItem = null, selectedStation = 'minutes', detailKey = '', itemButtons = [], mode = document.body.classList.contains('mode-after') ? 'after' : 'live';
   const buttons = [...document.querySelectorAll('[data-after-station]')];
+  const web = window.OopsWeb?.createWeb && $('after-web') ? window.OopsWeb.createWeb($('after-web'), { onPick: id => pickItem(id) }) : null;
   function openInspector() { if (window.innerWidth <= 900) $('after-studio-inspector').classList.add('is-open'); }
   function pickItem(id) { api()?.pause(); selectedItem = id; detailKey = ''; render(api()?.state() || snapshot); openInspector(); }
   function buildItems(post) {
@@ -96,9 +97,7 @@
       button.setAttribute('aria-pressed', String(selectedItem == null && selectedStation === key));
     });
     $('after-room-footnote').textContent = '展示顺序不代表历史发生顺序；人工核对和发送不自动推进。';
-    const deliveryStage = (post?.handoffs?.stages || []).find(stage => stage.id === 'delivery');
-    const hasHistoricalSentReceipt = !!post && (deliveryStage?.counts?.sent_receipts || post.delivery_record?.sent_receipts || 0) > 0;
-    $('after-delivery-link').classList.toggle('after-handoff-available', hasHistoricalSentReceipt);
+    if (web && mode === 'after') web.draw(window.OopsWeb.afterScene(mode === 'after' ? snapshot : { ...snapshot, playing: false }, selectedItem));
     itemButtons.forEach(item => item.button.classList.toggle('is-selected', item.id === selectedItem));
     renderDetail(post, roles);
   }
@@ -118,7 +117,7 @@
     const phase = phaseAt(snapshot); const key = [selectedStation, selectedItem, phase, !!post].join(':');
     if (detailKey === key) return; detailKey = key;
     const body = $('after-inspector-content'); body.replaceChildren();
-    $('after-inspector-kicker').textContent = selectedItem == null ? 'SAVED RECORDS / 已有成果与断点' : 'ITEM EVIDENCE / 事项与原话';
+    $('after-inspector-kicker').textContent = selectedItem == null ? '已有成果与断点' : '事项与原话依据';
     if (!post) { body.append(el('h2', null, '会后成果未就绪'), el('p', 'after-detail-copy', snapshot.data?.post_status?.message || '没有可用的已有纪要。来源变化或到期后旧成果不能继续当作当前依据。')); return; }
     const item = selectedItem == null ? null : post.items?.find(value => value.id === selectedItem);
     if (item) {
@@ -176,5 +175,6 @@
   document.addEventListener('funnel:data', event => { currentData = null; render({ ...(api()?.state() || {}), data: event.detail }); });
   document.addEventListener('funnel:mode', event => { mode = event.detail?.mode || 'live'; $('after-studio-inspector').classList.remove('is-open'); sync(); });
   reduced.addEventListener?.('change', sync);
+  if ($('after-studio-room') && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (mode === 'after') sync(); }).observe($('after-studio-room'));
   sync();
 })();

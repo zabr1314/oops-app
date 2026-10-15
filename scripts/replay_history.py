@@ -23,11 +23,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 ID = re.compile(r'[A-Za-z0-9_-]{1,100}')
 STATIC = {'funnel.html', 'funnel.css', 'funnel.js', 'funnel-after.js', 'funnel-sample.json',
-          'funnel-reference.css', 'funnel-reference.js', 'funnel-studio.css', 'funnel-studio.js', 'funnel-after-studio.js', 'funnel-after-studio.css', 'brand/mascot.png'}
+          'funnel-web.js', 'funnel-studio.css', 'funnel-studio.js', 'funnel-after-studio.js', 'funnel-after-studio.css', 'brand/mascot.png'}
 STATIC.update('icons/' + name + '.svg' for name in ('desk', 'desktop', 'file-text', 'microphone',
               'magnifying-glass', 'note-pencil', 'paper-plane-tilt', 'check-circle'))
-
-STATIC.update('funnel-reference/' + name + '.png' for name in ('desk-terminal', 'desk-terminal-2', 'desk-terminal-3', 'desk-terminal-4', 'desk-terminal-5', 'desk-terminal-6', 'office-left', 'office-right', 'office-lounge', 'office-wall'))
 
 
 class HistoryError(ValueError):

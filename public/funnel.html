@@ -4,76 +4,45 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0a0b0f">
-  <meta name="description" content="跟着多只 Oops 回放会议：查看原话、已有判断和选项概率。">
+  <meta name="description" content="回放一场会议：Jev 在蛛网上逐句判断，几只 Oops 接力整理，每一步都能看到原话和已存概率。">
   <title>Oops · 协作回放</title>
   <link rel="stylesheet" href="./funnel.css">
   <link rel="stylesheet" href="./funnel-studio.css">
   <link rel="stylesheet" href="./funnel-after-studio.css">
-  <link rel="stylesheet" href="./funnel-reference.css">
+  <script src="./funnel-web.js" defer></script>
   <script src="./funnel.js" defer></script>
   <script src="./funnel-after.js" defer></script>
   <script src="./funnel-studio.js" defer></script>
   <script src="./funnel-after-studio.js" defer></script>
-  <script src="./funnel-reference.js" defer></script>
 </head>
 <body class="studio-page">
   <div class="app">
     <header class="studio-top">
-      <a class="studio-brand" href="./showcase.html?view=app#home"><img src="./brand/mascot.png" alt=""><span>OOPS + JEV <small>会议协作回放</small></span></a>
-      <div class="meeting-heading"><span class="eyebrow">MEETING REPLAY</span><h1 id="studio-title">正在载入会议…</h1></div>
-      <div class="header-actions"><button id="meeting-open" class="quiet-button" type="button">切换会议 <span>⌄</span></button><button id="more-open" class="icon-button" type="button" aria-label="更多回放选项">•••</button></div>
+      <a class="studio-brand" href="./showcase.html?view=app#home"><img src="./brand/mascot.png" alt=""><span>Oops <b>×</b> Jev</span></a>
+      <div class="meeting-heading"><h1 id="studio-title">正在载入会议…</h1><div class="source-strip"><span id="source-badge" class="badge">载入中</span><span id="source-label" class="source-label"></span><span class="read-only">只读回放 · 不执行新任务</span></div></div>
+      <div class="header-actions"><button id="meeting-open" class="quiet-button" type="button">切换会议</button><button id="more-open" class="icon-button" type="button" aria-label="更多回放选项">•••</button></div>
     </header>
-    <div class="reference-replaybar"><div class="source-strip"><span id="source-badge" class="badge">载入中</span><span id="source-label" class="source-label"></span><span class="read-only"><i></i>只读已有记录 · 回放不执行新任务</span></div>
     <div class="studio-toolbar">
-      <nav class="modes" role="tablist" aria-label="看哪一段"><button id="tab-live" role="tab" type="button" aria-selected="true" aria-controls="mode-live" data-mode="live">现场回放</button><button id="tab-after" role="tab" type="button" aria-selected="false" aria-controls="mode-after" data-mode="after" tabindex="-1">会后结果</button></nav>
+      <nav class="modes" role="tablist" aria-label="看哪一段"><button id="tab-live" role="tab" type="button" aria-selected="true" aria-controls="mode-live" data-mode="live">会中 · 逐句判断</button><button id="tab-after" role="tab" type="button" aria-selected="false" aria-controls="mode-after" data-mode="after" tabindex="-1">会后 · 整理事项</button></nav>
       <div class="replay-controls"><button id="play" type="button" class="btn primary">▶ 播放</button><button id="after-play" type="button" class="btn primary">▶ 播放</button><input id="scrub" type="range" min="0" max="1000" value="0" aria-label="回放进度"><span id="clock" class="clock">00:00 / 00:00</span><span id="studio-speed" class="speed-indicator">×30</span><div class="after-studio-progress"><span id="after-studio-phase">成果回放</span><input id="after-studio-scrub" type="range" min="0" max="1000" value="0" aria-label="会后成果回放进度"><span id="after-studio-clock">00:00 / 00:00</span></div></div>
     </div>
-    </div>
     <div id="mode-live" role="tabpanel" aria-labelledby="tab-live">
-      <section id="studio" class="studio-workspace" aria-label="Oops 协作工作室">
-        <div class="studio-scene-column">
-          <div class="reference-deck" id="reference-live-deck"><div class="reference-dashboard" id="reference-live-dashboard" aria-label="现场工位仪表"></div><canvas class="reference-crawler" aria-hidden="true"></canvas><div id="studio-room" class="studio-room"><span class="reference-scene-note">参考布景 · 角色走位为回放展示</span><div class="reference-furniture" aria-hidden="true"><img class="office-wall" src="./funnel-reference/office-wall.png" alt=""><img class="office-left" src="./funnel-reference/office-left.png" alt=""><img class="office-right" src="./funnel-reference/office-right.png" alt=""><img class="office-lounge" src="./funnel-reference/office-lounge.png" alt=""><img class="office-brand" src="./brand/mascot.png" alt=""><b class="office-wordmark">OOPS</b></div>
-            <div class="room-topline"><span><i class="room-led"></i>OOPS WORKROOM</span><span id="studio-moment">已保存的处理过程</span></div>
-            <div class="room-grid" aria-hidden="true"></div>
-            <div class="room-orbit" aria-hidden="true"></div>
-            <div class="current-paper"><div class="paper-label"><span id="studio-current-label">当前原话</span><span id="studio-current-time">—</span></div><p id="studio-current-text">选择一句原话，看看 Oops 如何接力处理。</p><canvas class="reference-wall-chart" aria-hidden="true"></canvas></div>
-            <svg class="handoff-map" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true"><path class="map-idle" d="M205 322H480H795 M480 322V450H350 M350 450H720"/><path id="studio-active-link" class="map-active" d="M205 322H480"/></svg>
-            <img id="studio-flying-paper" class="flying-paper" src="./icons/file-text.svg" alt="" aria-hidden="true">
-          <button class="workstation station-listen" data-station="listen" type="button" aria-label="查看聆听 Oops 的分工">
-            <span class="station-number">01</span><span class="station-state" data-state="listen">等待来源</span>
-            <span class="station-character"><img src="./brand/mascot.png" alt="" draggable="false"><span class="character-shadow"></span></span>
-            <span class="workbench"><img class="desk-icon" src="./funnel-reference/desk-terminal.png" alt=""><img class="monitor-icon" src="./icons/desktop.svg" alt=""></span>
-            <span class="station-caption"><b>聆听 Oops</b><small>把声音变成原话</small></span>
-          </button>
-          <button class="workstation station-judge" data-station="judge" type="button" aria-label="查看判断 Oops 的分工">
-            <span class="station-number">02</span><span class="station-state" data-state="judge">等待来源</span>
-            <span class="station-character"><img src="./brand/mascot.png" alt="" draggable="false"><span class="character-shadow"></span></span>
-            <span class="workbench"><img class="desk-icon" src="./funnel-reference/desk-terminal-2.png" alt=""><img class="monitor-icon" src="./icons/desktop.svg" alt=""></span>
-            <span class="station-caption"><b>判断 Oops</b><small>辨认任务、决定与疑问</small></span>
-          </button>
-          <button class="workstation station-query" data-station="query" type="button" aria-label="查看查询 Oops 的分工">
-            <span class="station-number">03</span><span class="station-state" data-state="query">等待来源</span>
-            <span class="station-character"><img src="./brand/mascot.png" alt="" draggable="false"><span class="character-shadow"></span></span>
-            <span class="workbench"><img class="desk-icon" src="./funnel-reference/desk-terminal-3.png" alt=""><img class="monitor-icon" src="./icons/desktop.svg" alt=""></span>
-            <span class="station-caption"><b>查询 Oops</b><small>查找需要的资料</small></span>
-          </button>
-          <button class="workstation station-minutes" data-station="minutes" type="button" aria-label="查看纪要 Oops 的分工">
-            <span class="station-number">04</span><span class="station-state" data-state="minutes">等待来源</span>
-            <span class="station-character"><img src="./brand/mascot.png" alt="" draggable="false"><span class="character-shadow"></span></span>
-            <span class="workbench"><img class="desk-icon" src="./funnel-reference/desk-terminal-4.png" alt=""><img class="monitor-icon" src="./icons/desktop.svg" alt=""></span>
-            <span class="station-caption"><b>纪要 Oops</b><small>整理结果与依据</small></span>
-          </button>
-          <button class="workstation station-delivery" data-station="delivery" type="button" aria-label="查看飞书 Oops 的分工">
-            <span class="station-number">05</span><span class="station-state" data-state="delivery">等待来源</span>
-            <span class="station-character"><img src="./brand/mascot.png" alt="" draggable="false"><span class="character-shadow"></span></span>
-            <span class="workbench"><img class="desk-icon" src="./funnel-reference/desk-terminal-6.png" alt=""><img class="monitor-icon" src="./icons/desktop.svg" alt=""></span>
-            <span class="station-caption"><b>飞书 Oops</b><small>核对后再送达</small></span>
-          </button>
-<button class="workstation reference-review-station" data-room-review type="button" aria-label="查看人工核对要求"><span class="station-state">待人工核对</span><span class="station-character"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="workbench"><img class="desk-icon" src="./funnel-reference/desk-terminal-5.png" alt=""></span><span class="station-caption"><b>核对 Oops</b></span></button>          <div class="room-key"><span class="key-active">本次分析回放</span><span class="key-reused">复用已有结果</span><span class="key-idle">本次未运行</span></div>
-          </div></div><section class="reference-telemetry" aria-label="已保存的概率变化"><div class="reference-telemetry-head"><b>JEV · 已保存选项概率</b><span id="reference-live-chart-label">等待已有记录</span></div><canvas id="reference-live-chart" aria-hidden="true"></canvas></section>
-          <section class="sentence-tray" aria-label="会议原话"><div class="tray-heading"><span>原话 <b id="studio-sentence-count">0</b></span><span class="tray-hint">点一句，立即看判断</span><button id="studio-follow" class="text-button" type="button" hidden>继续跟随回放</button></div><ol id="studio-sentences" class="studio-sentences"></ol></section>
+      <section id="studio" class="studio-workspace" aria-label="会中逐句判断">
+        <section class="sentence-tray" aria-label="会议原话"><div class="tray-heading"><span>原话 <b id="studio-sentence-count">0</b></span><button id="studio-follow" class="text-button" type="button" hidden>回到播放位置</button></div><ol id="studio-sentences" class="studio-sentences"></ol></section>
+        <div id="studio-room" class="web-stage">
+          <div class="web-head"><span id="studio-moment">已保存的处理过程</span><span id="studio-stats" class="web-stats"></span></div>
+          <button class="current-paper" type="button" aria-label="查看当前原话的判断"><span class="paper-label"><span id="studio-current-label">当前原话</span><span id="studio-current-time">—</span></span><span id="studio-current-text" class="paper-text">选一句原话，看 Jev 怎么判断。</span></button>
+          <canvas id="studio-web" class="web-canvas" aria-hidden="true"></canvas>
+          <ul class="web-legend" aria-label="线的颜色"><li class="lg-code">规则</li><li class="lg-jev">Jev</li><li class="lg-model">生成</li><li class="lg-you">你</li><li class="lg-note">线越长，已存概率越高 · 虚线为无概率记录</li></ul>
+          <div class="relay" aria-label="Oops 接力">
+            <button class="workstation" data-station="listen" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>聆听</b><small data-state="listen">等待来源</small></button>
+            <button class="workstation" data-station="judge" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>判断</b><small data-state="judge">等待来源</small></button>
+            <button class="workstation" data-station="query" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>查询</b><small data-state="query">等待来源</small></button>
+            <button class="workstation" data-station="minutes" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>纪要</b><small data-state="minutes">等待来源</small></button>
+            <button class="workstation" data-station="delivery" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>飞书</b><small data-state="delivery">等待来源</small></button>
+          </div>
         </div>
-        <aside id="studio-inspector" class="studio-inspector" aria-label="当前判断详情"><div class="inspector-heading"><span id="studio-inspector-kicker" class="eyebrow">JUDGEMENT</span><button id="inspector-close" class="icon-button" type="button" aria-label="收起判断详情">×</button></div><div id="studio-inspector-content" class="inspector-content"><h2>每一步，都有来处</h2><p class="empty-detail">选一句原话，或点工位查看分工与保存的结果。</p></div></aside>
+        <aside id="studio-inspector" class="studio-inspector" aria-label="当前判断详情"><div class="inspector-heading"><span id="studio-inspector-kicker" class="eyebrow">判断详情</span><button id="inspector-close" class="icon-button" type="button" aria-label="收起判断详情">×</button></div><div id="studio-inspector-content" class="inspector-content"><h2>每一步，都有来处</h2><p class="empty-detail">选一句原话，或点一只 Oops 看它的分工。</p></div></aside>
       </section>
       <div class="legacy-engine" hidden>
     <section id="stage" class="stage">
@@ -132,14 +101,22 @@
       </div>
     </div>
     <section id="mode-after" class="after" role="tabpanel" aria-labelledby="tab-after" hidden>
-      <section id="after-studio" class="after-studio" aria-label="会后 Oops 协作回放">
-        <div class="after-studio-main">
-          <div class="after-studio-intro"><span id="after-studio-origin" class="after-origin">已有成果回放</span><span>动画为展示节奏，不是实际处理耗时</span></div>
-          <div class="reference-deck" id="reference-after-deck"><div class="reference-dashboard" id="reference-after-dashboard" aria-label="会后工位仪表"></div><canvas class="reference-crawler" aria-hidden="true"></canvas><div class="after-studio-room" id="after-studio-room"><span class="reference-scene-note">参考布景 · 角色走位为回放展示</span><div class="reference-furniture" aria-hidden="true"><img class="office-wall" src="./funnel-reference/office-wall.png" alt=""><img class="office-left" src="./funnel-reference/office-left.png" alt=""><img class="office-right" src="./funnel-reference/office-right.png" alt=""><img class="office-lounge" src="./funnel-reference/office-lounge.png" alt=""><img class="office-brand" src="./brand/mascot.png" alt=""><b class="office-wordmark">OOPS</b></div><div class="after-room-label"><span>AFTER MEETING / OOPS WORKROOM</span><span id="after-studio-moment">读取已有成果</span></div><div class="after-room-floor" aria-hidden="true"></div><div class="after-result-paper"><span id="after-result-label">会议原文 → 会后成果</span><h2 id="after-result-title">整理已有纪要与原话依据</h2><p id="after-result-copy">读取已有结果，不生成新纪要、不查询资料、不发送飞书。</p><canvas class="reference-wall-chart" aria-hidden="true"></canvas></div><svg class="after-handoff-map" viewBox="0 0 1000 520" preserveAspectRatio="none" aria-hidden="true"><path class="after-handoff-missing" d="M140 320H390 M390 320H630"/><path class="after-handoff-available" d="M140 330Q380 465 630 330"/><path id="after-delivery-link" class="after-handoff-missing" d="M630 320H870"/></svg><span class="research-gap">过程未记录</span><button type="button" class="after-workstation after-station-minutes" data-after-station="minutes" aria-label="查看纪要 Oops 的工作记录"><span class="after-station-number">01</span><span class="after-station-state" data-after-state="minutes">等待来源</span><span class="after-mascot"><img src="./brand/mascot.png" alt=""><span class="after-mascot-shadow"></span></span><img class="after-desk" src="./funnel-reference/desk-terminal.png" alt=""><img class="after-role-icon" src="./icons/note-pencil.svg" alt=""><b>纪要 Oops</b></button><button type="button" class="after-workstation after-station-research" data-after-station="research" aria-label="查看资料 Oops 的工作记录"><span class="after-station-number">02</span><span class="after-station-state" data-after-state="research">等待来源</span><span class="after-mascot"><img src="./brand/mascot.png" alt=""><span class="after-mascot-shadow"></span></span><img class="after-desk" src="./funnel-reference/desk-terminal-2.png" alt=""><img class="after-role-icon" src="./icons/magnifying-glass.svg" alt=""><b>资料 Oops</b></button><button type="button" class="after-workstation after-station-review" data-after-station="review" aria-label="查看核对 Oops 的工作记录"><span class="after-station-number">03</span><span class="after-station-state" data-after-state="review">等待来源</span><span class="after-mascot"><img src="./brand/mascot.png" alt=""><span class="after-mascot-shadow"></span></span><img class="after-desk" src="./funnel-reference/desk-terminal-3.png" alt=""><img class="after-role-icon" src="./icons/check-circle.svg" alt=""><b>核对 Oops</b></button><button type="button" class="after-workstation after-station-delivery" data-after-station="delivery" aria-label="查看飞书 Oops 的工作记录"><span class="after-station-number">04</span><span class="after-station-state" data-after-state="delivery">等待来源</span><span class="after-mascot"><img src="./brand/mascot.png" alt=""><span class="after-mascot-shadow"></span></span><img class="after-desk" src="./funnel-reference/desk-terminal-6.png" alt=""><img class="after-role-icon" src="./icons/paper-plane-tilt.svg" alt=""><b>飞书 Oops</b></button><div class="after-workstation reference-aux-transcript" aria-hidden="true"><span class="after-station-state" data-aux-state>等待来源</span><span class="after-mascot"><img src="./brand/mascot.png" alt=""></span><img class="after-desk" src="./funnel-reference/desk-terminal-4.png" alt=""><b>原话存档</b></div><div class="after-workstation reference-aux-evidence" aria-hidden="true"><span class="after-station-state" data-aux-state>等待来源</span><span class="after-mascot"><img src="./brand/mascot.png" alt=""></span><img class="after-desk" src="./funnel-reference/desk-terminal-5.png" alt=""><b>原话依据</b></div><img id="after-result-flyer" class="after-result-flyer" src="./icons/file-text.svg" alt="" aria-hidden="true"><p class="after-room-footnote" id="after-room-footnote">纪要、原话与回执分别读取；没有记录的步骤保留断点。</p></div></div><section class="reference-telemetry" aria-label="会后依据展示进度"><div class="reference-telemetry-head"><b>原话依据 · 回放展示进度</b><span id="reference-after-chart-label">等待已有成果</span></div><canvas id="reference-after-chart" aria-hidden="true"></canvas></section>
-
-          <section class="after-items-tray" aria-label="沿用纪要的事项"><div class="after-tray-heading"><b>沿用纪要中的事项 <span id="after-studio-item-count">0</span></b><span>点一项看原话依据</span></div><div id="after-studio-items" class="after-studio-items"></div></section>
+      <section id="after-studio" class="after-studio" aria-label="会后整理事项">
+        <section class="after-items-tray" aria-label="纪要事项"><div class="tray-heading"><span>事项 <b id="after-studio-item-count">0</b></span><span id="after-studio-origin" class="tray-hint">已有成果回放</span></div><div id="after-studio-items" class="after-studio-items"></div></section>
+        <div id="after-studio-room" class="web-stage after-web">
+          <div class="web-head"><span id="after-studio-moment">读取已有成果</span><span id="after-result-label" class="web-stats">会议原文 → 会后成果</span></div>
+          <div class="current-paper is-static"><span class="paper-label"><span id="after-result-title">整理已有纪要与原话依据</span></span><span id="after-result-copy" class="paper-text">读取已有结果，不生成新纪要、不查询资料、不发送飞书。</span></div>
+          <canvas id="after-web" class="web-canvas" aria-label="纪要事项蛛网，点节点查看事项"></canvas>
+          <ul class="web-legend"><li class="lg-dot-evidence">原话依据</li><li class="lg-code">规则通过</li><li class="lg-model">需复核</li><li class="lg-note">序号为待核对顺序 · 展示节奏不是实际耗时</li></ul>
+          <div class="relay is-after" aria-label="会后 Oops 接力">
+            <button type="button" class="workstation" data-after-station="minutes"><img src="./brand/mascot.png" alt="" draggable="false"><b>纪要</b><small data-after-state="minutes">等待来源</small></button>
+            <button type="button" class="workstation" data-after-station="research"><img src="./brand/mascot.png" alt="" draggable="false"><b>资料</b><small data-after-state="research">等待来源</small></button>
+            <button type="button" class="workstation" data-after-station="review"><img src="./brand/mascot.png" alt="" draggable="false"><b>核对</b><small data-after-state="review">等待来源</small></button>
+            <button type="button" class="workstation" data-after-station="delivery"><img src="./brand/mascot.png" alt="" draggable="false"><b>飞书</b><small data-after-state="delivery">等待来源</small></button>
+          </div>
+          <p class="after-room-footnote" id="after-room-footnote">纪要、原话与回执分别读取；没有记录的步骤保留断点。</p>
         </div>
-        <aside id="after-studio-inspector" class="after-studio-inspector" aria-label="会后成果详情"><div class="after-inspector-heading"><span id="after-inspector-kicker">SAVED RESULTS / 已有成果</span><button id="after-inspector-close" class="icon-button" type="button" aria-label="收起会后成果详情">×</button></div><div id="after-inspector-content" class="after-inspector-content"></div></aside>
+        <aside id="after-studio-inspector" class="studio-inspector after-studio-inspector" aria-label="会后成果详情"><div class="inspector-heading"><span id="after-inspector-kicker" class="eyebrow">已有成果</span><button id="after-inspector-close" class="icon-button" type="button" aria-label="收起会后成果详情">×</button></div><div id="after-inspector-content" class="inspector-content"></div></aside>
       </section>
       <div class="legacy-after" hidden>
       <p id="asr-review-note" class="source-note"></p>

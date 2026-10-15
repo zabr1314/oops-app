@@ -57,9 +57,9 @@
   }
   const stations = [...document.querySelectorAll('[data-station]')];
   const roleNames = { listen: '聆听 Oops', judge: '判断 Oops', query: '查询 Oops', minutes: '纪要 Oops', delivery: '飞书 Oops' };
-  const roleIcons = { listen: 'microphone', judge: 'check-circle', query: 'magnifying-glass', minutes: 'note-pencil', delivery: 'paper-plane-tilt' };
+  const web = window.OopsWeb?.createWeb ? window.OopsWeb.createWeb($('studio-web')) : null;
   stations.forEach(button => {
-    const icon = el('img', 'station-role-icon'); icon.src = './icons/' + roleIcons[button.dataset.station] + '.svg'; icon.alt = ''; button.append(icon);
+    button.setAttribute('aria-label', '查看' + roleNames[button.dataset.station] + '的分工');
     button.addEventListener('click', () => { chosenStation = button.dataset.station; detailKey = ''; renderInspector(); openInspector(); });
   });
   function openInspector() { if (window.innerWidth <= 900) $('studio-inspector').classList.add('is-open'); }
@@ -95,8 +95,9 @@
     const row = rows[current];
     $('studio-current-label').textContent = row ? '原话 ' + String(current + 1).padStart(2, '0') + ' / ' + rows.length : '当前原话';
     $('studio-current-time').textContent = row ? (row.speaker ? row.speaker + ' · ' : '') + mmss(row.start_ms ?? row.end_ms) : '—';
-    $('studio-current-text').textContent = row?.text || '选择一句原话，看看 Oops 如何接力处理。';
-    $('studio-moment').textContent = !rows.length ? '等待会议来源' : snapshot.selected != null ? '正在查看选中的原话' : snapshot.playing ? (presentationUntil > performance.now() ? '结果交接展示 · 已存分析回放' : '按原话顺序回放已有分析') : '回放已暂停 · 可点原话看判断';
+    $('studio-current-text').textContent = row?.text || '选一句原话，看 Jev 怎么判断。';
+    $('studio-moment').textContent = !rows.length ? '等待会议来源' : snapshot.selected != null ? '正在看选中的原话' : snapshot.playing ? 'Jev 正按原话顺序回放已存判断' : '已暂停 · 点任意一句原话看判断';
+    $('studio-stats').textContent = statsLine(rows, snapshot);
     $('studio-speed').textContent = '×' + (snapshot.speed || 1);
     $('studio-follow').hidden = snapshot.selected == null;
     const roles = deriveStations(snapshot);
@@ -112,12 +113,7 @@
     const room = $('studio-room');
     room.classList.toggle('is-playing', !!snapshot.playing && mode === 'live' && !motion.matches);
     room.classList.toggle('is-paused', !snapshot.playing || mode !== 'live');
-    room.classList.toggle('is-reduced', motion.matches);
-        const handoff = row && snapshot.playing && mode === 'live' && presentationUntil > performance.now() && !motion.matches;
-    room.classList.toggle('has-handoff', !!handoff);
-        const paper = $('studio-flying-paper');
-    paper.style.left = '25%'; paper.style.top = '54%';
-    $('studio-active-link').style.opacity = handoff ? '.85' : '.15';
+    if (web && mode === 'live') web.draw(window.OopsWeb.liveScene(mode === 'live' ? snapshot : { ...snapshot, playing: false }, current));
     sentenceNodes.forEach((node, index) => {
       node.button.classList.toggle('is-active', index === current);
       node.button.classList.toggle('is-selected', index === snapshot.selected);
@@ -130,6 +126,12 @@
     }
     previousCurrent = current;
     renderInspector();
+  }
+  function statsLine(rows, state) {
+    if (!rows.length) return '';
+    const done = rows.filter(row => !Number.isFinite(row.doneAt) || row.doneAt <= (state.now || 0)).length;
+    const count = layer => rows.reduce((n, row) => n + (row.forks || []).filter(f => f.layer === layer).length, 0);
+    return '已回放 ' + Math.min(done, rows.length) + ' / ' + rows.length + ' 句 · Jev ' + count('jev') + ' 次 · 规则 ' + count('code') + ' 次 · 待你 ' + count('you');
   }
   function stepName(fork) {
     if (fork.layer === 'code') return '规则检查';
@@ -173,7 +175,7 @@
     detailKey = key;
     const body = $('studio-inspector-content');
     const roles = deriveStations(snapshot);
-    $('studio-inspector-kicker').textContent = chosenStation === 'judge' ? 'JUDGEMENT / 已保存的判断' : 'WORKSTATION / 工位分工';
+    $('studio-inspector-kicker').textContent = chosenStation === 'judge' ? '判断详情 · 已保存的结果' : '这只 Oops 的分工';
     if (!rows.length) {
       body.replaceChildren(el('h2', null, '每一步，都有来处'), el('p', 'empty-detail', '选一句原话，或点工位查看分工与保存的结果。')); return;
     }
@@ -216,9 +218,8 @@
   $('inspector-close').addEventListener('click', () => { $('studio-inspector').classList.remove('is-open'); const index = currentIndex(snapshot); sentenceNodes[index]?.button.focus({ preventScroll: true }); });
   $('studio-sentences').addEventListener('wheel', () => { lastScroll = performance.now(); }, { passive: true });
   $('studio-sentences').addEventListener('touchmove', () => { lastScroll = performance.now(); }, { passive: true });
-  const paper = document.querySelector('.current-paper'); paper.tabIndex = 0; paper.setAttribute('role', 'button'); paper.setAttribute('aria-label', '查看当前原话的判断');
-  paper.addEventListener('click', () => { const rows = snapshot.sentences || []; if (rows.length) select(currentIndex(snapshot)); });
-  paper.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); paper.click(); } });
+  document.querySelector('#studio-room .current-paper').addEventListener('click', () => { const rows = snapshot.sentences || []; if (rows.length) select(currentIndex(snapshot)); });
+  new ResizeObserver(() => { if (mode === 'live') sync(); }).observe($('studio-room'));
   function openDialog(id) { api()?.play(false); window.OopsAfterReplay?.pause(); $(id).showModal(); }
   $('meeting-open').addEventListener('click', () => openDialog('meeting-dialog'));
   $('more-open').addEventListener('click', () => openDialog('more-dialog'));
