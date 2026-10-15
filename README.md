@@ -21,7 +21,7 @@
 
 ## 实时漏斗回放（2026-10-14）
 
-体验中心新增[实时漏斗](public/funnel.html)：一场会议逐句回放，每句话变成几个带类型的问题，标出由规则、Jev、DeepSeek 还是由你来定，并旁路比较「规则先判」能省多少模型调用。公开页只用标明的示例数据；真实回放用 `python3 scripts/funnel_replay.py build/replay-0238.json` 生成到 `build/`，再在页面里「打开回放文件」本机查看，不要提交或发布。
+体验中心新增[实时漏斗](public/funnel.html)，分两个标签。「会中 · 实时漏斗」逐句回放，每句话变成几个带类型的问题，标出由规则、Jev、DeepSeek 还是由你来定，并旁路比较「规则先判」能省多少模型调用。「会后 · 整理」展示 DeepSeek 纪要如何对回原话（`minutes_items`）、规则复核（`item_quality`）并排进会后核对队列（`review_queue`），后三步都是现有后端代码。公开页只用标明的示例数据；真实回放用 `python3 scripts/funnel_replay.py build/replay-0238.json` 生成到 `build/`，再在页面里「打开回放文件」本机查看，不要提交或发布。
 
 ## Android 原生 App
 

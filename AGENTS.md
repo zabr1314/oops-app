@@ -242,3 +242,13 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 ## 会后逐句复核：MiMo 只给纪要参考（2026-10-14）
 
 用户选定：会中仍用火山流式识别；会后由服务器按已有起止时间逐句截音频交给小米 `mimo-v2.5-asr` 再识别，结果只作为写纪要时的参考（行末「另一识别」），不改原话、不在界面显示、不自动替换。原因：MiMo 不返回时间戳和说话人，实测与火山各有对错。由 `MIMO_API_KEY` 开关，每场/每天有音频秒数上限，结果随录音删除、随转写到期删除。纪要最多等 10 分钟。详情见 `docs/asr-review-20261014.md`。
+
+## 实时漏斗可视化页（2026-10-14）
+
+用户参考「每个词一个岔口」的蜘蛛视频，要求把 Oops 的实时处理做成同类页面。本轮只做可视化，不改后端判断：`public/funnel.html` 是体验中心的独立页，逐句回放每句话经过的岔口，按谁来答分成规则 / Jev / DeepSeek / 你四层。规则岔口用当前后端代码（`TextClean` 语气词、`rules_tag`、`looks_like_question`、`assess_item`）重算，Jev 与 DeepSeek 结果只取回放记录，概率没记录就留空，不编。数据由 `scripts/funnel_replay.py` 生成。
+
+公开站只放编写的示例会议（`scripts/funnel_example_replay.json` → `public/funnel-sample.json`，页面标「示例数据」）。真实会议回放只生成到已忽略的 `build/funnel-*.json`，在页面里「打开回放文件」本机读取，不上传、不提交、不发布。「规则先判」面板只做旁路比较；要把后端改成规则优先的分层，需另行授权，并按 Jev 验收要求在独立样本上重新评估。
+
+页面结构（2026-10-14 定稿）：用户选定参考视频的深色风格（原文面板 + 弧形扇面 + 爬行的蜘蛛 + 右侧分层卡片），不套品牌视觉。弧分成四个扇区，分别正对规则 / Jev / DeepSeek / 你四张卡片，每个问题的线从原话连到答它那一层的扇区，刻度长度表示置信度 p。卡片显示该层回答的问题数、在该层结束的句子数和主要出口（出口名称由 `funnel_replay.py` 的 `outcome` 给出）；点一句话，决策流水只显示这句经过的问题。
+
+会后整理（2026-10-14）：页面另有「会后 · 整理」标签，参考蜘蛛逐段抓取全文的录屏。四步：①DeepSeek 一次读完全文写纪要（耗时取自回放）；②`minutes_items.build` 把纪要变成待办 / 决定 / 未决问题并对回原话；③`item_quality.assess_item` 复核；④`meeting_features.review_queue` 排会后核对顺序。②–④都是现有后端代码，由 `funnel_replay.py` 的 `post` 段生成，不调模型、不编结果。蜘蛛按原话顺序爬过全文只是展示每条结果引用了哪些原话，不代表模型逐句阅读。
