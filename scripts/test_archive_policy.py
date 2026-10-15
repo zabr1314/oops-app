@@ -124,11 +124,17 @@ class ArchivePolicyTest(unittest.TestCase):
         contract = dict(self.contract, audio_retention_days=90, transcript_retention_days=7)
         self.meetings.sync(dict(self.body, **contract))
         self.upload(contract)
+        # Simulate a legacy writer which accidentally persisted derived items.
+        path = Path(self.meetings.path(self.sid))
+        legacy = json.loads(path.read_text())
+        legacy['items'] = [dict(title='派生事项', evidence=[dict(text=self.secret)])]
+        path.write_text(json.dumps(legacy, ensure_ascii=False))
         future = self.now + dt.timedelta(days=8)
         self.meetings.cleanup(future); self.recordings.cleanup(future)
         row = self.meetings.load(self.sid)
         self.assertEqual([], row['utterances'])
         self.assertEqual('expired', row['transcript_status'])
+        self.assertNotIn('items', row)
         self.assertNotIn(self.secret, Path(self.meetings.path(self.sid)).read_text())
         folder = Path(self.recordings.folder(self.sid))
         self.assertFalse((folder / 'finals.jsonl').exists())
@@ -163,7 +169,7 @@ class ArchivePolicyTest(unittest.TestCase):
         decision = self.meetings.project('Oops')['decisions'][0]
         self.assertEqual(self.quote, decision['text'])
         self.assertEqual('saved_excerpt', decision['source_kind'])
-        self.assertEqual('expired', decision['source_status'])
+        self.assertEqual('retained', decision['source_status'])  # independently retained, still usable as evidence
 
     def test_changed_source_does_not_turn_old_confirmation_into_new_summary(self):
         self.meetings.sync(self.body)
@@ -380,6 +386,8 @@ class ArchivePolicyTest(unittest.TestCase):
     def test_authenticated_http_refuses_daily_sync_and_returns_contract(self):
         backend = Backend.__new__(Backend)
         backend.meetings, backend.recordings, backend.jev = self.meetings, self.recordings, None
+        backend.speaker_state_lock = threading.RLock()
+        backend.manual_speakers = {}
         class Protected(Handler): api_token = 'offline-test-key'
         Protected.backend = backend
         server = ThreadingHTTPServer(('127.0.0.1', 0), Protected)

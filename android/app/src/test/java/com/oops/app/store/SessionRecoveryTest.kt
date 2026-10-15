@@ -10,6 +10,28 @@ import java.nio.file.Files
 import java.time.Instant
 
 class SessionRecoveryTest {
+    @Test fun `closed formal audio without ack recovers as incomplete and a saved ack is preserved`() {
+        val dir = Files.createTempDirectory("recover-eos").toFile()
+        val began = Instant.now().toString()
+        for ((id, closure) in listOf("tail-pending" to null, "tail-ack" to "acknowledged")) {
+            val meta = RecordingPolicy("meeting", 7, 30).contract(began)
+                .put("session_id", id).put("source", "mic").put("audio_ended_at", began)
+            if (closure != null) meta.put("asr_closure", closure)
+            File(dir, "$id.json").writeText(meta.toString())
+        }
+        assertEquals(setOf("tail-pending", "tail-ack"), SessionRecovery.scan(dir, null).map { it.first }.toSet())
+        val pending = JSONObject(File(dir, "tail-pending.json").readText())
+        val body = SessionRecovery.endBody("tail-pending", began, pending)
+        assertEquals("incomplete", body.getString("asr_closure"))
+        assertEquals("process_interrupted", body.getString("asr_error_code"))
+        assertEquals(7, body.getInt("audio_retention_days"))
+        assertEquals(began, body.getString("archive_started_at"))
+        val ack = JSONObject(File(dir, "tail-ack.json").readText())
+        assertEquals("acknowledged", SessionRecovery.endBody("tail-ack", began, ack).getString("asr_closure"))
+        SessionRecovery.markSent(dir, "tail-pending"); SessionRecovery.markSent(dir, "tail-ack")
+        assertTrue(SessionRecovery.scan(dir, null).isEmpty())
+    }
+
     @Test
     fun `a session the app never stopped is found once, its end estimated from the logs`() {
         val dir = Files.createTempDirectory("recover").toFile()

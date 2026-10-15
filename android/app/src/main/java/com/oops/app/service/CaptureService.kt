@@ -9,6 +9,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -24,16 +27,40 @@ import com.oops.app.engine.OopsEngine
  */
 class CaptureService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var stopCheck: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             OopsEngine.stopCapture()
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // Keep the process protected while the bounded ASR tail is being
+            // delivered. The microphone itself has already stopped immediately.
+            if (stopCheck == null) {
+                val deadline = SystemClock.elapsedRealtime() + 60_000
+                val check = object : Runnable {
+                    override fun run() {
+                        if (OopsEngine.isCaptureStopping() && SystemClock.elapsedRealtime() < deadline) {
+                            handler.postDelayed(this, 100)
+                        } else {
+                            stopCheck = null
+                            ServiceCompat.stopForeground(this@CaptureService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                            stopSelf()
+                        }
+                    }
+                }
+                stopCheck = check
+                handler.post(check)
+            }
             return START_NOT_STICKY
         }
+        if (OopsEngine.isCaptureStopping()) {
+            OopsEngine.startCapture(intent?.getStringExtra(EXTRA_SOURCE) ?: OopsEngine.settings.source)
+            return START_NOT_STICKY
+        }
+        stopCheck?.let(handler::removeCallbacks)
+        stopCheck = null
         startInForeground()
         acquireWakeLock()
         val policy = intent?.getStringExtra("recording_policy")?.let { com.oops.app.store.RecordingPolicy.fromBridge(org.json.JSONObject(it)) } ?: com.oops.app.store.RecordingPolicy()
@@ -43,6 +70,8 @@ class CaptureService : Service() {
     }
 
     override fun onDestroy() {
+        stopCheck?.let(handler::removeCallbacks)
+        stopCheck = null
         OopsEngine.stopCapture()
         wakeLock?.takeIf { it.isHeld }?.release()
         wakeLock = null

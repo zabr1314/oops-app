@@ -19,6 +19,8 @@ import sys
 import threading
 from action_sources import board_source_hash
 
+from item_quality import assess_item, bounded_context
+
 PRIORITIES = ("P0", "P1", "P2", "P3")
 CONTEXT_LINES = 12
 MAX_TASKS = 25
@@ -48,6 +50,12 @@ def line(u):
     return f"{u['id']} [{u.get('speaker') or '未识别'}] {u['text']}"
 
 
+def item_quality(task, rows):
+    ids = task.get('sources') or []
+    evidence = [u for u in rows or [] if u.get('id') in ids]
+    return assess_item(task.get('what', ''), evidence, bounded_context(rows, ids))
+
+
 def update(model, board, drafts, context, timeout=40):
     """board: [{id, what, owner, priority, status, sources, reason}]; drafts: [{what, owner, source}] from one sentence."""
     shown = [{k: t[k] for k in ("id", "what", "owner", "priority", "status", "sources")} for t in board]
@@ -75,8 +83,19 @@ def update(model, board, drafts, context, timeout=40):
         priority = item.get("priority") if item.get("priority") in PRIORITIES else (old or {}).get("priority", "P2")
         status = item.get("status") if item.get("status") in ("open", "done", "dropped") else "open"
         owner = item.get("owner") if item.get("owner") in ("林春源", "洪玉麟", "江古月", "黄丽萍") else (old or {}).get("owner", "")
-        out.append(dict(id=tid, what=what, owner=owner, priority=priority, status=status,
-                        sources=sorted(set(sources) | set((old or {}).get("sources", [])), key=lambda s: int(re.sub(r"\D", "", s) or 0)),
+        sources = sorted(set(sources) | set((old or {}).get('sources', [])), key=lambda s: int(re.sub(r'\D', '', s) or 0))
+        quality = item_quality(dict(what=what, sources=sources), context)
+        if quality['reason'] == 'evidence_missing' and old and what == old.get('what'):
+            quality = old.get('quality') or quality
+        if status == 'open' and quality['status'] == 'rejected':
+            if not old:
+                continue
+            # Preserve the old candidate for inspection, outside executable tasks.
+            status = 'needs_review'
+        elif status == 'open' and quality['status'] == 'needs_review':
+            status = 'needs_review'
+        out.append(dict(id=tid, what=what, owner=owner, priority=priority, status=status, quality=quality,
+                        sources=sources,
                         reason=str(item.get("reason") or "")[:120], changed=old is None or priority != old["priority"] or status != old["status"]))
     for t in board:  # a task the model forgot to return stays as it was
         if t["id"] not in seen:
@@ -107,8 +126,10 @@ class Boards:
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 saved = json.load(f)
+        rows = None
         if self.source_rows:
-            hashes = self._hashes(sid)
+            rows = self.source_rows(sid)
+            hashes = self._row_hashes(rows)
             if hashes is None:
                 self.discard(sid)
                 saved = {}
@@ -121,11 +142,34 @@ class Boards:
                         saved['tasks'], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         with self.lock:
             pending = sid in self.running or bool(self.queues.get(sid))
-        return dict(session_id=sid, tasks=saved.get("tasks", []), updated_at=saved.get("updated_at"), pending=pending)
+        tasks, review_queue = [], []
+        for task in saved.get('tasks', []):
+            # Historical completion/removal stays historical. These checks only
+            # classify model candidates and never undo a human action.
+            if task.get('status') in ('done', 'dropped'):
+                tasks.append(task)
+                continue
+            quality = item_quality(task, rows) if rows is not None else task.get('quality')
+            quality = quality or assess_item(task.get('what', ''), [])
+            candidate = dict(task, quality=quality)
+            if quality['status'] == 'accepted':
+                # An old needs_review verdict is cleared only with current proof.
+                candidate['status'] = 'open'
+                tasks.append(candidate)
+            else:
+                candidate['status'] = 'needs_review'
+                review_queue.append(candidate)
+        return dict(session_id=sid, tasks=tasks, review_queue=review_queue,
+                    updated_at=saved.get("updated_at"), pending=pending)
 
     def _hashes(self, sid):
-        rows = self.source_rows(sid)
-        return None if rows is None else {u['id']: u.get('_board_source_hash') or board_source_hash(u) for u in rows}
+        return self._row_hashes(self.source_rows(sid))
+
+    @staticmethod
+    def _row_hashes(rows):
+        return None if rows is None else {u['id']: hashlib.sha256(json.dumps(
+            {k: u.get(k) for k in ('text', 'speaker', 'review')}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            for u in rows}
 
     def discard(self, sid):
         with self.lock:
@@ -177,7 +221,8 @@ class Boards:
                     if self.source_rows and (all_hashes is None or any(d['source'] not in all_hashes for d in drafts)
                             or any(u['id'] not in current or u['text'] != current[u['id']]['text'] for u in context)):
                         continue
-                    previous = self.view(sid)['tasks']
+                    prior = self.view(sid)
+                    previous = prior['tasks'] + prior['review_queue']
                     used = {d['source'] for d in drafts} | {u['id'] for u in context} | {i for t in previous for i in t['sources']}
                     hashes = {i: all_hashes[i] for i in used if i in all_hashes} if all_hashes is not None else None
                     board = update(self.model, previous, drafts, context[-CONTEXT_LINES * 2:])

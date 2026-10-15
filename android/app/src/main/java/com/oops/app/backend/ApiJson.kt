@@ -101,6 +101,7 @@ object ApiJson {
             board = json.optJSONObject("board")?.takeIf { it.optJSONArray("tasks") != null },
             sourceBinding = json.optJSONObject("source_binding")?.toString(),
             sourceError = json.stringOrNull("source_error"),
+            sourceReceipt = json.stringOrNull("source_receipt"),
         )
     }
 
@@ -147,7 +148,8 @@ object ApiJson {
                     .put("clip_start_ms", d.evidence.clipStartMs)
                     .put("clip_end_ms", d.evidence.clipEndMs)
                     .apply { d.evidence.sourceBinding?.let { put("source_binding", JSONObject(it)) } },
-            ).also { r.freezeWire(it.toString()) }
+            ).apply { d.sourceReceipt?.takeIf { it.isNotBlank() }?.let { put("source_receipt", it) } }
+            .also { r.freezeWire(it.toString()) }
     }
 
     fun actionResult(json: JSONObject): ActionResult {
@@ -159,7 +161,9 @@ object ApiJson {
             taskUrl = task?.stringOrNull("url"),
             message = json.stringOrNull("message"),
             sourceInvalidated = json.opt("source_invalidated") == true,
-            sourceBlocked = json.opt("source_blocked") == true,
+            sourceBlocked = json.opt("source_blocked") == true ||
+                (json.opt("source_blocked") as? String)?.isNotBlank() == true,
+            errorCode = json.stringOrNull("error_code"),
         )
     }
 

@@ -13,8 +13,8 @@ function element(id) {
 }
 const errors = [], messages = [], native = {postMessage(raw) {messages.push(JSON.parse(raw));}};
 vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../main/assets/web/app.js'), 'utf8'), {
-  window: {OopsNative: native}, location: {search: ''}, URLSearchParams,
-  document: {getElementById: element, createElement: () => element(Symbol('node')), querySelectorAll: () => [], documentElement: {dataset: {}}},
+  window: {OopsNative: native, addEventListener() {}}, location: {search: ''}, URLSearchParams,
+  document: {addEventListener() {}, getElementById: element, createElement: () => element(Symbol('node')), querySelectorAll: () => [], documentElement: {dataset: {}}},
   console: {...console, error(error) {errors.push(error);}}, setTimeout, clearTimeout,
 });
 const receive = (type, payload) => native.onmessage({data: JSON.stringify({type, payload})});

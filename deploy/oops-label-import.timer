@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconcile newly ended Oops meetings
+
+[Timer]
+OnBootSec=20s
+OnUnitInactiveSec=15s
+AccuracySec=1s
+Unit=oops-label-import.service
+
+[Install]
+WantedBy=timers.target

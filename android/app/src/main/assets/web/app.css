@@ -134,3 +134,32 @@ body { -webkit-tap-highlight-color: transparent; }
 .raw-tags summary { display: grid; gap: 2px; cursor: pointer; list-style: none; }
 .raw-tags summary::-webkit-details-marker { display: none; }
 .raw-tags[open] summary { margin-bottom: 8px; }
+/* after the meeting: items from the minutes */
+.item-title { font-size: 20px; line-height: 1.45; margin: 10px 0 6px; overflow-wrap: anywhere; }
+select.chip { max-width: 100%; font: inherit; }
+.session-items h3 { margin: 14px 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.review-answer .action-grid + .inline-actions { margin-top: 12px; }
+
+/* The review site's candidates keep their evidence and each person's answer separate from Feishu work. */
+.parsed-task-group { padding-bottom: 10px; }
+.parsed-task-card h3 { margin: 12px 0 7px; line-height: 1.5; overflow-wrap: anywhere; }
+.parsed-task-card .section-title { flex-wrap: wrap; gap: 8px; }
+.parsed-task-card .parsed-owner { margin: 9px 0 12px; color: var(--brand); font-size: 13px; line-height: 1.6; }
+.parsed-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.parsed-filters .chip, .parsed-actions .chip { min-height: 40px; white-space: normal; }
+.parsed-reviews { display: grid; gap: 8px; padding: 11px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.parsed-review-row { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; }
+.parsed-review-row > span:first-child { min-width: 48px; color: var(--ink); }
+.parsed-review-row small { color: var(--muted); font-size: 11px; }
+.parsed-review-row p { flex-basis: 100%; margin: 2px 0; overflow-wrap: anywhere; }
+.parsed-evidence { margin: 12px 0; }
+.parsed-evidence blockquote { margin: 0 0 10px; padding: 9px 12px; border-left: 2px solid #d6c6f1; border-radius: 0 10px 10px 0; background: #faf8ff; }
+.parsed-evidence p { margin: 0 0 5px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.parsed-evidence cite { color: var(--muted); font-style: normal; font-size: 11px; }
+.parsed-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.parsed-source-state { background: #fff9f1; }
+.parsed-source-state p { margin: 5px 0; font-size: 13px; line-height: 1.6; }
+.formal-task-group { padding-top: 18px; border-top: 1px solid var(--line); }
+.meeting-work-entry { margin: 12px 0 18px; padding: 4px 10px; border: 1px solid #e8e0f8; border-radius: 18px; background: #faf7ff; }
+.parsed-source-heading { margin: 12px 0 0; color: var(--brand); font-size: 14px; }
+.parsed-decision-quote { padding: 9px 11px; border-radius: 10px; background: #faf8ff; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }

@@ -11,6 +11,25 @@ import java.io.File
 import java.nio.file.Files
 
 class SessionRecorderTest {
+    @Test fun `closure quality preserves the frozen contract audio end and late final`() {
+        val dir = Files.createTempDirectory("rec-closure").toFile()
+        val began = java.time.Instant.now().toString()
+        val contract = JSONObject().put("recording_mode", "meeting").put("cloud_save_confirmed", true)
+            .put("archive_started_at", began).put("audio_retention_days", 7).put("transcript_retention_days", 30)
+        val r = SessionRecorder(dir, "closure", contract)
+        r.audio(ByteArray(3200)); r.closeAudio()
+        val ended = JSONObject(File(dir, "closure.json").readText()).getString("audio_ended_at")
+        r.final(Utterance("tail", 0, 100, "最后定稿", null)); r.flush()
+        r.recordAsrClosure("incomplete", "finish_timeout", "结束未确认")
+        val saved = JSONObject(File(dir, "closure.json").readText())
+        assertEquals("incomplete", saved.getString("asr_closure"))
+        assertEquals("finish_timeout", saved.getString("asr_error_code"))
+        assertEquals(ended, saved.getString("audio_ended_at"))
+        assertEquals(began, saved.getString("archive_started_at"))
+        assertEquals(7, saved.getInt("audio_retention_days"))
+        assertEquals(30, saved.getInt("transcript_retention_days"))
+        assertEquals("最后定稿", JSONObject(File(dir, "closure.finals.jsonl").readLines().single()).getString("text"))
+    }
     @Test
     fun `audio and gaps stay on the session timeline and stop at the cap`() {
         val dir = Files.createTempDirectory("rec").toFile()

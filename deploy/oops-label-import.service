@@ -1,0 +1,19 @@
+[Unit]
+Description=Oops new meeting review bridge (stored minutes only)
+After=oops-backend.service oops-label.service
+
+[Service]
+Type=oneshot
+User=oops
+Group=oops
+WorkingDirectory=/opt/oops/label
+ExecStart=/usr/bin/python3 -B /opt/oops/label/label_auto_import.py --backend /var/lib/oops/backend --data /var/lib/oops-label --policy /var/lib/oops-label/auto-import-policy.json
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/oops/backend
+ReadWritePaths=/var/lib/oops-label
+TimeoutStartSec=180
+

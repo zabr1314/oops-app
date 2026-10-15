@@ -26,6 +26,8 @@ interface OopsApi {
     /** A person's name for a past meeting; an empty title returns to the automatic one. */
     suspend fun renameMeeting(sessionId: String, title: String): org.json.JSONObject? = null
     suspend fun reviewMeeting(request: org.json.JSONObject): org.json.JSONObject? = null
+    /** A person's check of one minutes item (confirm / reject / merge / reopen); null when unsupported. */
+    suspend fun reviewMeetingItem(request: org.json.JSONObject): org.json.JSONObject? = null
     /** One archived sentence as 16 kHz mono PCM, cut on the server; null when it has no recording. */
     suspend fun recordingClip(sessionId: String, startMs: Long, endMs: Long): ByteArray? = null
     /** Created Feishu tasks with their current Feishu state; null when unsupported. */
@@ -172,6 +174,7 @@ data class DraftResponse(
     /** Server-verified source snapshot, preserved verbatim until explicit confirmation. */
     val sourceBinding: String? = null,
     val sourceError: String? = null,
+    val sourceReceipt: String? = null,
 )
 
 /** Server-verified context resolution of the task wording: display only, never confirmed data. */
@@ -208,6 +211,7 @@ data class ActionDraft(
     val ownerSelectionSource: String = "model",
     val context: TaskContext? = null,
     val sourceError: String? = null,
+    val sourceReceipt: String? = null,
 )
 
 data class ConfirmRequest(val opId: String, val sessionId: String, val draft: ActionDraft) {
@@ -232,6 +236,7 @@ data class ActionResult(
     val mock: Boolean = false,
     val sourceInvalidated: Boolean = false,
     val sourceBlocked: Boolean = false,
+    val errorCode: String? = null,
 ) {
     companion object {
         const val PENDING = "pending"

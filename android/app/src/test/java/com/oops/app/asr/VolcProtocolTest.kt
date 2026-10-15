@@ -8,4 +8,7 @@ class VolcProtocolTest {
  @Test fun sequenceAndGzipDecode() { val f=VolcProtocol.encode(9,3,1,1,VolcProtocol.gzip("你好".toByteArray()),-7);val r=VolcProtocol.decode(f) as VolcProtocol.ServerMessage.Response;assertEquals(-7,r.sequence);assertTrue(r.isLast);assertEquals("你好",r.payload) }
  @Test fun errorFrameDecodesCodeAndMessage() { val text="bad token".toByteArray();val f=byteArrayOf(0x11,0xf0.toByte(),0x10,0)+ByteBuffer.allocate(8).putInt(45000001).putInt(text.size).array()+text;assertEquals(VolcProtocol.ServerMessage.Error(45000001,"bad token"),VolcProtocol.decode(f)) }
  @Test(expected=IllegalArgumentException::class) fun shortFrameIsRejected() { VolcProtocol.decode(byteArrayOf(0x11)) }
+ @Test fun emptyLastResponseIsAnAcknowledgementWithoutText() { val r=VolcProtocol.decode(VolcProtocol.encode(9,2,1,0,byteArrayOf())) as VolcProtocol.ServerMessage.Response;assertTrue(r.isLast);assertEquals("",r.payload) }
+ @Test(expected=IllegalArgumentException::class) fun truncatedPayloadCannotMasqueradeAsACompleteResponse() { val f=VolcProtocol.encode(9,2,1,0,"{}".toByteArray());VolcProtocol.decode(f.copyOf(f.size-1)) }
+ @Test(expected=IllegalArgumentException::class) fun unsupportedMessageTypeCannotMasqueradeAsAnAcknowledgement() { VolcProtocol.decode(VolcProtocol.encode(11,2,1,0,"{}".toByteArray())) }
 }

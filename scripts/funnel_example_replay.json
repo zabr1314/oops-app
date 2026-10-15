@@ -1,0 +1,804 @@
+{
+ "label": "示例会议 · 首版上线方案与预算",
+ "note": "编写的示例，不是真实录音",
+ "utterances": [
+  {
+   "id": "u1",
+   "text": "我们这次要在两周内上线，预算不能超过10万。",
+   "start_ms": 300,
+   "end_ms": 4700,
+   "speaker": "林春源",
+   "tag": "constraint"
+  },
+  {
+   "id": "u2",
+   "text": "嗯。",
+   "start_ms": 5300,
+   "end_ms": 6000,
+   "speaker": "黄丽萍",
+   "tag": null
+  },
+  {
+   "id": "u3",
+   "text": "我觉得注册前应该先让用户体验一下产品，不然转化率会很低。",
+   "start_ms": 6900,
+   "end_ms": 13100,
+   "speaker": "江古月",
+   "tag": "idea"
+  },
+  {
+   "id": "u4",
+   "text": "这个想法不错，不过方案A要按时上线，大概要13万。",
+   "start_ms": 13500,
+   "end_ms": 18900,
+   "speaker": "洪玉麟",
+   "tag": "constraint"
+  },
+  {
+   "id": "u5",
+   "text": "那我周五前把新方案发你。",
+   "start_ms": 19600,
+   "end_ms": 22600,
+   "speaker": "洪玉麟",
+   "tag": "commitment"
+  },
+  {
+   "id": "u6",
+   "text": "好的。",
+   "start_ms": 23100,
+   "end_ms": 24000,
+   "speaker": "林春源",
+   "tag": "chitchat"
+  },
+  {
+   "id": "u7",
+   "text": "体验版的话，首页要不要先做个引导页？",
+   "start_ms": 24800,
+   "end_ms": 28600,
+   "speaker": "江古月",
+   "tag": "idea"
+  },
+  {
+   "id": "u8",
+   "text": "比如说它会帮你查一下竞品的引导页是怎么做的。",
+   "start_ms": 29200,
+   "end_ms": 33500,
+   "speaker": "黄丽萍",
+   "tag": "idea"
+  },
+  {
+   "id": "u9",
+   "text": "现在市面上做会议纪要的App，一个月大概多少钱？",
+   "start_ms": 34700,
+   "end_ms": 39300,
+   "speaker": "林春源",
+   "tag": "uncertain"
+  },
+  {
+   "id": "u10",
+   "text": "呃。",
+   "start_ms": 39800,
+   "end_ms": 40400,
+   "speaker": "洪玉麟",
+   "tag": null
+  },
+  {
+   "id": "u11",
+   "text": "我们就定了，先做安卓，iOS下个版本再说。",
+   "start_ms": 41100,
+   "end_ms": 45300,
+   "speaker": "江古月",
+   "tag": "decision"
+  },
+  {
+   "id": "u12",
+   "text": "古月你下周三之前把安卓的登录接口打通。",
+   "start_ms": 46200,
+   "end_ms": 50100,
+   "speaker": "林春源",
+   "tag": "commitment"
+  },
+  {
+   "id": "u13",
+   "text": "行，没问题，我来弄。",
+   "start_ms": 50500,
+   "end_ms": 52600,
+   "speaker": "江古月",
+   "tag": "commitment"
+  },
+  {
+   "id": "u14",
+   "text": "上次说的录音豆蓝牙连接，已经修好了。",
+   "start_ms": 54100,
+   "end_ms": 57700,
+   "speaker": "黄丽萍",
+   "tag": "idea"
+  },
+  {
+   "id": "u15",
+   "text": "预算这块，要是超了怎么办？",
+   "start_ms": 58300,
+   "end_ms": 61100,
+   "speaker": "洪玉麟",
+   "tag": "constraint"
+  },
+  {
+   "id": "u16",
+   "text": "超了就砍掉体验版里的视频教程。",
+   "start_ms": 61800,
+   "end_ms": 64900,
+   "speaker": "林春源",
+   "tag": "decision"
+  },
+  {
+   "id": "u17",
+   "text": "视频教程本来也没几个人看。",
+   "start_ms": 65400,
+   "end_ms": 68000,
+   "speaker": "江古月",
+   "tag": "idea"
+  },
+  {
+   "id": "u18",
+   "text": "那我们先把会议纪要那页做完，再说问答。",
+   "start_ms": 68800,
+   "end_ms": 72500,
+   "speaker": "黄丽萍",
+   "tag": "commitment"
+  },
+  {
+   "id": "u19",
+   "text": "Whisper和豆包的识别，中文哪个更准？",
+   "start_ms": 73400,
+   "end_ms": 76800,
+   "speaker": "洪玉麟",
+   "tag": "idea"
+  },
+  {
+   "id": "u20",
+   "text": "豆包中文更准，我们之前测过。",
+   "start_ms": 77400,
+   "end_ms": 80300,
+   "speaker": "江古月",
+   "tag": "idea"
+  },
+  {
+   "id": "u21",
+   "text": "好，那就继续用豆包。",
+   "start_ms": 81000,
+   "end_ms": 83200,
+   "speaker": "林春源",
+   "tag": "decision"
+  },
+  {
+   "id": "u22",
+   "text": "我周四约一下设计评审的会议室。",
+   "start_ms": 84300,
+   "end_ms": 87300,
+   "speaker": "黄丽萍",
+   "tag": "commitment"
+  },
+  {
+   "id": "u23",
+   "text": "要是方案能压到10万以内，我们就按方案A走。",
+   "start_ms": 87800,
+   "end_ms": 92100,
+   "speaker": "洪玉麟",
+   "tag": "idea"
+  },
+  {
+   "id": "u24",
+   "text": "嗯嗯，好。",
+   "start_ms": 92700,
+   "end_ms": 93900,
+   "speaker": "林春源",
+   "tag": "chitchat"
+  },
+  {
+   "id": "u25",
+   "text": "那今天就到这，周五再对一下进度。",
+   "start_ms": 94600,
+   "end_ms": 97900,
+   "speaker": "江古月",
+   "tag": "commitment"
+  }
+ ],
+ "events": [
+  {
+   "kind": "conflict",
+   "id": "u1",
+   "at_ms": 4700,
+   "latency_ms": 214,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.98,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u1",
+   "at_ms": 4700,
+   "latency_ms": 512,
+   "error": null,
+   "tag": "constraint",
+   "prob": 0.97,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "tag",
+   "id": "u3",
+   "at_ms": 13100,
+   "latency_ms": 498,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.88,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u4",
+   "at_ms": 18900,
+   "latency_ms": 236,
+   "error": null,
+   "result": {
+    "conflict": true,
+    "with": {
+     "id": "u1",
+     "text": "我们这次要在两周内上线，预算不能超过10万。",
+     "start_ms": 300,
+     "end_ms": 4700,
+     "speaker": "林春源",
+     "tag": "constraint"
+    },
+    "prob": 0.91,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u4",
+   "at_ms": 18900,
+   "latency_ms": 541,
+   "error": null,
+   "tag": "constraint",
+   "prob": 0.74,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u5",
+   "at_ms": 22600,
+   "latency_ms": 205,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.96,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u5",
+   "at_ms": 22600,
+   "latency_ms": 476,
+   "error": null,
+   "tag": "commitment",
+   "prob": 0.98,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "task",
+   "id": "u5",
+   "at_ms": 22600,
+   "latency_ms": 1065,
+   "error": null,
+   "tasks": [
+    {
+     "is_task": true,
+     "task_quote": "那我周五前把新方案发你。",
+     "resolutions": [],
+     "missing": [],
+     "model": "deepseek-flash",
+     "what": "周五前把新方案发给林春源",
+     "owner_role": "speaker",
+     "owner_name": "洪玉麟",
+     "due_raw": "周五前"
+    }
+   ]
+  },
+  {
+   "kind": "tag",
+   "id": "u6",
+   "at_ms": 24000,
+   "latency_ms": 455,
+   "error": null,
+   "tag": "chitchat",
+   "prob": 0.96,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "question",
+   "id": "u7",
+   "at_ms": 28600,
+   "answered": null,
+   "same_as": null,
+   "status": "skip",
+   "final": "skip",
+   "how": "quick",
+   "value": 0,
+   "detect_kind": "internal",
+   "question": ""
+  },
+  {
+   "kind": "tag",
+   "id": "u7",
+   "at_ms": 28600,
+   "latency_ms": 503,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.81,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "question",
+   "id": "u8",
+   "at_ms": 33500,
+   "answered": null,
+   "same_as": null,
+   "status": "skip",
+   "final": "skip",
+   "how": "search",
+   "value": 0,
+   "detect_kind": "rhetorical",
+   "question": ""
+  },
+  {
+   "kind": "tag",
+   "id": "u8",
+   "at_ms": 33500,
+   "latency_ms": 521,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.77,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "question",
+   "id": "u9",
+   "at_ms": 39300,
+   "answered": null,
+   "same_as": null,
+   "status": "research",
+   "final": "release",
+   "how": "search",
+   "value": 3,
+   "question": "同类会议纪要 App 的月费大概多少？"
+  },
+  {
+   "kind": "tag",
+   "id": "u9",
+   "at_ms": 39300,
+   "latency_ms": 560,
+   "error": null,
+   "tag": "uncertain",
+   "prob": 0.46,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u11",
+   "at_ms": 45300,
+   "latency_ms": 221,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.97,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u11",
+   "at_ms": 45300,
+   "latency_ms": 489,
+   "error": null,
+   "tag": "decision",
+   "prob": 0.96,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u12",
+   "at_ms": 50100,
+   "latency_ms": 218,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.95,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u12",
+   "at_ms": 50100,
+   "latency_ms": 470,
+   "error": null,
+   "tag": "commitment",
+   "prob": 0.99,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "task",
+   "id": "u12",
+   "at_ms": 50100,
+   "latency_ms": 1052,
+   "error": null,
+   "tasks": [
+    {
+     "is_task": true,
+     "task_quote": "古月你下周三之前把安卓的登录接口打通。",
+     "resolutions": [],
+     "missing": [],
+     "model": "deepseek-flash",
+     "what": "打通安卓登录接口",
+     "owner_role": "named",
+     "owner_name": "江古月",
+     "due_raw": "下周三之前"
+    }
+   ]
+  },
+  {
+   "kind": "conflict",
+   "id": "u13",
+   "at_ms": 52600,
+   "latency_ms": 230,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.93,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u13",
+   "at_ms": 52600,
+   "latency_ms": 466,
+   "error": null,
+   "tag": "commitment",
+   "prob": 0.87,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "task",
+   "id": "u13",
+   "at_ms": 52600,
+   "latency_ms": 1093,
+   "error": null,
+   "tasks": []
+  },
+  {
+   "kind": "tag",
+   "id": "u14",
+   "at_ms": 57700,
+   "latency_ms": 492,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.7,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "question",
+   "id": "u15",
+   "at_ms": 61100,
+   "answered": null,
+   "same_as": null,
+   "status": "skip",
+   "final": "skip",
+   "how": "quick",
+   "value": 1,
+   "detect_kind": "internal",
+   "question": ""
+  },
+  {
+   "kind": "tag",
+   "id": "u15",
+   "at_ms": 61100,
+   "latency_ms": 515,
+   "error": null,
+   "tag": "constraint",
+   "prob": 0.66,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u16",
+   "at_ms": 64900,
+   "latency_ms": 247,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.81,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u16",
+   "at_ms": 64900,
+   "latency_ms": 507,
+   "error": null,
+   "tag": "decision",
+   "prob": 0.83,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "question",
+   "id": "u17",
+   "at_ms": 68000,
+   "answered": null,
+   "same_as": null,
+   "status": "skip",
+   "final": "skip",
+   "how": "quick",
+   "value": 0,
+   "detect_kind": "rhetorical",
+   "question": ""
+  },
+  {
+   "kind": "tag",
+   "id": "u17",
+   "at_ms": 68000,
+   "latency_ms": 480,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.63,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u18",
+   "at_ms": 72500,
+   "latency_ms": 212,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.94,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u18",
+   "at_ms": 72500,
+   "latency_ms": 1340,
+   "error": null,
+   "tag": "commitment",
+   "prob": 0.93,
+   "engine": "jev-1.13.0+clauses",
+   "task_clause": "那我们先把会议纪要那页做完，"
+  },
+  {
+   "kind": "task",
+   "id": "u18",
+   "at_ms": 72500,
+   "latency_ms": 998,
+   "error": null,
+   "tasks": [
+    {
+     "is_task": true,
+     "task_quote": "那我们先把会议纪要那页做完，再说问答。",
+     "resolutions": [],
+     "missing": [],
+     "model": "deepseek-flash",
+     "what": "先做完会议纪要页",
+     "owner_role": "unknown",
+     "owner_name": null,
+     "due_raw": null
+    }
+   ]
+  },
+  {
+   "kind": "question",
+   "id": "u19",
+   "at_ms": 76800,
+   "answered": true,
+   "same_as": null,
+   "status": "wait",
+   "final": "answered",
+   "how": "search",
+   "value": 2,
+   "question": "Whisper 和豆包语音识别在中文上哪个更准？"
+  },
+  {
+   "kind": "tag",
+   "id": "u19",
+   "at_ms": 76800,
+   "latency_ms": 533,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.58,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "tag",
+   "id": "u20",
+   "at_ms": 80300,
+   "latency_ms": 486,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.72,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u21",
+   "at_ms": 83200,
+   "latency_ms": 240,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.88,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u21",
+   "at_ms": 83200,
+   "latency_ms": 461,
+   "error": null,
+   "tag": "decision",
+   "prob": 0.97,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u22",
+   "at_ms": 87300,
+   "latency_ms": 201,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.99,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u22",
+   "at_ms": 87300,
+   "latency_ms": 478,
+   "error": null,
+   "tag": "commitment",
+   "prob": 0.95,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "task",
+   "id": "u22",
+   "at_ms": 87300,
+   "latency_ms": 862,
+   "error": null,
+   "tasks": [
+    {
+     "is_task": true,
+     "task_quote": "我周四约一下设计评审的会议室。",
+     "resolutions": [],
+     "missing": [],
+     "model": "deepseek-flash",
+     "what": "预约设计评审会议室",
+     "owner_role": "speaker",
+     "owner_name": "黄丽萍",
+     "due_raw": "周四"
+    }
+   ]
+  },
+  {
+   "kind": "tag",
+   "id": "u23",
+   "at_ms": 92100,
+   "latency_ms": 527,
+   "error": null,
+   "tag": "idea",
+   "prob": 0.69,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "tag",
+   "id": "u24",
+   "at_ms": 93900,
+   "latency_ms": 444,
+   "error": null,
+   "tag": "chitchat",
+   "prob": 0.97,
+   "engine": "jev-1.13.0",
+   "task_clause": null
+  },
+  {
+   "kind": "conflict",
+   "id": "u25",
+   "at_ms": 97900,
+   "latency_ms": 209,
+   "error": null,
+   "result": {
+    "conflict": false,
+    "with": null,
+    "prob": 0.96,
+    "engine": "jev-1.13.0"
+   }
+  },
+  {
+   "kind": "tag",
+   "id": "u25",
+   "at_ms": 97900,
+   "latency_ms": 1295,
+   "error": null,
+   "tag": "commitment",
+   "prob": 0.78,
+   "engine": "jev-1.13.0+clauses",
+   "task_clause": "周五再对一下进度。"
+  },
+  {
+   "kind": "task",
+   "id": "u25",
+   "at_ms": 97900,
+   "latency_ms": 985,
+   "error": null,
+   "tasks": [
+    {
+     "is_task": true,
+     "task_quote": "那今天就到这，周五再对一下进度。",
+     "resolutions": [],
+     "missing": [],
+     "model": "deepseek-flash",
+     "what": "周五对一次进度",
+     "owner_role": "unknown",
+     "owner_name": null,
+     "due_raw": "周五"
+    }
+   ]
+  },
+  {
+   "kind": "minutes",
+   "at_ms": 100000,
+   "latency_ms": 4210,
+   "error": null,
+   "minutes": {
+    "overview": "首版两周内上线、预算上限 10 万；先做安卓，超预算时砍掉视频教程，识别继续用豆包。"
+   }
+  }
+ ]
+}

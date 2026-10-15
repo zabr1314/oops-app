@@ -36,6 +36,8 @@ data class EngineState(
     val recordSession: Boolean = false,
     val recordingsPending: Int = 0,
     val recordingUpload: String = "idle",
+    val recordingsBlocked: Int = 0,
+    val recordingArchiveMessage: String? = null,
     /** The 3-hour audio cap was reached: text continues, audio no longer is recorded. */
     val recordingCapped: Boolean = false,
     /** Another app is holding the microphone (Android silences our input); the transcript has a hole. */

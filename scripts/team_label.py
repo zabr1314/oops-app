@@ -14,9 +14,11 @@ Listens on 127.0.0.1 only. Audio is served in single-sentence clips, only with a
 """
 import argparse
 import base64
+import datetime as dt
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import shutil
@@ -27,6 +29,10 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# systemd runs this file as __main__; helpers import team_label. Keep one
+# RevisionConflict class so their conflicts reach the HTTP 409 handler.
+if __name__ == '__main__':
+    sys.modules.setdefault('team_label', sys.modules[__name__])
 from label_meeting import clip_wav  # noqa: E402
 from label_workflow import expressions, content_audit, current_label, row_fingerprint, digest  # noqa: E402
 
@@ -50,7 +56,8 @@ def make_key(secret, name):
     return base64.urlsafe_b64encode(name.encode()).decode().rstrip("=") + "." + tag
 
 
-TEAM = "team"  # one shared link: the page asks who you are and sends it as X-Labeler
+TEAM = "team"
+OPEN_MARKER = "open-access"  # one shared link: the page asks who you are and sends it as X-Labeler
 
 
 def check_key(secret, key):
@@ -197,38 +204,196 @@ class RevisionConflict(ValueError):
 
 
 class Data:
-    def __init__(self, folder):
+    def __init__(self, folder, recover_similarity=True):
         self.folder = folder
         self.meetings = {}
         self.roles = {}
-        for mid in sorted(os.listdir(os.path.join(folder, "meetings"))):
-            path = os.path.join(folder, "meetings", mid)
-            if not MEETING.fullmatch(mid) or not os.path.isfile(os.path.join(path, "audio.wav")):
-                continue
-            with open(os.path.join(path, "meeting.json"), encoding="utf-8") as f:
-                meeting = json.load(f)
-            voice = {}
-            if os.path.isfile(os.path.join(path, "voice.json")):  # voice_prefill.py: speakers the voiceprints are sure of
-                with open(os.path.join(path, "voice.json"), encoding="utf-8") as f:
-                    voice = json.load(f)["rows"]
-            roles = {}
-            if os.path.isfile(os.path.join(path, "roles.json")):  # voice_roles.py: unknown voices grouped for claiming
-                with open(os.path.join(path, "roles.json"), encoding="utf-8") as f:
-                    found = json.load(f)
-                roles = found["rows"]
-                self.roles = found["roles"]
-            for u in meeting["utterances"]:
-                if voice.get(u["id"], {}).get("name") in PEOPLE:
-                    u["voice"] = voice[u["id"]]["name"]
-                elif u["id"] in roles:
-                    u["role"] = roles[u["id"]]["role"]
-            self.meetings[mid] = {"id": mid, "title": meeting.get("title", mid), "rows": meeting["utterances"],
-                                  "wav": os.path.join(path, "audio.wav")}
         self.lock = threading.RLock()
-        self.groups = self._voice_groups()
+        self.groups = {}
+        self.catalog_revision = ''
+        self._catalog_stamps = {}
+        self._catalog_good = {}
         self._similarity_recovering = False
         self._similarity_cache = None
-        self._recover_similarity()
+        self.refresh()
+        if recover_similarity:
+            self._recover_similarity()
+
+    @staticmethod
+    def _file_stamp(path):
+        try:
+            found = os.stat(path)
+            return (found.st_ino, found.st_size, found.st_mtime_ns, found.st_ctime_ns)
+        except FileNotFoundError:
+            return None
+
+    def _load_catalog_meeting(self, mid, path):
+        with open(os.path.join(path, 'meeting.json'), encoding='utf-8') as stream:
+            meeting = json.load(stream)
+        if not isinstance(meeting, dict) or not isinstance(meeting.get('utterances'), list):
+            raise ValueError('invalid meeting')
+        imported = meeting.get('imported') is True
+        audio_name = meeting.get('audio_file', 'audio.wav')
+        if imported and audio_name is None and meeting.get('audio_available') is False:
+            audio_name = 'audio.wav'
+        if not isinstance(audio_name, str) or not re.fullmatch(r'audio(?:-[0-9a-f]{64})?\.wav', audio_name):
+            raise ValueError('invalid audio basename')
+        items_name = meeting.get('items_file', 'items.json')
+        if not isinstance(items_name, str) or not re.fullmatch(r'items(?:-[0-9a-f]{64})?\.json', items_name):
+            raise ValueError('invalid items basename')
+        wav = os.path.join(path, audio_name)
+        if not imported and not os.path.isfile(wav):
+            return None
+        if imported and meeting.get('audio_available') is True and not os.path.isfile(wav):
+            raise FileNotFoundError('committed audio missing')
+        rows, ids = [], set()
+        for original in meeting['utterances']:
+            if not isinstance(original, dict):
+                raise ValueError('invalid sentence')
+            uid, value = original.get('id'), original.get('text')
+            start, end = original.get('start_ms'), original.get('end_ms')
+            if (not isinstance(uid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', uid)
+                    or uid in ids or not isinstance(value, str)
+                    or any(type(n) not in (int, float) or not math.isfinite(n) for n in (start, end))
+                    or not (0 <= start < end if imported else 0 <= start <= end)):
+                raise ValueError('invalid sentence')
+            ids.add(uid)
+            row = dict(original)
+            if imported:
+                # Names and anonymous letters from another capture never extend old approvals.
+                row.pop('voice', None)
+                row.pop('role', None)
+            rows.append(row)
+        role_meta = {}
+        if not imported:
+            voice = self._read(os.path.join(path, 'voice.json'), {}).get('rows', {})
+            found = self._read(os.path.join(path, 'roles.json'), {})
+            role_rows, role_meta = found.get('rows', {}), found.get('roles', {})
+            for row in rows:
+                if voice.get(row['id'], {}).get('name') in PEOPLE:
+                    row['voice'] = voice[row['id']]['name']
+                elif row['id'] in role_rows:
+                    row['role'] = role_rows[row['id']]['role']
+        processing = meeting.get('processing') or {}
+        if not isinstance(processing, dict):
+            raise ValueError('invalid processing state')
+        roster = meeting.get('shared_roster', [])
+        if not isinstance(roster, list) or any(name not in PEOPLE for name in roster):
+            raise ValueError('invalid shared roster')
+        return dict(id=mid, title=meeting.get('title') or mid, rows=rows, wav=wav,
+                    imported=imported, processing=dict(processing), shared_roster=list(dict.fromkeys(roster)),
+                    audio_file=audio_name, items_file=items_name,
+                    audio_available=os.path.isfile(wav) and meeting.get('audio_available', True) is True,
+                    storage_policy=meeting.get('storage_policy'),
+                    source_session_id=meeting.get('source_session_id') or meeting.get('session'),
+                    source_kind=meeting.get('source_kind') or ('existing_summary' if imported else None),
+                    source_managed=meeting.get('source_managed') is True,
+                    source_backend=meeting.get('source_backend'),
+                    source_minutes_fingerprint=meeting.get('source_minutes_fingerprint'),
+                    source_revision=meeting.get('source_revision'),
+                    source_audio_sha256=meeting.get('source_audio_sha256'),
+                    role_meta=role_meta)
+
+    def _guard_import(self, record, now):
+        if not record['imported']:
+            return record
+        current = dict(record, processing=dict(record['processing']))
+        if record.get('source_managed'):
+            try:
+                backend = record.get('source_backend')
+                expected = record.get('source_minutes_fingerprint')
+                revision = record.get('source_revision')
+                audio_sha = record.get('source_audio_sha256')
+                if (not isinstance(backend, str) or not os.path.isabs(backend)
+                        or not record.get('source_session_id')
+                        or record['rows'] and (not isinstance(expected, str)
+                            or not re.fullmatch(r'[0-9a-f]{64}', expected)
+                            or not isinstance(revision, str) or not re.fullmatch(r'[0-9a-f]{64}', revision))
+                        or record['audio_available'] and (not isinstance(audio_sha, str)
+                            or not re.fullmatch(r'[0-9a-f]{64}', audio_sha))):
+                    raise ValueError('source_guard_metadata_invalid')
+                from label_auto_import import live_guard
+                blocked = live_guard(backend, self.folder, record['source_session_id'], expected,
+                    expected_revision=revision, expected_audio_sha256=audio_sha)
+            except (ImportError, OSError, ValueError, TypeError, AttributeError):
+                blocked = dict(stage='waiting_policy', reason_code='source_guard_unavailable')
+            if blocked is not None:
+                current.update(rows=[], audio_available=False)
+                if isinstance(blocked, dict):
+                    current['processing'].update(stage=blocked.get('stage') or 'stale',
+                        reason_code=blocked.get('reason_code') or 'source_unavailable')
+                else:
+                    current['processing'].update(stage='stale', reason_code='source_unavailable')
+                return current
+        policy = record.get('storage_policy')
+        expiries = {}
+        try:
+            if not isinstance(policy, dict):
+                raise ValueError('missing policy')
+            for asset in ('audio', 'transcript'):
+                value = policy[asset + '_expires_at']
+                expiry = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
+                if expiry.tzinfo is None:
+                    raise ValueError('expiry timezone missing')
+                expiries[asset] = expiry <= now
+        except (ValueError, KeyError, TypeError, AttributeError):
+            current.update(rows=[], audio_available=False)
+            current['processing'].update(stage='waiting_policy', reason='等待有效的原音和全文保留期限')
+            return current
+        if expiries['audio']:
+            current['audio_available'] = False
+        if expiries['transcript']:
+            current['rows'] = []
+            current['audio_available'] = False
+            current['processing'].update(stage='expired', reason='全文已过保留期限')
+        current['audio_available'] = current['audio_available'] and os.path.isfile(current['wav'])
+        return current
+
+    def refresh(self):
+        """Re-read committed catalog snapshots; malformed replacements retain the last good copy.
+
+        Workers publish versioned assets before atomically replacing meeting.json. Reads
+        never run a model or modify answers, and expiry checks run even without file changes.
+        """
+        with self.lock:
+            root = os.path.join(self.folder, 'meetings')
+            try:
+                mids = [mid for mid in sorted(os.listdir(root)) if MEETING.fullmatch(mid)
+                        and os.path.isdir(os.path.join(root, mid))]
+            except FileNotFoundError:
+                mids = []
+            stamps, good = {}, {}
+            for mid in mids:
+                path = os.path.join(root, mid)
+                stamp = tuple(self._file_stamp(os.path.join(path, name)) for name in
+                              ('meeting.json', 'voice.json', 'roles.json', 'audio.wav'))
+                stamps[mid] = stamp
+                if stamp == self._catalog_stamps.get(mid) and mid in self._catalog_good:
+                    good[mid] = self._catalog_good[mid]
+                    continue
+                try:
+                    record = self._load_catalog_meeting(mid, path)
+                    if record is not None:
+                        good[mid] = record
+                except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                    if mid in self._catalog_good:
+                        good[mid] = self._catalog_good[mid]
+            now = dt.datetime.now(dt.timezone.utc)
+            meetings = {mid: self._guard_import(record, now) for mid, record in good.items()}
+            revision = hashlib.sha256(json.dumps(dict(stamps=stamps, visible=[
+                (mid, record['title'], record['processing'], record['audio_available'], len(record['rows']))
+                for mid, record in meetings.items()]), sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            changed = revision != self.catalog_revision
+            self._catalog_stamps, self._catalog_good = stamps, good
+            if changed:
+                self.meetings = meetings
+                self.roles = {}
+                for record in meetings.values():
+                    self.roles.update(record['role_meta'])
+                self.groups = self._voice_groups()
+                self.catalog_revision = revision
+                self._similarity_cache = None
+            return changed
 
     def _recover_similarity(self):
         from label_similarity_review import recover
@@ -237,6 +402,8 @@ class Data:
     def _voice_groups(self):
         groups = {}
         for mid, meeting in self.meetings.items():
+            if meeting.get('imported'):
+                continue
             for row in meeting['rows']:
                 gid = 'voice:' + row['voice'] if row.get('voice') else 'role:' + row['role'] if row.get('role') else None
                 if not gid:
@@ -304,16 +471,19 @@ class Data:
         return {'revision': 0, 'history': [], 'seen': {}, 'approvals': {}, **doc}
 
     def identity_payload(self, name):
-        doc = self._identities(name)
+        from label_shared_identity import read, valid
+        doc = read(self)
         claims = self.claims()
         groups = []
         for gid, group in self.groups.items():
             approval = doc['approvals'].get(gid)
-            valid = bool(approval and approval.get('fingerprint') == group['fingerprint'])
+            current = valid(group, approval, PEOPLE, SPEAKER_OTHER)
             suggestion = gid.split(':', 1)[1] if gid.startswith('voice:') else claims.get(group['title'], {}).get('person')
-            groups.append(dict(group, suggested_person=suggestion, approval=approval, current=valid,
-                count=len(group['members'])))
-        return dict(groups=groups, revision=doc['revision'], can_undo=bool(doc['history']))
+            groups.append(dict(group, suggested_person=suggestion, approval=approval, current=current,
+                count=len(group['members']), shared=True, speaker=approval['speaker'] if current else None,
+                confirmed_by=approval.get('by') if current else None,
+                confirmed_at=approval.get('at') if current else None))
+        return dict(groups=groups, revision=doc['revision'], can_undo=bool(doc['history']), shared=True, scope='team')
 
     @staticmethod
     def _begin(doc, body, field):
@@ -373,24 +543,8 @@ class Data:
                 if before.get(uid) != after.get(uid))
 
     def review_identity(self, name, body):
-        with self.lock:
-            doc = self._identities(name)
-            if not self._begin(doc, body, 'approvals'):
-                return self.identity_payload(name)
-            if body.get('action') != 'undo':
-                group = self.groups.get(body.get('group'))
-                if not group or body.get('fingerprint') != group['fingerprint']:
-                    raise RevisionConflict('Voice group changed')
-                if body.get('action') == 'revoke':
-                    doc['approvals'].pop(group['id'], None)
-                elif body.get('action') == 'confirm' and body.get('speaker') in PEOPLE + list(SPEAKER_OTHER):
-                    doc['approvals'][group['id']] = dict(speaker=body['speaker'], fingerprint=group['fingerprint'],
-                        by=name, at=time.strftime('%Y-%m-%dT%H:%M:%S'), scope='voice_group',
-                        members=[dict(meeting=r['meeting'], id=r['id']) for r in group['members']])
-                else:
-                    raise ValueError('unknown identity action')
-            self._write(self._identity_path(name), doc)
-            return self.identity_payload(name)
+        from label_shared_identity import review
+        return review(self, name, body)
 
     def annotation_state(self, mid):
         """Only validated, source-bound sidecars can supply suggestions. GET never calls a model."""
@@ -519,7 +673,7 @@ class Data:
         ids = {uid for e in selected for uid in e['ids']}
         rows = [r for r in all_rows if r['id'] in ids]
         doc = self._document(mid, name)
-        labels = self.load(mid, name)
+        labels = self.load(mid, name, include_shared=review_mode != 'blind')
         audit = content_audit(rows, {name: labels}, selected)
         by_id = {uid: e for e in selected for uid in e['ids']}
         legacy = {uid: e for e in expressions(all_rows) for uid in e['ids']}
@@ -541,7 +695,10 @@ class Data:
         complete_blind = sum(all(uid not in exposed and blind_labels.get(uid, {}).get('kind')
             and blind_labels[uid].get('kind_source', {}).get('review_mode') == 'blind'
             and (blind_labels[uid]['kind'] != 'task' or blind_labels[uid].get('owner')) for uid in e['ids']) for e in blind_units)
+        from label_curation import transcript
+        curation = transcript(self, mid) if review_mode == 'assisted' else None
         return dict(id=mid, rows=[dict(u, chars=chars(u), fingerprint=row_fingerprint(u)) for u in rows], labels=current,
+            curation=curation,
             stale_ids=list(set(audit['stale_kind_ids'] + audit['stale_speaker_ids'])),
             expressions=audit['expressions'], revision=doc['revision'],
             can_undo=any(entry.get('review_mode') == review_mode for entry in doc['history']),
@@ -693,21 +850,65 @@ class Data:
     def labels_path(self, mid, name):
         return os.path.join(self.folder, "labels", mid, name + ".json")
 
-    def load(self, mid, name):
+    def resolved_speakers(self, mid, name=None):
+        """Confirmed identities only: this person's valid sentence override, then a shared group.
+
+        ``name=None`` resolves only team groups for future AI inputs. Machine
+        voice hints and role claims are never promoted to confirmed identities.
+        Group sources stay ``voice_group`` so they cannot count as independent
+        sentence-level speaker evidence in the existing audit/merge code.
+        """
+        from label_shared_identity import read, valid
+        if name is not None and name not in PEOPLE:
+            raise ValueError('unknown reviewer')
+        with self.lock:
+            doc = read(self)
+            personal = self._document(mid, name)['labels'] if name is not None else {}
+            meeting = self.meetings[mid]
+            originals = {u['id']: u for u in meeting['rows']} if meeting.get('imported') else {}
+            resolved = {}
+            for row in self.rows_with_claims(mid):
+                label = current_label(row, personal.get(row['id'], {}))
+                if label.get('speaker_excluded'):
+                    resolved[row['id']] = dict(speaker_excluded=True)
+                    continue
+                if label.get('speaker'):
+                    resolved[row['id']] = {key: label[key] for key in ('speaker', 'speaker_source') if key in label}
+                    continue
+                if meeting.get('imported'):
+                    original = originals[row['id']]
+                    speaker, source = original.get('confirmed_speaker'), original.get('speaker_source')
+                    if (speaker in PEOPLE and speaker in meeting.get('shared_roster', [])
+                            and isinstance(source, dict) and source.get('mode') == 'backend_manual'
+                            and source.get('fingerprint') == row_fingerprint(row)
+                            and source.get('source_session_id') == meeting.get('source_session_id')
+                            and source.get('source_session_id')
+                            and isinstance(source.get('source_utterance_id'), str)
+                            and source['source_utterance_id']
+                            and source.get('source_utterance_id') in
+                                (original.get('origin_id'), row['id'], row.get('parent'))
+                            and source.get('by') in PEOPLE and isinstance(source.get('at'), str)
+                            and source['at']):
+                        resolved[row['id']] = dict(speaker=speaker, speaker_source=dict(source,
+                            mode='single', origin='backend_manual', id=row['id']))
+                    continue
+                gid = row.get('voice_group_id')
+                approval = doc['approvals'].get(gid)
+                if valid(self.groups.get(gid), approval, PEOPLE, SPEAKER_OTHER):
+                    resolved[row['id']] = dict(speaker=approval['speaker'], speaker_source=dict(
+                        mode='voice_group', id=gid, fingerprint=approval['fingerprint'], shared=True,
+                        scope='team', revision=doc['revision'], by=approval.get('by'), at=approval.get('at')))
+            return resolved
+
+    def load(self, mid, name, include_shared=True):
         labels = self._document(mid, name)['labels']
         exposed = self._exposed(mid, name)
         for uid in exposed:
             if labels.get(uid, {}).get('kind_source', {}).get('review_mode') == 'blind':
                 labels[uid]['kind_source']['review_mode'] = 'ai_assisted'
-        approvals = self._identities(name)['approvals']
-        for row in self.rows_with_claims(mid):
-            gid = row.get('voice_group_id')
-            approval = approvals.get(gid)
-            label = labels.get(row['id'], {})
-            if approval and approval.get('fingerprint') == row.get('voice_group_fingerprint') \
-                    and not label.get('speaker') and not label.get('speaker_excluded'):
-                labels[row['id']] = dict(label, speaker=approval['speaker'], speaker_source=dict(
-                    mode='voice_group', id=gid, fingerprint=approval['fingerprint']))
+        if include_shared:
+            for uid, identity in self.resolved_speakers(mid, name).items():
+                labels[uid] = dict(labels.get(uid, {}), **identity)
         return labels
 
     def save(self, mid, name, raw, revision=None):
@@ -786,19 +987,23 @@ def make_handler(data, secret):
             .replace("__SPOTHER__", json.dumps(SPEAKER_OTHER, ensure_ascii=False))
             .replace("__OWOTHER__", json.dumps(OWNER_OTHER, ensure_ascii=False))
             .replace("__SHORT__", str(SHORT_MS)).replace("__DUPS__", DUPS)).encode()
-    index = {mid: {u["id"]: u for u in m["rows"]} for mid, m in data.meetings.items()}
+    # A marker file in the data folder opens the plain address to the team: no key needed, the page asks who you are.
+    # Delete the marker (and restart) to require personal links again.
+    open_access = os.path.isfile(os.path.join(data.folder, OPEN_MARKER))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
 
-        def send(self, status, body, kind="application/json; charset=utf-8"):
+        def send(self, status, body, kind="application/json; charset=utf-8", cache_control=None):
             self.send_response(status)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "private, max-age=86400" if kind == "audio/wav" else "no-store")
+            self.send_header("Cache-Control", cache_control or
+                             ("private, max-age=86400" if kind == "audio/wav" else "no-store"))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
             self.end_headers()
             self.wfile.write(body)
 
@@ -806,6 +1011,8 @@ def make_handler(data, secret):
             auth = self.headers.get("Authorization", "")
             key = auth[7:] if auth.startswith("Bearer ") else (query.get("k") or [""])[0]
             name = check_key(secret, key)
+            if name is None and open_access:
+                name = TEAM
             if name == TEAM:
                 picked = urllib.parse.unquote(self.headers.get("X-Labeler", ""))
                 return picked if picked in PEOPLE else TEAM
@@ -814,7 +1021,9 @@ def make_handler(data, secret):
         def do_GET(self):
             from label_similarity_review import SimilarityRecoveryError
             try:
-                return self._get()
+                with data.lock:
+                    data.refresh()
+                    return self._get()
             except SimilarityRecoveryError:
                 return self.send(503, b'{"error":"recovery_required"}')
             except OSError:
@@ -833,8 +1042,11 @@ def make_handler(data, secret):
                     return self.send(200, json.dumps({"name": None, "people": PEOPLE}, ensure_ascii=False).encode())
                 meetings = [{"id": mid, "title": m["title"], "count": long_rows(m["rows"]),
                              "minutes": round(m["rows"][-1]["end_ms"] / 60000) if m["rows"] else 0,
-                             "progress": data.progress(mid)} for mid, m in data.meetings.items()]
-                return self.send(200, json.dumps({"name": name, "meetings": meetings}, ensure_ascii=False).encode())
+                             "progress": data.progress(mid), 'processing': m.get('processing', {}),
+                             'audio_available': m.get('audio_available', True),
+                             'imported': m.get('imported', False)} for mid, m in data.meetings.items()]
+                return self.send(200, json.dumps({"name": name, "meetings": meetings,
+                    'catalog_revision': data.catalog_revision}, ensure_ascii=False).encode())
             if url.path == "/api/roles":
                 return self.send(200, json.dumps({"roles": data.roles, "claims": data.claims()}, ensure_ascii=False).encode())
             if url.path == '/api/identity' and name != TEAM:
@@ -849,6 +1061,12 @@ def make_handler(data, secret):
                 except (ValueError, TypeError):
                     return self.send(400, b'{}')
                 return self.send(200, json.dumps(result, ensure_ascii=False).encode())
+            m = re.fullmatch(r"/api/meeting/([0-9]{4})/items", url.path)
+            if m and name != TEAM and m.group(1) in data.meetings:
+                from label_items import items_payload
+                with data.lock:
+                    result = items_payload(data, m.group(1), name)
+                return self.send(200, json.dumps(result, ensure_ascii=False).encode())
             m = re.fullmatch(r"/api/meeting/([0-9]{4})", url.path)
             if m and name == TEAM:
                 return self.send(400, b'{"error":"who"}')
@@ -859,10 +1077,24 @@ def make_handler(data, secret):
                     return self.send(400, b'{}')
                 return self.send(200, json.dumps(data.meeting_payload(mid, name, mode), ensure_ascii=False).encode())
             m = re.fullmatch(r"/clip/([0-9]{4})/([A-Za-z0-9_-]{1,40})\.wav", url.path)
-            if m and m.group(2) in index.get(m.group(1), {}):
-                u = index[m.group(1)][m.group(2)]
+            if m and m.group(1) in data.meetings:
+                meeting = data.meetings[m.group(1)]
+                if not meeting.get('audio_available', True):
+                    return self.send(410, b'{"error":"audio_unavailable"}')
+                index = {u['id']: u for u in meeting['rows']}
+                if m.group(2) not in index:
+                    return self.send(404, b'{}')
+                u = index[m.group(2)]
                 pad = 0 if (query.get("pad") or [""])[0] == "0" else 300
                 end_ms = u['end_ms']
+                until = (query.get('until') or [''])[0]
+                if until:
+                    # Item evidence: a contiguous span of original sentences, at most three minutes.
+                    order = list(index)
+                    if until not in index or order.index(until) < order.index(u['id']) \
+                            or index[until]['end_ms'] - u['start_ms'] > 180_000:
+                        return self.send(400, b'{}')
+                    end_ms = index[until]['end_ms']
                 through = (query.get('through') or [''])[0]
                 if through:
                     expr = next((e for e in data.content_units(m.group(1))
@@ -870,13 +1102,16 @@ def make_handler(data, secret):
                     if not expr:
                         return self.send(400, b'{}')
                     end_ms = expr['end_ms']
-                return self.send(200, clip_wav(data.meetings[m.group(1)]["wav"], u["start_ms"], end_ms, pad), "audio/wav")
+                return self.send(200, clip_wav(meeting['wav'], u['start_ms'], end_ms, pad), 'audio/wav',
+                    cache_control='no-store' if meeting.get('imported') or meeting.get('source_managed') else None)
             self.send(404, b"{}")
 
         def do_POST(self):
             from label_similarity_review import SimilarityRecoveryError
             try:
-                return self._post()
+                with data.lock:
+                    data.refresh()
+                    return self._post()
             except SimilarityRecoveryError:
                 return self.send(503, b'{"error":"recovery_required"}')
             except OSError:
@@ -902,6 +1137,21 @@ def make_handler(data, secret):
                 except SimilarityRecoveryError:
                     return self.send(503, b'{"error":"recovery_required"}')
                 except (ValueError, TypeError, AttributeError):
+                    return self.send(400, b'{}')
+                return self.send(200, json.dumps(result, ensure_ascii=False).encode())
+            items = re.fullmatch(r'/api/meeting/([0-9]{4})/items/review', url.path)
+            if items and items.group(1) in data.meetings:
+                from label_items import review_items
+                if not 0 < size <= 65536:
+                    return self.send(400, b'{}')
+                try:
+                    body = json.loads(self.rfile.read(size))
+                    if not isinstance(body, dict):
+                        raise ValueError('object required')
+                    result = review_items(data, items.group(1), name, body)
+                except RevisionConflict:
+                    return self.send(409, b'{"error":"changed"}')
+                except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
                     return self.send(400, b'{}')
                 return self.send(200, json.dumps(result, ensure_ascii=False).encode())
             review = re.fullmatch(r'/api/meeting/([0-9]{4})/review', url.path)

@@ -38,7 +38,7 @@ class RetainedTaskEvidenceTest {
         }
         val row = RetainedTaskEvidence.select(cleaned, "meeting-1", listOf("u1"))!!.single()
         assertEquals("周五前发方案", row.text)
-        assertTrue(cleaned.getJSONArray("utterances").isEmpty)
+        assertTrue(cleaned.getJSONArray("utterances").length() == 0)
         cleaned.getJSONArray("retained_evidence").getJSONObject(0).put("confirmed", false)
         assertNull(RetainedTaskEvidence.select(cleaned, "meeting-1", listOf("u1")))
     }

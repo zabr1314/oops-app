@@ -188,9 +188,9 @@ html, body { background: var(--canvas); }
 }
 .oops-root .chip.selected, .oops-root .chip[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); font-weight: 700; }
 /* 设计语言 Chip: a chosen filter or person gets a check that pops in. */
-.oops-root .chip[aria-pressed="true"], .oops-root .chip.selected:is([data-act="self-set"], [data-act="speaker-set"], [data-act="project-set"], [data-act="review-owner"], [data-act="choose-owner"]) { padding-left: 12px; }
+.oops-root .chip[aria-pressed="true"], .oops-root .chip.selected:is([data-act="self-set"], [data-act="speaker-set"], [data-act="project-set"], [data-act="review-owner"], [data-act="choose-owner"], [data-act="item-owner"]) { padding-left: 12px; }
 .oops-root .chip[aria-pressed="true"]::before,
-.oops-root .chip.selected:is([data-act="self-set"], [data-act="speaker-set"], [data-act="project-set"], [data-act="review-owner"], [data-act="choose-owner"])::before {
+.oops-root .chip.selected:is([data-act="self-set"], [data-act="speaker-set"], [data-act="project-set"], [data-act="review-owner"], [data-act="choose-owner"], [data-act="item-owner"])::before {
   content: ""; flex: none; width: 14px; height: 14px; background: currentColor;
   -webkit-mask: url(icons/check-bold.svg) center / contain no-repeat; mask: url(icons/check-bold.svg) center / contain no-repeat;
   animation: oo-pop-in var(--dur-slow) var(--ease-bounce) 1;
@@ -669,3 +669,13 @@ html, body { background: var(--canvas); }
   background: linear-gradient(to top, var(--canvas) 40%, rgb(242 239 255 / 0) 100%);
 }
 .oops-root.has-recording-controls::after { height: calc(var(--mobile-safe-area-height, 0px) + 124px); background: linear-gradient(to top, var(--canvas) 86%, rgb(242 239 255 / 0) 100%); }
+
+/* ---------- after-meeting items and review-site candidates (PR #11, merged after the redesign) ----------
+   app.css keeps their layout; here only their hard-coded tints move onto the design tokens. */
+.oops-root .parsed-evidence blockquote { border-left-color: var(--brand-mist); background: var(--canvas); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.oops-root .parsed-decision-quote { background: var(--canvas); border-radius: var(--radius-sm); color: var(--ink-2); }
+.oops-root .parsed-source-state { background: var(--warning-soft); }
+.oops-root .meeting-work-entry { border-color: var(--line); background: var(--primary-soft); border-radius: var(--radius-md); }
+.oops-root .parsed-source-heading, .oops-root .parsed-task-card .parsed-owner { color: var(--primary-text); }
+.oops-root .session-items h3 { color: var(--ink-3); font-weight: 700; }
+.oops-root .item-title { color: var(--ink); font-weight: 800; }

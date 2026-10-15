@@ -73,10 +73,11 @@ def vote(runs):
     out = dict(base)
     out["decisions"] = vote_items([r["decisions"] for r in runs], "text", quorum)
     out["actions"] = vote_items([r["actions"] for r in runs], "task", quorum)
+    out["undecided"] = vote_items([r.get("undecided") or [] for r in runs], "topic", quorum)
     out["open_questions"] = vote_items([r["open_questions"] for r in runs], "question", quorum)
     out["follow_ups"] = vote_items([r["follow_ups"] for r in runs], "title", quorum)
     substantive = sum(1 for r in runs if r["substantive"]) >= quorum
-    useful = out["decisions"] or out["actions"] or out["topics"] or out["open_questions"] or out["follow_ups"]
+    useful = out["decisions"] or out["actions"] or out["topics"] or out["undecided"] or out["open_questions"] or out["follow_ups"]
     out["substantive"] = bool(useful) and substantive
     out["overview"] = base["overview"] if out["substantive"] else ""
     out["runs"] = len(runs)

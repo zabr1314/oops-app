@@ -10,6 +10,8 @@ import os
 import re
 import urllib.request
 
+from item_quality import assess_item
+
 DEFAULT_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 
@@ -109,9 +111,29 @@ def verify(raw, transcript, target_id, clause=None):
     if role == "named" and not name:
         role = "unknown"
     what = str(raw.get("what") or "").strip()[:60]
-    is_task = raw.get("is_task") is True and bool(what) and bool(quote)
-    return {"is_task": is_task, "what": what, "task_quote": quote, "task_offset": locate(quote, target), "owner_role": role,
-            "owner_name": name, "due_raw": due, "resolutions": resolutions, "missing": list(dict.fromkeys(missing))}
+    offset = locate(quote, target)
+    literal = ''
+    if offset is not None:
+        # Preserve punctuation and the exact scope in the source, including when
+        # the verified model quote omitted punctuation between words.
+        remaining = len(_norm(quote))
+        end = offset
+        while remaining > 0 and end < len(target):
+            remaining -= len(_norm(target[end]))
+            end += 1
+        literal = target[offset:end]
+    evidence = ([dict(id=target_id, text=literal)] if literal else [])
+    evidence.extend(dict(id=e['id'], text=e['quote'], support_only=True)
+                    for item in resolutions for e in item['evidence'])
+    quality = assess_item(what, evidence, transcript)
+    is_task = raw.get("is_task") is True and bool(what) and bool(quote) and offset is not None
+    if quality['status'] == 'rejected':
+        is_task = False
+    elif is_task and quality['status'] == 'needs_review':
+        missing.extend(quality.get('issues') or ['原话中的任务承诺需核对'])
+    return {"is_task": is_task, "what": what, "task_quote": quote, "task_offset": offset, "owner_role": role,
+            "owner_name": name, "due_raw": due, "resolutions": resolutions, "missing": list(dict.fromkeys(missing)),
+            "quality": quality}
 
 
 def locate(quote, text):
@@ -141,6 +163,8 @@ def owner_for(result, clause_speaker, participants):
 def grade(result, owner):
     if not result["is_task"]:
         return "not_task"
+    if result.get('quality', {}).get('status') == 'needs_review':
+        return 'needs_review'
     return "complete" if owner and not result["missing"] else "needs_info"
 
 

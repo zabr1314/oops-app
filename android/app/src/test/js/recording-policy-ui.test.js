@@ -8,7 +8,7 @@ function ui() {
   const elements=new Map(),messages=[];
   const el=id=>{if(!elements.has(id)){const node={id,dataset:{},children:[],renderVersion:0,style:{setProperty(){}},classList:{toggle(){},add(){},remove(){}},setAttribute(){},appendChild(){},insertBefore(){},querySelectorAll:()=>[],listeners:{},addEventListener(t,fn){(this.listeners[t]||=[]).push(fn);}};let html='';Object.defineProperty(node,'innerHTML',{get:()=>html,set:value=>{html=value;node.renderVersion++;}});elements.set(id,node);}return elements.get(id);};
   const native={postMessage(raw){messages.push(JSON.parse(raw));}};
-  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../main/assets/web/app.js'),'utf8'),{window:{OopsNative:native},location:{search:''},URLSearchParams,document:{getElementById:el,createElement:()=>el(Symbol()),querySelectorAll:()=>[],documentElement:{dataset:{}}},console,setTimeout:()=>1,clearTimeout(){}});
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../main/assets/web/app.js'),'utf8'),{window:{OopsNative:native,addEventListener(){}},location:{search:''},URLSearchParams,document:{addEventListener(){},getElementById:el,createElement:()=>el(Symbol()),querySelectorAll:()=>[],documentElement:{dataset:{}}},console,setTimeout:()=>1,clearTimeout(){}});
   const receive=(type,payload)=>native.onmessage({data:JSON.stringify({type,payload})});
   const click=(act,data={},sheet=false)=>el(sheet?'sheet':'root').listeners.click.forEach(fn=>fn({stopPropagation(){},target:{closest(sel){return sel==='#sheet'?null:{dataset:{act,...data}};}}}));
   // Browser keeps the original event path after an action replaces sheet markup.

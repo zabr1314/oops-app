@@ -9,6 +9,7 @@ import argparse
 import difflib
 import gzip
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -65,20 +66,35 @@ def decode(data):
         raise ValueError("invalid ASR binary response")
     kind, flags, compression = data[1] >> 4, data[1] & 15, data[2] & 15
     offset = (data[0] & 15) * 4
+    if data[0] >> 4 != 1 or offset < 4 or offset > len(data) - 4 or flags not in range(4) or compression not in (0, 1):
+        raise ValueError('invalid ASR response header')
     if kind == 15:
+        if len(data) - offset < 8:
+            raise ValueError('truncated ASR error header')
         code = struct.unpack_from(">I", data, offset)[0]
         size = struct.unpack_from(">I", data, offset + 4)[0]
-        payload = data[offset + 8:offset + 8 + size]
-        if compression == 1:
+        if size != len(data) - offset - 8:
+            raise ValueError('invalid ASR error size')
+        payload = data[offset + 8:]
+        if compression == 1 and payload:
             payload = gzip.decompress(payload)
         raise RuntimeError(f"ASR provider error {code}: " + payload.decode(errors="replace")[:300])
+    if kind != 9:
+        raise ValueError('unsupported ASR response type')
     if flags & 1:
         offset += 4
+    if len(data) - offset < 4:
+        raise ValueError('truncated ASR response header')
     size = struct.unpack_from(">I", data, offset)[0]
-    payload = data[offset + 4:offset + 4 + size]
-    if compression == 1:
+    if size != len(data) - offset - 4:
+        raise ValueError('invalid ASR response size')
+    payload = data[offset + 4:]
+    if compression == 1 and payload:
         payload = gzip.decompress(payload)
-    return json.loads(payload), bool(flags & 2)
+    reply = json.loads(payload) if payload else {}
+    if not isinstance(reply, dict):
+        raise ValueError('ASR response is not an object')
+    return reply, bool(flags & 2)
 
 
 def clean(text):
@@ -126,8 +142,93 @@ def summarize(utterances):
             "rows": rows}
 
 
+class ProbeStream:
+    """One socket, one EOS, one terminal outcome. Never reconnects or resends audio."""
+    def __init__(self, ws, secrets=()):
+        self.ws, self.secrets = ws, tuple(secret for secret in secrets if secret)
+        self.lock = threading.RLock()
+        self.done = threading.Event()
+        self.finals, self.seen, self.errors = [], set(), []
+        self.eos_attempted, self.eos_sent, self.server_last, self.termination = False, False, False, None
+        self.skipped_empty = 0
+
+    def fail(self, detail, termination):
+        with self.lock:
+            if self.done.is_set():
+                return
+            for secret in self.secrets:
+                detail = detail.replace(secret, '[redacted]')
+            self.errors.append(detail)
+            self.termination = termination
+            self.done.set()
+
+    def send_audio(self, pcm):
+        with self.lock:
+            if self.done.is_set() or self.eos_attempted:
+                return False
+            sent = self.ws.send_binary(frame(2, pcm))
+            if sent is False or type(sent) is int and sent <= 0:
+                raise RuntimeError('ASR audio send failed')
+            return True
+
+    def finish(self, final_sequence=False):
+        with self.lock:
+            if self.done.is_set() or self.eos_attempted:
+                return
+            # Audio samples remain exact. This separate control packet carries no
+            # additional audio/silence and is submitted once, including on empty input.
+            self.eos_attempted = True
+            sent = self.ws.send_binary(frame(2, b'', last=True, final_sequence=final_sequence))
+            if sent is False or type(sent) is int and sent <= 0:
+                raise RuntimeError('ASR EOS send failed')
+            self.eos_sent = True
+
+    def receive(self, raw):
+        reply, last = decode(raw)
+        with self.lock:
+            if self.done.is_set():
+                return reply
+            utterances = (reply.get('result') or {}).get('utterances', [])
+            if not isinstance(utterances, list):
+                raise ValueError('invalid ASR utterances')
+            for utterance in utterances:
+                if not isinstance(utterance, dict):
+                    raise ValueError('invalid ASR utterance')
+                text = utterance.get('text')
+                if not isinstance(text, str) or not text.strip():
+                    if utterance.get('definite'):
+                        self.skipped_empty += 1
+                    continue
+                key = (utterance.get('start_time', 0), utterance.get('end_time', 0), text)
+                if utterance.get('definite') and key not in self.seen:
+                    self.finals.append(utterance)
+                    self.seen.add(key)
+            if last:
+                self.server_last = True
+                if self.eos_sent:
+                    self.termination = 'acknowledged'
+                    self.done.set()
+                else:
+                    self.fail('ASR ended before the explicit EOS; completeness is unconfirmed', 'premature_server_end')
+        return reply
+
+    def wait_for_finish(self, timeout):
+        if not self.done.wait(timeout):
+            self.fail('ASR finish acknowledgement timed out; captured finals retained', 'finish_timeout')
+
+
 def probe(path, args):
     import websocket
+    # Validate before opening a chargeable connection.
+    with wave.open(str(path)) as audio:
+        if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth()) != (16000, 1, 2):
+            raise ValueError('requires 16 kHz mono s16le WAV')
+        total_samples = audio.getnframes()
+    limit = min(total_samples, int(args.seconds * 16000)) if args.seconds else total_samples
+    dest = Path(args.output) / path.stem
+    dest.mkdir(parents=True, exist_ok=True)
+    if any((dest / name).exists() for name in ('responses.jsonl', 'finals.json', 'summary.json')):
+        raise FileExistsError('Probe evidence already exists; use a new output directory, no automatic paid retry')
     creds = credentials(ROOT / "android/local.properties")
     headers = {"X-Api-Resource-Id": creds["VOLC_RESOURCE_ID"] or "volc.seedasr.sauc.duration",
                "X-Api-Connect-Id": str(uuid.uuid4())}
@@ -137,76 +238,70 @@ def probe(path, args):
         headers.update({"X-Api-App-Key": creds["VOLC_APP_ID"], "X-Api-Access-Key": creds["VOLC_ACCESS_TOKEN"]})
     else:
         raise RuntimeError("ASR credentials are not configured")
-    dest = Path(args.output) / path.stem
-    dest.mkdir(parents=True, exist_ok=True)
-    finals, seen, errors, finished, server_last = [], set(), [], threading.Event(), []
     ws = websocket.create_connection(ENDPOINT, header=headers, timeout=30, enable_multithread=True)
-    ws.send_binary(frame(1, gzip.compress(json.dumps(request_json(not getattr(args, 'no_hotwords', False), getattr(args, 'end_window_size', None)), ensure_ascii=False).encode()), compressed=True))
+    stream = ProbeStream(ws, creds.values())
 
     def receive():
         try:
             with (dest / "responses.jsonl").open("w") as out:
-                while not finished.is_set():
+                while not stream.done.is_set():
                     raw = ws.recv()
                     if not raw:
+                        stream.fail('ASR socket closed without a terminal acknowledgement', 'closed_without_ack')
                         break
-                    reply, last = decode(raw)
+                    reply = stream.receive(raw)
                     out.write(json.dumps(reply, ensure_ascii=False) + "\n")
                     out.flush()
-                    for u in (reply.get("result") or {}).get("utterances", []):
-                        key = (u.get("start_time", 0), u.get("end_time", 0), u.get("text"))
-                        if u.get("definite") and key not in seen:
-                            finals.append(u)
-                            seen.add(key)
-                    if last:
-                        server_last.append(True)
-                        break
         except Exception as exc:
             detail = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-            for secret in creds.values():
-                if secret:
-                    detail = detail.replace(secret, "[redacted]")
-            errors.append(detail)
-        finally:
-            finished.set()
+            stream.fail(detail, 'provider_error' if isinstance(exc, RuntimeError) else 'receive_error')
 
     reader = threading.Thread(target=receive, daemon=True)
-    reader.start()
     sent_samples = 0
     try:
+        ws.send_binary(frame(1, gzip.compress(json.dumps(request_json(not getattr(args, 'no_hotwords', False), getattr(args, 'end_window_size', None)), ensure_ascii=False).encode()), compressed=True))
+        reader.start()
         with wave.open(str(path)) as audio:
-            if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth()) != (16000, 1, 2):
-                raise ValueError("requires 16 kHz mono s16le WAV")
-            limit = min(audio.getnframes(), int(args.seconds * 16000)) if args.seconds else audio.getnframes()
             started, progress_at = time.monotonic(), time.monotonic()
-            while sent_samples < limit and not finished.is_set():
+            while sent_samples < limit and not stream.done.is_set():
                 data = audio.readframes(min(3200, limit - sent_samples))
                 if not data:
                     break
-                is_last = sent_samples + len(data) // 2 == limit
-                # Very short tail frames can leave the provider waiting for another packet.
-                # Pad only the final transport packet with silence; original sample count stays exact.
-                payload = data.ljust(6400, b"\0") if is_last else data
-                ws.send_binary(frame(2, payload, last=is_last, final_sequence=args.final_sequence))
+                if not stream.send_audio(data):
+                    break
                 sent_samples += len(data) // 2
                 wait = started + sent_samples / 16000 / args.speed - time.monotonic()
                 if wait > 0:
                     time.sleep(wait)
                 if time.monotonic() - progress_at >= 30:
                     print(json.dumps({"recording": path.name, "sent_seconds": round(sent_samples / 16000),
-                                      "final_count": len(finals)}), flush=True)
+                                      "final_count": len(stream.finals)}), flush=True)
                     progress_at = time.monotonic()
-            reader.join(30)
+            if sent_samples == limit and not stream.done.is_set():
+                stream.finish(final_sequence=getattr(args, 'final_sequence', False))
+            stream.wait_for_finish(getattr(args, 'finish_timeout', 30.0))
+    except Exception as exc:
+        detail = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        stream.fail(detail, 'send_error')
     finally:
-        finished.set()
-        ws.close()
-        reader.join(2)
+        try:
+            ws.close()
+        except Exception:
+            stream.fail('ASR socket cleanup failed; captured finals retained', 'close_error')
+        finally:
+            if reader.ident is not None:
+                reader.join(2)
+    finals = stream.finals
     finals.sort(key=lambda u: (u.get("start_time", 0), u.get("end_time", 0)))
     (dest / "finals.json").write_text(json.dumps(finals, ensure_ascii=False, indent=2) + "\n")
     report = {"recording": path.name, "sent_seconds": round(sent_samples / 16000, 3),
-              "complete": not args.seconds and sent_samples == limit and not errors and bool(server_last),
-              "server_last_received": bool(server_last),
-              "transport_errors": errors, **summarize(finals)}
+              "complete": not args.seconds and sent_samples == limit and not stream.errors
+                          and stream.eos_sent and stream.termination == 'acknowledged',
+              "eos_attempted": stream.eos_attempted, "eos_sent": stream.eos_sent, "termination": stream.termination,
+              "all_samples_sent": sent_samples == limit, "total_samples": total_samples,
+              "server_last_received": stream.server_last,
+              "skipped_empty_final_count": stream.skipped_empty,
+              "transport_errors": stream.errors, **summarize(finals)}
     (dest / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({k: v for k, v in report.items() if k != "rows"}, ensure_ascii=False), flush=True)
     return report
@@ -221,9 +316,11 @@ def main():
     parser.add_argument("--no-hotwords", action="store_true", help="omit the app's hotwords (the pre-2026-10-08 probe behaviour)")
     parser.add_argument("--end-window-size", type=int, help="sentence-ending silence in ms; unset = provider default, as in the app")
     parser.add_argument("--final-sequence", action="store_true", help="final negative sequence packet for transport diagnosis")
+    parser.add_argument('--finish-timeout', type=float, default=30.0, help='seconds to await provider terminal acknowledgement after one empty EOS')
     args = parser.parse_args()
-    if args.speed <= 0 or (args.seconds is not None and args.seconds <= 0):
-        parser.error("speed and seconds must be positive")
+    if (not math.isfinite(args.speed) or args.speed <= 0 or not math.isfinite(args.finish_timeout)
+            or args.finish_timeout <= 0 or args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds <= 0)):
+        parser.error('speed, seconds and finish-timeout must be finite and positive')
     paths = args.wav or [p for p in sorted((ROOT / "test-media").glob("*-16k-mono.wav"))
                          if "_0236_" in p.name or "_0238_" in p.name]
     if not paths:
