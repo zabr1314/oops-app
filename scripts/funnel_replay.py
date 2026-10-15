@@ -24,7 +24,9 @@ sys.path.insert(0, HERE)
 import filler_report  # noqa: E402
 import local_backend  # noqa: E402
 import question_watch  # noqa: E402
-from item_quality import assess_item  # noqa: E402
+import minutes_items  # noqa: E402
+from item_quality import assess_item, bounded_context  # noqa: E402
+from meeting_features import review_queue  # noqa: E402
 
 EXAMPLE = os.path.join(HERE, "funnel_example_replay.json")
 SAMPLE_OUT = os.path.join(ROOT, "public", "funnel-sample.json")
@@ -168,6 +170,40 @@ def outcome(forks, tag):
 
 
 
+QUALITY = {"accepted": "通过", "needs_review": "待人核对", "rejected": "否决"}
+
+
+def post_meeting(replay):
+    """After the meeting: DeepSeek's minutes → items (minutes_items) → rules check (item_quality) → review order
+    (review_queue). Only the minutes come from a model; the other three steps are the backend's own code."""
+    event = next((e for e in replay.get("events", []) if e.get("kind") == "minutes" and not e.get("error")
+                  and isinstance(e.get("minutes"), dict)), None)
+    if not event:
+        return None
+    minutes = event["minutes"]
+    rows = [dict(id=u["id"], text=u["text"]) for u in replay["utterances"]]
+    by_id = {r["id"]: r for r in rows}
+    items = []
+    for item in minutes_items.build(minutes):
+        ids = [i for i in item["ids"] if i in by_id]
+        if not ids:
+            continue
+        evidence = [by_id[i] for i in ids]
+        check = assess_item(item["title"], evidence, bounded_context(rows, ids), kind=item["kind"],
+                            detail=item.get("detail", ""))
+        items.append(dict(id=item["id"], kind=item["kind"], title=item["title"], ids=ids,
+                          owner=item.get("owner_hint") or "", due=item.get("due") or "",
+                          quality=dict(status=check["status"], label=QUALITY.get(check["status"], check["status"]),
+                                       reason=VETO.get(check["reason"], "有原话依据" if check["status"] == "accepted"
+                                                       else check["reason"]))))
+    cited = dict(tasks=[i for it in items if it["kind"] == "task" for i in it["ids"]],
+                 decisions=[i for it in items if it["kind"] == "decision" for i in it["ids"]])
+    queue = review_queue(replay["utterances"], cited)
+    return dict(latency_ms=event.get("latency_ms"), overview=minutes.get("overview") or "",
+                topics=[t.get("topic") for t in minutes.get("topics") or [] if t.get("topic")],
+                items=items, queue=queue)
+
+
 def build(replay, label, kind, note=""):
     events = {}
     for e in replay.get("events", []):
@@ -196,7 +232,7 @@ def build(replay, label, kind, note=""):
                 "overview") or "纪要已生成", ms=e.get("latency_ms"), settled=True)))
     last = max((u["end_ms"] for u in replay["utterances"]), default=0)
     return dict(version=1, source=dict(kind=kind, label=label, note=note, sentences=len(sentences),
-                                       duration_ms=last),
+                                       duration_ms=last), post=post_meeting(replay),
                 thresholds=dict(settle=SETTLE, tag_floor=TAG_FLOOR), sentences=sentences, session=session,
                 lens=lens)
 
