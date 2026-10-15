@@ -65,7 +65,7 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/index.html", import.meta.url));
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
-  for (const path of ["native-flow.html", "native-flow.js", "native-flow.css", "funnel.html", "funnel.js", "funnel-after.js", "funnel.css", "funnel-sample.json", "funnel-studio.js", "funnel-studio.css", "funnel-after-studio.js", "funnel-after-studio.css", "funnel-web.js", "funnel-crawler.js",
+  for (const path of ["native-flow.html", "native-flow.js", "native-flow.css", "funnel.html", "funnel.js", "funnel-after.js", "funnel.css", "funnel-sample.json", "funnel-studio.js", "funnel-studio.css", "funnel-after-studio.js", "funnel-after-studio.css", "funnel-web.js", "funnel-crawler.js", "funnel-dashboard.js", ...[1, 2, 3, 4, 5, 6].map(n => `funnel-desks/desk-${n}.png`),
     "native-preview/index.html", "native-preview/app.js", "native-preview/bridge-mock.js", "native-preview/source-manifest.json",
     ...["list-failure", "review-failure", "minutes-ready", "minutes-pending", "minutes-source-changed", "minutes-failure"].map(name => `native-shots/${name}.jpg`)]) {
     await access(new URL(`../dist/client/${path}`, import.meta.url));

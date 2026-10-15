@@ -85,3 +85,32 @@ test('a local replay file can be opened only on this machine and only from ./dat
   assert.ok(js.includes(String.raw`/^[\w-]+\.json$/.test(name)`));
   assert.ok(js.includes("fetch('./data/' + name"));
 });
+
+const dashContext = vm.createContext({ window: { OopsWeb: context.window.OopsWeb } });
+vm.runInContext(readFileSync('public/funnel-dashboard.js', 'utf8'), dashContext, { filename: 'public/funnel-dashboard.js' });
+const { deriveAgents, trend, rules } = dashContext.window.OopsDashboard;
+
+test('agent cards count only saved steps already reached and stay quiet when paused', () => {
+  const row = replay(0).sentences[index];
+  const early = deriveAgents(replay(row.end_ms + 300, { playing: false }));
+  const all = deriveAgents(replay(1e9, { playing: false }));
+  assert.ok(early.jev.count <= all.jev.count);
+  assert.equal(all.jev.count, fixture.sentences.reduce((n, s) => n + s.forks.filter(f => f.layer === 'jev').length, 0));
+  assert.ok(Object.values(all).every(a => !a.active));
+  assert.equal(deriveAgents({ data: { sentences: [] } }).chief.value, '—');
+});
+
+test('the curve plots only reached Jev probabilities and never a missing one', () => {
+  const t = trend(replay(1e9));
+  const saved = fixture.sentences.flatMap(s => s.forks).filter(f => f.layer === 'jev' && Number.isFinite(f.p)).length;
+  assert.equal(t.points.length, saved);
+  assert.ok(t.points.every(p => Number.isFinite(p.p)));
+  assert.equal(trend(replay(0)).points.length, 0);
+});
+
+test('the rules panel shows the current sentence path and where it ended only once done', () => {
+  const row = replay(0).sentences[index];
+  assert.ok(rules(replay(row.end_ms), index).path.every(step => step.state === 'idle'));
+  const done = rules(replay(row.doneAt), index);
+  assert.equal(done.path.filter(step => step.state === 'end').length, 1);
+});

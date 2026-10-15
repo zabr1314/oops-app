@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="./funnel-after-studio.css">
   <script src="./funnel-web.js" defer></script>
   <script src="./funnel-crawler.js" defer></script>
+  <script src="./funnel-dashboard.js" defer></script>
   <script src="./funnel.js" defer></script>
   <script src="./funnel-after.js" defer></script>
   <script src="./funnel-studio.js" defer></script>
@@ -28,22 +29,40 @@
       <div class="replay-controls"><button id="play" type="button" class="btn primary">▶ 播放</button><button id="after-play" type="button" class="btn primary">▶ 播放</button><input id="scrub" type="range" min="0" max="1000" value="0" aria-label="回放进度"><span id="clock" class="clock">00:00 / 00:00</span><span id="studio-speed" class="speed-indicator">×30</span><div class="after-studio-progress"><span id="after-studio-phase">成果回放</span><input id="after-studio-scrub" type="range" min="0" max="1000" value="0" aria-label="会后成果回放进度"><span id="after-studio-clock">00:00 / 00:00</span></div></div>
     </div>
     <div id="mode-live" role="tabpanel" aria-labelledby="tab-live">
-      <section id="studio" class="studio-workspace" aria-label="会中逐句判断">
-        <section class="sentence-tray" aria-label="会议原话"><div class="tray-heading"><span>原话 <b id="studio-sentence-count">0</b></span><button id="studio-follow" class="text-button" type="button" hidden>回到播放位置</button></div><ol id="studio-sentences" class="studio-sentences"></ol></section>
-        <div id="studio-room" class="web-stage">
-          <div class="web-head"><span id="studio-moment">已保存的处理过程</span><span id="studio-stats" class="web-stats"></span></div>
-          <button class="current-paper" type="button" aria-label="查看当前原话的判断"><span class="paper-label"><span id="studio-current-label">当前原话</span><span id="studio-current-time">—</span></span><span id="studio-current-text" class="paper-text">选一句原话，看 Jev 怎么判断。</span></button>
-          <canvas id="studio-web" class="web-canvas" aria-hidden="true"></canvas>
-          <ul class="web-legend" aria-label="线的颜色"><li class="lg-code">规则</li><li class="lg-jev">Jev</li><li class="lg-model">生成</li><li class="lg-you">你</li><li class="lg-note">线越长，已存概率越高 · 虚线为无概率记录</li></ul>
-          <div class="relay" aria-label="Oops 接力">
-            <button class="workstation" data-station="listen" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>聆听</b><small data-state="listen">等待来源</small></button>
-            <button class="workstation" data-station="judge" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>判断</b><small data-state="judge">等待来源</small></button>
-            <button class="workstation" data-station="query" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>查询</b><small data-state="query">等待来源</small></button>
-            <button class="workstation" data-station="minutes" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>纪要</b><small data-state="minutes">等待来源</small></button>
-            <button class="workstation" data-station="delivery" type="button"><img src="./brand/mascot.png" alt="" draggable="false"><b>飞书</b><small data-state="delivery">等待来源</small></button>
+      <section id="studio" class="dash" aria-label="会中逐句判断">
+        <section class="agents" aria-label="各只 Oops 的状态">
+          <article class="agent agent-chief" data-agent="chief"><header><b>主控</b><span class="agent-role">Oops · 只读回放</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+          <article class="agent agent-listen" data-agent="listen"><header><b>聆听</b><span class="agent-role">把声音变成原话</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+          <article class="agent agent-code" data-agent="code"><header><b>规则</b><span class="agent-role">本地代码，不调模型</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+          <article class="agent agent-jev" data-agent="jev"><header><b>判断</b><span class="agent-role">Jev 逐句分类</span><span class="agent-asks">问 JEV</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+          <article class="agent agent-model" data-agent="model"><header><b>生成</b><span class="agent-role">DeepSeek 已存记录</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+          <article class="agent agent-you" data-agent="you"><header><b>你</b><span class="agent-role">只问需要你决定的</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+          <article class="agent agent-minutes" data-agent="minutes"><header><b>纪要</b><span class="agent-role">会后整理事项</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+          <article class="agent agent-delivery" data-agent="delivery"><header><b>飞书</b><span class="agent-role">核对后再送达</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
+        </section>
+        <section id="studio-room" class="room" aria-label="Oops 工作室">
+          <div class="room-strip"><span><i class="room-led"></i>OOPS WORKROOM</span><span id="studio-moment">已保存的处理过程</span><span id="studio-stats" class="web-stats"></span></div>
+          <div class="monitor">
+            <button class="current-paper" type="button" aria-label="查看当前原话的判断"><span class="paper-label"><span id="studio-current-label">当前原话</span><span id="studio-current-time">—</span></span><span id="studio-current-text" class="paper-text">选一句原话，看 Jev 怎么判断。</span></button>
+            <canvas id="studio-web" class="web-canvas" aria-hidden="true"></canvas>
+            <ul class="web-legend" aria-label="线的颜色"><li class="lg-code">规则</li><li class="lg-jev">Jev</li><li class="lg-model">生成</li><li class="lg-you">你</li><li class="lg-note">线越长，已存概率越高 · 虚线为无概率记录</li></ul>
           </div>
+          <div class="floor">
+            <button class="desk desk-listen" data-desk="listen" data-station="listen" type="button"><img class="desk-art" src="./funnel-desks/desk-1.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>聆听 Oops</b><small data-state="listen">等待来源</small></span></button>
+            <button class="desk desk-code" data-desk="code" type="button"><img class="desk-art" src="./funnel-desks/desk-2.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>规则 Oops</b><small data-desk-state="code">本地规则</small></span></button>
+            <button class="desk desk-judge" data-desk="judge" data-station="judge" type="button"><img class="desk-art" src="./funnel-desks/desk-3.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>判断 Oops</b><small data-state="judge">等待来源</small></span></button>
+            <button class="desk desk-query" data-desk="query" data-station="query" type="button"><img class="desk-art" src="./funnel-desks/desk-4.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>查询 Oops</b><small data-state="query">等待来源</small></span></button>
+            <button class="desk desk-minutes" data-desk="minutes" data-station="minutes" type="button"><img class="desk-art" src="./funnel-desks/desk-5.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>纪要 Oops</b><small data-state="minutes">等待来源</small></span></button>
+            <button class="desk desk-delivery" data-desk="delivery" data-station="delivery" type="button"><img class="desk-art" src="./funnel-desks/desk-6.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>飞书 Oops</b><small data-state="delivery">等待来源</small></span></button>
+          </div>
+          <span class="room-note">参考布景 · 角色动作为回放展示，不代表实时运行</span>
+        </section>
+        <section class="trend" aria-label="Jev 已存概率曲线"><div class="panel-head"><b>JEV · 已存概率</b><span id="trend-label">尚未回放到判断</span></div><canvas id="trend-canvas" aria-hidden="true"></canvas></section>
+        <div class="dash-bottom">
+          <section class="sentence-tray panel" aria-label="会议原话"><div class="panel-head"><b>原话 <span id="studio-sentence-count">0</span></b><button id="studio-follow" class="text-button" type="button" hidden>回到播放位置</button><span class="tray-hint">点一句，立即看判断</span></div><ol id="studio-sentences" class="studio-sentences"></ol></section>
+          <aside id="studio-inspector" class="studio-inspector panel" aria-label="当前判断详情"><div class="panel-head inspector-heading"><b id="studio-inspector-kicker">JEV · 分析</b><button id="inspector-close" class="icon-button" type="button" aria-label="收起判断详情">×</button></div><div id="studio-inspector-content" class="inspector-content"><h2>每一步，都有来处</h2><p class="empty-detail">选一句原话，或点一只 Oops 看它的分工。</p></div></aside>
+          <section class="rules panel" aria-label="规则检查"><div class="panel-head"><b>rules · 规则检查</b><span>本地代码 · 不花钱</span></div><ol id="rules-checks" class="rules-checks"></ol><div id="rules-thresholds" class="rules-thresholds"></div><div class="panel-head sub"><b>顺序就是一切</b></div><ol id="rules-path" class="rules-path"></ol></section>
         </div>
-        <aside id="studio-inspector" class="studio-inspector" aria-label="当前判断详情"><div class="inspector-heading"><span id="studio-inspector-kicker" class="eyebrow">判断详情</span><button id="inspector-close" class="icon-button" type="button" aria-label="收起判断详情">×</button></div><div id="studio-inspector-content" class="inspector-content"><h2>每一步，都有来处</h2><p class="empty-detail">选一句原话，或点一只 Oops 看它的分工。</p></div></aside>
       </section>
       <div class="legacy-engine" hidden>
     <section id="stage" class="stage">

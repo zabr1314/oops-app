@@ -67,10 +67,12 @@
     for (const event of events.slice(-2)) {
       const row = rows[event.i]; if (!row) continue;
       const k = (row.forks || []).indexOf(event.f);
+      bubble(event.f.layer, (event.f.a || '未记录') + (Number.isFinite(event.f.p) ? ' ' + event.f.p.toFixed(2) : ''));
       if (k <= 0) steps.push({ el: sentenceNodes[event.i]?.button, label: '原话 ' + String(event.i + 1).padStart(2, '0'), tone: 'idle', dwell: 160, ax: 0.9 });
+      steps.push({ el: agentNodes.find(n => n.dataset.agent === event.f.layer), tone: event.f.layer, dwell: 140, ax: 0.88, ay: 0.55 });
       steps.push({ point: () => web?.anchors().spokes.at(-1) || null, label: (event.f.a || '未记录') + (Number.isFinite(event.f.p) ? ' · ' + percentage(event.f.p) : ''), tone: event.f.layer, dwell: 260 });
       steps.push({ el: document.querySelectorAll('#studio-inspector-content .detail-step')[k], tone: event.f.layer, dwell: 160, ax: 0.92, ay: 0.2 });
-      if (k === (row.forks || []).length - 1 && event.f.layer === 'jev') steps.push({ el: stations.find(b => b.dataset.station === 'judge'), label: row.outcome || event.f.a, tone: 'jev', dwell: 300, ax: 0.5, ay: 0.3 });
+      if (k === (row.forks || []).length - 1) steps.push({ el: desks.find(d => d.dataset.desk === (DESK_OF[event.f.layer] || 'judge')), label: row.outcome || event.f.a, tone: event.f.layer, dwell: 300, ax: 0.5, ay: 0.35 });
     }
     crawler()?.visit(steps);
   }
@@ -150,6 +152,7 @@
     }
     previousCurrent = current;
     renderInspector();
+    renderDashboard(rows, current);
     if (mode === 'live' && rows.length) {
       crawler()?.rest(hub);
       // Tendrils reach the reached strands, the hub and the sentence being read.
@@ -157,6 +160,60 @@
       crawler()?.live(!!snapshot.playing);
     }
     if (pendingCrawl?.length && mode === 'live') crawl(pendingCrawl);
+  }
+  const DESK_OF = { code: 'code', jev: 'judge', model: 'query' };
+  const desks = [...document.querySelectorAll('[data-desk]')];
+  const agentNodes = [...document.querySelectorAll('[data-agent]')];
+  const bubbleTimers = new Map();
+  /* A desk's Oops speaks the saved answer it just produced. */
+  function bubble(layer, text) {
+    const desk = desks.find(d => d.dataset.desk === DESK_OF[layer]); if (!desk || motion.matches) return;
+    const node = desk.querySelector('.desk-bubble'); node.textContent = text;
+    desk.classList.remove('is-speaking'); void desk.offsetWidth; desk.classList.add('is-speaking');
+    clearTimeout(bubbleTimers.get(desk)); bubbleTimers.set(desk, setTimeout(() => desk.classList.remove('is-speaking'), 1400));
+  }
+  function renderDashboard(rows, current) {
+    const dash = window.OopsDashboard; if (!dash) return;
+    const agents = dash.deriveAgents(snapshot);
+    for (const node of agentNodes) {
+      const a = agents[node.dataset.agent]; if (!a) continue;
+      node.querySelector('[data-agent-value]').textContent = a.value;
+      node.querySelector('[data-agent-line]').textContent = a.line;
+      node.querySelector('[data-agent-status]').textContent = a.active ? '● 处理中 · ' + a.status : a.status;
+      node.querySelector('[data-agent-bar]').style.width = Math.round(Math.min(1, Math.max(0, a.bar || 0)) * 100) + '%';
+      node.classList.toggle('is-active', !!a.active && !motion.matches);
+      node.classList.toggle('is-quiet', !a.count && node.dataset.agent !== 'chief');
+    }
+    const codeDesk = desks.find(d => d.dataset.desk === 'code');
+    if (codeDesk) { codeDesk.classList.toggle('is-current', !!agents.code.active && !motion.matches); codeDesk.querySelector('[data-desk-state]').textContent = agents.code.count ? agents.code.count + ' 次规则检查' : '本地规则'; }
+    const trend = dash.trend(snapshot);
+    $('trend-label').textContent = trend.latest == null ? '尚未回放到判断 · 概率不是准确率' : '最近 Jev ' + trend.latest.toFixed(2) + ' · 已回放 ' + trend.points.length + ' 个 · 概率不是准确率';
+    drawTrend(trend);
+    const rules = dash.rules(snapshot, current);
+    $('rules-checks').replaceChildren(...(rules.checks.length ? rules.checks.map(c => { const li = el('li'); li.append(el('span', 'rule-q', c.q || '规则'), el('b', c.settled ? 'rule-a is-settled' : 'rule-a', (c.a || '—') + (c.settled ? ' · 结束' : ' ✓'))); return li; }) : [el('li', 'rule-empty', rows.length ? '这句尚未回放到规则检查' : '等待来源')]));
+    $('rules-thresholds').replaceChildren(...rules.thresholds.map(([k, v]) => { const span = el('span', null, k + ' '); span.append(el('b', null, String(v))); return span; }));
+    const NAMES = { code: '规则', jev: 'Jev', model: '生成', you: '你' };
+    $('rules-path').replaceChildren(...rules.path.map(step => el('li', 'path-' + step.layer + ' is-' + step.state, NAMES[step.layer] + (step.state === 'end' ? ' · 在此结束' : ''))));
+  }
+  function drawTrend(trend) {
+    const canvas = $('trend-canvas'); const ctx = canvas.getContext?.('2d'); if (!ctx) return;
+    const box = canvas.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1), W = Math.max(1, box.width), H = Math.max(1, box.height);
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    const plotH = H - 34, x = t => 12 + (W - 150) * Math.min(1, t / trend.span), y = p => 10 + (1 - p) * (plotH - 14);
+    ctx.strokeStyle = '#ffffff10'; ctx.lineWidth = 1;
+    for (const p of [0.25, 0.5, 0.75]) { ctx.beginPath(); ctx.moveTo(12, y(p)); ctx.lineTo(W - 138, y(p)); ctx.stroke(); }
+    const COLOR = window.OopsWeb?.COLOR || {};
+    for (const b of trend.bars) { ctx.fillStyle = (COLOR[b.route] || '#666') + 'cc'; ctx.fillRect(x(b.t) - 2, H - 20, 4, 14); }
+    if (trend.points.length) {
+      const grad = ctx.createLinearGradient(0, 0, 0, plotH); grad.addColorStop(0, '#3dffa855'); grad.addColorStop(1, '#3dffa800');
+      ctx.beginPath(); ctx.moveTo(x(trend.points[0].t), plotH); trend.points.forEach(p => ctx.lineTo(x(p.t), y(p.p))); ctx.lineTo(x(trend.points.at(-1).t), plotH); ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+      ctx.beginPath(); trend.points.forEach((p, k) => ctx[k ? 'lineTo' : 'moveTo'](x(p.t), y(p.p)));
+      ctx.strokeStyle = '#3dffa8'; ctx.lineWidth = 2; ctx.shadowColor = '#3dffa8'; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0;
+      const last = trend.points.at(-1); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x(last.t), y(last.p), 4, 0, Math.PI * 2); ctx.fill();
+      ctx.font = '700 26px ui-monospace, Menlo, monospace'; ctx.fillStyle = '#3dffa8'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(last.p.toFixed(2), W - 12, plotH / 2);
+      ctx.font = '11px ui-monospace, Menlo, monospace'; ctx.fillStyle = '#8f88a8'; ctx.fillText('最近 Jev 概率', W - 12, plotH / 2 - 26);
+    }
   }
   function statsLine(rows, state) {
     if (!rows.length) return '';
