@@ -838,8 +838,20 @@
       }
     }
   }
+  // Local preview only: ?local=real-0238.json opens a replay file served beside the page on this machine.
+  // Public sites never carry such files, and the name cannot leave ./data/.
+  async function loadLocalReplay() {
+    const name = new URLSearchParams(location.search).get('local') || '';
+    if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || !/^[\w-]+\.json$/.test(name)) return false;
+    const version = ++requestVersion;
+    const response = await fetch('./data/' + name, { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error('本机回放文件读取失败：HTTP ' + response.status);
+    const replay = await response.json();
+    if (version === requestVersion) load(replay);
+    return true;
+  }
   async function initialise() {
-    try { await loadExample(); }
+    try { if (!(await loadLocalReplay().catch(error => { ui.note.textContent = error.message; return false; }))) await loadExample(); }
     catch (error) { ui.badge.textContent = '载入失败'; ui.note.textContent = '示例数据载入失败：' + error.message; }
     refreshDeployedPipeline();
     if (!privateHistory) return;

@@ -150,7 +150,12 @@
     }
     previousCurrent = current;
     renderInspector();
-    if (mode === 'live' && rows.length) crawler()?.rest(hub);
+    if (mode === 'live' && rows.length) {
+      crawler()?.rest(hub);
+      // Tendrils reach the reached strands, the hub and the sentence being read.
+      crawler()?.anchors(() => { const a = web?.anchors(); const r = sentenceNodes[current]?.button.getBoundingClientRect(); return [...(a?.spokes || []), a?.hub, r && { x: r.right - 10, y: r.top + r.height / 2 }]; });
+      crawler()?.live(!!snapshot.playing);
+    }
     if (pendingCrawl?.length && mode === 'live') crawl(pendingCrawl);
   }
   function statsLine(rows, state) {

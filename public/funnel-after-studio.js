@@ -114,6 +114,7 @@
     const room = $('after-studio-room');
     const playing = !!snapshot.playing && mode === 'after' && !!post && !reduced.matches;
     room.classList.toggle('is-handoff', playing && phase === 1);
+    room.classList.toggle('is-playing', playing);
     buttons.forEach(button => {
       const key = button.dataset.afterStation; const role = roles[key];
       button.querySelector('[data-after-state]').textContent = role.label;
@@ -125,7 +126,11 @@
     });
     $('after-room-footnote').textContent = '展示顺序不代表历史发生顺序；人工核对和发送不自动推进。';
     if (web && mode === 'after') web.draw(window.OopsWeb.afterScene(mode === 'after' ? snapshot : { ...snapshot, playing: false }, selectedItem));
-    if (mode === 'after' && post) crawler()?.rest(() => web?.anchors().hub || null);
+    if (mode === 'after' && post) {
+      crawler()?.rest(() => web?.anchors().hub || null);
+      crawler()?.anchors(() => { const a = web?.anchors(); return [...(a?.nodes || []), a?.hub]; });
+      crawler()?.live(playing);
+    }
     crawl(post, phase, playing);
     itemButtons.forEach(item => item.button.classList.toggle('is-selected', item.id === selectedItem));
     renderDetail(post, roles);

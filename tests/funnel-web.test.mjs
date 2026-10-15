@@ -78,3 +78,10 @@ test('the page-wide crawler only labels saved answers and is off for reduced mot
   const studio = readFileSync('public/funnel-studio.js', 'utf8');
   assert.match(studio, /event\.f\.a \|\| '未记录'/);
 });
+
+test('a local replay file can be opened only on this machine and only from ./data/', () => {
+  const js = readFileSync('public/funnel.js', 'utf8');
+  assert.ok(js.includes(String.raw`/^(localhost|127\.0\.0\.1)$/.test(location.hostname)`));
+  assert.ok(js.includes(String.raw`/^[\w-]+\.json$/.test(name)`));
+  assert.ok(js.includes("fetch('./data/' + name"));
+});

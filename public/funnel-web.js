@@ -94,7 +94,8 @@
     if (!ctx) return { draw() {}, stop() {} };
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
     let scene = { spokes: [], rings: [], nodes: [], empty: true }, pos = { angle: 0, reach: 0 }, raf = 0, last = 0, phase = 0, hits = [], anchors = { hub: null, spokes: [], nodes: [] };
-    let W = 0, H = 0;
+    let W = 0, H = 0, born = new Map(), animating = false;
+    const ease = k => 1 - Math.pow(1 - k, 3);
     function size() {
       const box = canvas.getBoundingClientRect(); const dpr = Math.min(2, window.devicePixelRatio || 1);
       W = Math.max(1, box.width); H = Math.max(1, box.height);
@@ -148,16 +149,29 @@
       // Finished sentences make the web grow outward, newest ring innermost-out.
       const rings = scene.rings || [];
       rings.forEach((layer, k) => ring(cx, cy, R * (0.2 + 0.78 * (k + 1) / Math.max(10, rings.length)), COLOR[layer] || COLOR.idle, 0.28 + 0.5 * (k + 1) / rings.length));
+      const now = performance.now(); animating = false;
+      const seen = new Set();
       for (const s of scene.spokes || []) {
-        const [x, y] = polar(cx, cy, R * s.reach, s.angle);
-        ctx.strokeStyle = COLOR[s.layer]; ctx.lineWidth = s.measured ? 1 + 2.4 * (s.p || 0) : 1.2; ctx.setLineDash(s.measured ? [] : [4, 4]);
+        // A newly reached strand shoots out from the hub with a bright head and a ripple.
+        const key = s.angle.toFixed(3) + s.answer; seen.add(key);
+        if (!born.has(key)) born.set(key, reduce.matches || !scene.working ? -Infinity : now);
+        const k = Math.min(1, (now - born.get(key)) / 420), g = ease(k);
+        if (k < 1) animating = true;
+        const [tx, ty] = polar(cx, cy, R * s.reach, s.angle);
+        const x = cx + (tx - cx) * g, y = cy + (ty - cy) * g;
+        ctx.save(); ctx.shadowColor = COLOR[s.layer]; ctx.shadowBlur = k < 1 ? 22 : 10;
+        ctx.strokeStyle = COLOR[s.layer]; ctx.lineWidth = s.measured ? 1.2 + 3 * (s.p || 0) : 1.4; ctx.setLineDash(s.measured ? [] : [5, 5]);
         ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = COLOR[s.layer]; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
-        anchors.spokes.push({ x, y, layer: s.layer, label: s.answer + (s.measured ? ' ' + pct(s.p) : '') });
+        ctx.fillStyle = k < 1 ? '#ffffff' : COLOR[s.layer]; ctx.beginPath(); ctx.arc(x, y, k < 1 ? 7 : 5.5, 0, Math.PI * 2); ctx.fill();
+        if (k < 1) { ctx.globalAlpha = 1 - k; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 20 + g * R * 0.5, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
+        ctx.restore();
+        anchors.spokes.push({ x: tx, y: ty, layer: s.layer, label: s.answer + (s.measured ? ' ' + pct(s.p) : '') });
+        if (k < 0.85) continue;
         const right = Math.cos(s.angle) >= 0, lx = x + (right ? 10 : -10);
         label(s.answer, lx, y - 7, '#ece8f7', right ? 'left' : 'right', 12, 600);
         label((LAYER[s.layer] || '') + (s.measured ? ' · ' + pct(s.p) : ' · 无概率'), lx, y + 9, COLOR[s.layer], right ? 'left' : 'right', 10);
       }
+      for (const key of born.keys()) if (!seen.has(key)) born.delete(key);
       for (const n of scene.nodes || []) {
         const [x, y] = polar(cx, cy, R * n.reach, n.angle);
         const color = n.quality === 'accepted' ? COLOR.code : n.quality === 'rejected' ? '#ff6b7a' : n.quality ? COLOR.model : COLOR.jev;
@@ -192,7 +206,7 @@
       last = t; phase = t;
       draw(t);
       const settled = Math.abs(pos.reach - (scene.spider?.reach || 0)) < 0.004;
-      if (!reduce.matches && (scene.working || !settled)) raf = requestAnimationFrame(tick);
+      if (!reduce.matches && (scene.working || !settled || animating)) raf = requestAnimationFrame(tick);
     }
     canvas.addEventListener('click', event => {
       if (!onPick || !hits.length) return;
