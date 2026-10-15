@@ -95,7 +95,7 @@
 .workstation img { width: 44px; height: 38px; object-fit: contain; position: relative; z-index: 1; transition: transform .2s, filter .2s, opacity .2s; }
 .workstation b { font-size: 13px; font-weight: 600; }
 .workstation small { font-size: 11px; color: var(--muted); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.workstation.is-idle img, .workstation.is-missing img { filter: grayscale(1) brightness(.6); opacity: .65; }
+.workstation.is-idle img, .workstation.is-missing img { opacity: .85; }
 .workstation.is-idle small, .workstation.is-missing small { color: var(--faint); }
 .workstation.is-pending small { color: var(--model); }
 .workstation.is-selected, .workstation[aria-pressed="true"] { border-color: var(--line-2); background: var(--panel-2); }
@@ -283,8 +283,9 @@
 .desk.is-speaking .desk-bubble { animation: bubble 1.4s cubic-bezier(.2,.9,.3,1.3) forwards; }
 @keyframes bubble { 0% { opacity: 0; transform: translate(-50%, -80%) scale(.6); } 12% { opacity: 1; transform: translate(-50%, -110%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -130%) scale(.95); } }
 .desk.is-speaking .desk-oops img, .desk.is-current .desk-oops img { animation: oops-work .35s ease-in-out infinite alternate; filter: hue-rotate(var(--tint)) saturate(1.8) drop-shadow(0 0 12px #fff8); }
-.desk.is-idle .desk-oops img, .desk.is-missing .desk-oops img { filter: grayscale(1) brightness(.55); }
-.desk.is-idle .desk-art { filter: brightness(.6); }
+/* No saved work this replay: keep its colour, just stay still; the caption says why. */
+.desk.is-idle .desk-oops img, .desk.is-missing .desk-oops img { filter: hue-rotate(var(--tint)) saturate(1.4) drop-shadow(0 4px 6px #000c); opacity: .9; }
+.desk.is-idle .desk-name small { color: #6f6889; }
 .desk[aria-pressed="true"] .desk-name b { color: #ff8be4; }
 .desk-listen { --tint: 200deg; } .desk-code { --tint: 120deg; } .desk-judge { --tint: 0deg; } .desk-query { --tint: 300deg; } .desk-minutes { --tint: 60deg; } .desk-delivery { --tint: 160deg; }
 .room-note { position: absolute; right: 18px; bottom: 6px; font: 10px var(--mono); color: #5d5779; z-index: 2; }
