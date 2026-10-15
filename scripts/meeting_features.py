@@ -396,7 +396,7 @@ class Meetings:
                     row['utterances'], row['notices'] = [], []
                     row['transcript_status'] = 'expired'
                     row['transcript_expired_at'] = policy['transcript_expires_at']
-                    for key in (*MEETING_DERIVED, 'last_sync_at', 'asr_error'):
+                    for key in (*MEETING_DERIVED, 'last_sync_at', 'asr_error', 'processing_trace'):
                         row.pop(key, None)
                     self.write(row['session_id'], row)
                     count += 1
@@ -584,6 +584,9 @@ class Meetings:
             return True
 
     def write(self, sid, row):
+        if row.get('processing_trace'):
+            from processing_trace import sanitize_for_storage
+            sanitize_for_storage(row)
         previous = read_json(self.path(sid)) if os.path.isfile(self.path(sid)) else None
         refresh_versions(row, previous)
         row['updated_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -623,6 +626,8 @@ class Meetings:
             entry = {k: v for k, v in {**previous, **fields}.items() if v is not None and k in ('speaker', 'verdict', 'owner')}
             if entry:
                 reviews[uid] = dict(entry, by=by, at=dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'))
+                if req.get('_actor_principal'):
+                    reviews[uid]['by_principal'] = req['_actor_principal']
                 if fields.get('verdict') == 'confirmed':
                     utterance = next(u for u in row['utterances'] if u['id'] == uid)
                     hashes[uid] = hashlib.sha256(utterance['text'].encode()).hexdigest()
@@ -642,6 +647,8 @@ class Meetings:
                 raise ValueError('这场会议还没有可核对的纪要事项')
             row = read_json(self.path(sid))
             minutes_items.review(row, current['items'], req, self.team)
+            if req.get('_actor_principal') and req.get('item_id') in row.get('item_reviews', {}):
+                row['item_reviews'][req['item_id']]['by_principal'] = req['_actor_principal']
             self.write(sid, row)
             fresh = self.load(sid)
             return dict(session_id=sid, items=fresh['items'], review_queue=fresh['review_queue'])
@@ -728,7 +735,7 @@ class Meetings:
 
     TITLE_MIN_UTTERANCES = 5
 
-    def title_jobs(self, now=None, sid=None):
+    def title_jobs(self, now=None, sid=None, allowed_sessions=None):
         """Finished meetings whose generated title is missing or older than their text: (session_id, count, transcript).
 
         With sid, only that meeting, which the caller already knows is over.
@@ -738,7 +745,8 @@ class Meetings:
         with self.lock:
             names = [identifier(sid) + '.json'] if sid else os.listdir(self.dir)
             for name in names:
-                if not name.endswith('.json') or not os.path.isfile(os.path.join(self.dir, name)):
+                if (not name.endswith('.json') or not os.path.isfile(os.path.join(self.dir, name))
+                        or (allowed_sessions is not None and name[:-5] not in allowed_sessions)):
                     continue
                 row = read_json(os.path.join(self.dir, name))
                 count = len(row['utterances'])
@@ -775,16 +783,17 @@ class Meetings:
         goal = (row.get('agenda') or {}).get('goal', '')
         return dict(session_id=sid, started_at=row.get('started_at'), goal=goal, title=row.get('title') or goal or None)
 
-    def listing(self, limit=30):
+    def listing(self, limit=30, allowed_sessions=None):
         if not 1 <= limit <= 100:
             raise ValueError('limit 必须为 1–100')
-        return self._listing(limit)
+        return self._listing(limit, allowed_sessions=allowed_sessions)
 
-    def _listing(self, limit=None):
+    def _listing(self, limit=None, allowed_sessions=None):
         """Internal complete index; project scope must be applied before any presentation limit."""
         with self.lock:
             self.cleanup()
-            rows = [self.load(n[:-5]) for n in os.listdir(self.dir) if n.endswith('.json')]
+            rows = [self.load(n[:-5]) for n in os.listdir(self.dir) if n.endswith('.json')
+                    and (allowed_sessions is None or n[:-5] in allowed_sessions)]
             rows.sort(key=lambda r: r['started_at'], reverse=True)
             return dict(count=len(rows), items=[dict(session_id=r['session_id'], started_at=r['started_at'],
                 title=r['display_title'], title_source=r['title_source'], project=r.get('project'),
@@ -834,7 +843,7 @@ class Meetings:
 
     PROJECT_POOL = 30
 
-    def historical(self, sid, query, overlap):
+    def historical(self, sid, query, overlap, allowed_sessions=None):
         """Earlier decisions and constraints to check a new one against.
 
         With a project: every decision a person confirmed in that project's other meetings (newest first), so a
@@ -842,7 +851,7 @@ class Meetings:
         the old keyword-matched pool from the last ten meetings, marked unconfirmed.
         """
         with self.lock:
-            sessions = [s for s in self._listing()['items'] if s['session_id'] != sid]
+            sessions = [s for s in self._listing(allowed_sessions=allowed_sessions)['items'] if s['session_id'] != sid]
             project = self.project_of(sid)
             def item(s, u, confirmed):
                 return dict(id=f"h:{s['session_id']}:{u['id']}", text=u['text'], start_ms=u['start_ms'], end_ms=u['end_ms'],
@@ -900,11 +909,11 @@ class Meetings:
             self.write(sid, row)
         return dict(session_id=sid, project=project or None)
 
-    def projects(self):
+    def projects(self, allowed_sessions=None):
         """Every project name in use, with how much it holds, most recently active first."""
         with self.lock:
             groups = {}
-            for s in self._listing()['items']:
+            for s in self._listing(allowed_sessions=allowed_sessions)['items']:
                 if s.get('project') and minutes_items.reusable(self.load(s['session_id'])):
                     groups.setdefault(s['project'], []).append(s)
             items = []
@@ -918,13 +927,13 @@ class Meetings:
             items.sort(key=lambda p: p['last_started_at'], reverse=True)
             return dict(items=items)
 
-    def project(self, name):
+    def project(self, name, allowed_sessions=None):
         """One project: its meetings, its confirmed decisions and constraints, and how many still wait for a review."""
         name = text(name, 200).strip()
         if not name:
             raise ValueError('缺少项目名称')
         with self.lock:
-            meetings = [s for s in self._listing()['items'] if s.get('project') == name
+            meetings = [s for s in self._listing(allowed_sessions=allowed_sessions)['items'] if s.get('project') == name
                         and minutes_items.reusable(self.load(s['session_id']))]
             decisions, unreviewed = [], 0
             for s in meetings:
@@ -942,14 +951,14 @@ class Meetings:
                         unreviewed += 1
             return dict(name=name, meetings=meetings, decisions=decisions, unreviewed_decisions=unreviewed)
 
-    def search(self, query, jev, overlap, jev_recall):
+    def search(self, query, jev, overlap, jev_recall, allowed_sessions=None):
         text(query, 500)
         if not query.strip(): raise ValueError('请输入问题')
         with self.lock:
             pool = []
             self.cleanup()
             for name in os.listdir(self.dir):
-                if not name.endswith('.json'): continue
+                if not name.endswith('.json') or (allowed_sessions is not None and name[:-5] not in allowed_sessions): continue
                 row = self.load(name[:-5])
                 s = row
                 for u in evidence_rows(row):

@@ -7,6 +7,14 @@
   const failedOnce = new Set();
   let minutesChanged = false;
   let retainedEvidence=[],retainedSummaries=[];
+  let feishuStatus = flow === 'feishu-unconfigured' ? 'unconfigured' : flow === 'feishu-expired' ? 'expired' : 'disconnected';
+  let feishuAccount = null;
+  const deliveryDrafts = new Map(), deliveryOperations = new Map();
+  const workflowDrafts=new Map(),workflowOperations=new Map(),mockJob='d'.repeat(32);
+  const feishuPeople = [{open_id:'mock-jason',name:'Jason',department:'示例产品团队'}, {open_id:'mock-lip',name:'黄丽萍',department:'示例设计团队'}, {open_id:'mock-yue',name:'江古月',department:'示例开发团队'}];
+  const emitFeishuStatus = requestId => emit('feishu.status', {requestId, status:feishuStatus, account:feishuAccount,
+    binding_revision:1,capabilities:{minutes_delivery:feishuStatus==='connected',recipients:feishuStatus==='connected',documents_write:feishuStatus==='connected',sharing:feishuStatus==='connected',messages_send:feishuStatus==='connected',calendar_delivery:feishuStatus==='connected',calendar_invite:feishuStatus==='connected',agent_file_delivery:feishuStatus==='connected'},mock:true});
+  const deliveryReply = (p, status, extra = {}) => emit('minutes.delivery', {session_id:p.sessionId, requestId:p.requestId, status, draft:deliveryDrafts.get(p.sessionId), mock:true, ...extra});
   const team = ['Jason', '黄丽萍', '江古月', '洪玉麟', '林春源'];
   // Real device ASR observations for assets/test/dialog.wav (2026-10-06).
   const sample = [
@@ -173,7 +181,33 @@
     review: mockItemReviews[it.id] || null,
     evidence: it.ids.map((id) => { const u = historicalRows.find((r) => r.id === id); return {id, text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}; })}));
   const itemQueue = (items) => items.filter((i) => !i.review).map((i) => ({kind: 'item', id: i.id, item_kind: i.kind}));
+  function personalWorkflowMock(type,p) {
+    if(type==='assistant.jobs') {emit(type,{...p,items:[{job_id:mockJob,session_id:'demo',title:'首版方案报告（隔离示例）',kind:'report',generation_status:'ready',status:'done',delivery_status:'needs_personal_review'}],mock:true});return true;}
+    const agent=type.startsWith('assistant.delivery.'),calendar=type.startsWith('calendar.');
+    if(!agent && !calendar)return false;
+    const key=agent?p.jobId:`${p.sessionId}:${p.followupId || 'manual'}`,action=type.split('.').at(-1);
+    const reply=(extra={})=>emit(agent?'assistant.delivery':'calendar.delivery',{...p,session_id:p.sessionId,job_id:agent?p.jobId:undefined,followup_id:p.followupId || 'manual',draft:workflowDrafts.get(key),mock:true,...extra});
+    if(!workflowDrafts.has(key))workflowDrafts.set(key,agent?{revision:1,job_id:p.jobId,title:'首版方案报告（隔离示例）',content:'这是已有报告的隔离示例。读取或恢复交付均不重新生成。',recipients:[],permission:'view',artifacts:[{name:'首版方案.pptx',kind:'file',size:1024}],attachments:[],attachment_copies_confirmed:false,binding_revision:1,account_open_id:'mock-self'}:{revision:1,title:'后续评审（隔离示例）',description:'浏览器不创建真实日程',start:'2026-10-20T15:00:00+08:00',end:'2026-10-20T15:30:00+08:00',time_zone:'Asia/Shanghai',attendees:[],reviewed:false,binding_revision:1,account_open_id:'mock-self'});
+    const draft=workflowDrafts.get(key),fail=(code,message)=>emit('error',{...p,scope:'feishu',operation:type,code,message});
+    if(action==='save') {
+      if(feishuStatus!=='connected'){fail('FEISHU_NOT_CONNECTED','请先连接本人示例飞书');return true;}
+      if(p.revision!==draft.revision){fail('REVIEW_REVISION_CHANGED','草稿版本已变化');return true;}
+      if(agent && p.attachments?.length && !p.attachment_copies_confirmed){fail('FILE_COPY_CONFIRMATION_REQUIRED','请确认原文件会作为可下载副本发送');return true;}
+      const fields=agent?['title','content','recipients','permission','attachments','attachment_copies_confirmed']:['title','description','start','end','time_zone','attendees'];
+      for(const field of fields)if(field in p)draft[field]=p[field];draft.revision++;if(calendar)draft.reviewed=true;
+      reply();return true;
+    }
+    let op=[...workflowOperations.values()].find(o=>o.key===key);
+    if(action==='confirm') {
+      if(feishuStatus!=='connected' || p.confirmed!==true || p.revision!==draft.revision || agent && !draft.recipients.length || calendar && !draft.reviewed){fail('CONFIRMATION_REQUIRED','请保存并单独确认本版内容');return true;}
+      if(!op){op={key,op_id:p.opId,revision:draft.revision,status:flow.includes('timeout')?'unknown':agent?'sending':'created_unverified',mock:true};workflowOperations.set(p.opId,op);}
+      else if(op.status!=='unknown')op.status=agent?'sent':'created';
+      if(calendar && op.status!=='unknown'){op.event_verified=op.status==='created';op.event_id='mock-event-only';}
+    }else if(action==='status' && op && op.status!=='unknown'){op.status=agent?'sent':'created';if(calendar)op.event_verified=true;}
+    reply(agent?{delivery:op || null}:{calendar:op || null});return true;
+  }
   function handle(type, p) {
+    if(personalWorkflowMock(type,p))return;
     const listFailure = flow === 'list-failure' && ['history.list', 'projects.list', 'project.open', 'tasks.list'].includes(type);
     const reviewFailure = flow === 'review-failure' && ['review.set', 'speaker.correct'].includes(type);
     const minutesFailure = flow === 'minutes-failure' && type === 'history.minutes';
@@ -185,6 +219,43 @@
       return;
     }
     switch (type) {
+      case 'feishu.status': emitFeishuStatus(p.requestId); break;
+      case 'feishu.connect':
+        if (feishuStatus === 'unconfigured') { emitFeishuStatus(p.requestId); break; }
+        emit('feishu.authorization', {requestId:p.requestId,status:'authorizing',message:'隔离模拟：正在体验官方授权返回。不会访问真实飞书。'});
+        setTimeout(() => {
+          feishuStatus = flow === 'feishu-cancelled' ? 'cancelled' : 'connected';
+          feishuAccount = feishuStatus === 'connected' ? {open_id:'mock-self',name:'我的飞书（模拟）',tenant_name:'Oops 示例组织',binding_id:id('mock-binding')} : null;
+          emitFeishuStatus(p.requestId);
+        }, 250); break;
+      case 'feishu.disconnect': feishuStatus = 'disconnected'; feishuAccount = null; emitFeishuStatus(p.requestId); break;
+      case 'feishu.recipients':
+        emit('feishu.recipients', {requestId:p.requestId, items:feishuStatus === 'connected' ? feishuPeople.filter(person => person.name.toLowerCase().includes(String(p.query || '').toLowerCase())) : [], message:feishuStatus === 'connected' ? null : '请先绑定自己的飞书账号',mock:true}); break;
+      case 'minutes.delivery.open':
+        if (!deliveryDrafts.has(p.sessionId)) deliveryDrafts.set(p.sessionId, {revision:1,source_fingerprint:'mock-source-'+p.sessionId,title:'首版上线方案与预算',content:'会议结论（模拟）\n预算上限为10万。\n待办：核对并提交新方案，负责人和期限待人工核对。\n未决：13万方案如何满足预算？',recipients:[],permission:'view'});
+        deliveryReply(p, flow === 'minutes-source-changed' ? 'source_changed' : 'ready'); break;
+      case 'minutes.delivery.save': {
+        const draft = deliveryDrafts.get(p.sessionId);
+        if (feishuStatus !== 'connected') { deliveryReply(p,'expired',{message:'请先绑定自己的飞书账号'}); break; }
+        if (!draft || p.revision !== draft.revision || flow === 'minutes-source-changed') {deliveryReply(p,'source_changed',{message:'来源或草稿版本已变化，请重新读取后核对'});break;}
+        if (!p.title?.trim() || !p.content?.trim() || !Array.isArray(p.recipients) || p.recipients.some(id => !feishuPeople.some(person => person.open_id === id))) {deliveryReply(p,'failed',{message:'请核对正文和可访问的收件人'});break;}
+        deliveryDrafts.set(p.sessionId,{...draft,title:p.title.trim(),content:p.content.trim(),recipients:p.recipients.map(id => feishuPeople.find(person => person.open_id === id)),permission:p.permission === 'edit' ? 'edit' : 'view',revision:draft.revision+1});
+        deliveryReply(p,'ready'); break;
+      }
+      case 'minutes.delivery.confirm': {
+        const draft = deliveryDrafts.get(p.sessionId), old = deliveryOperations.get(p.opId);
+        if (old) {deliveryReply(p,old.status,{op_id:p.opId,receipt:old.receipt});break;}
+        if (feishuStatus !== 'connected' || !draft || p.revision !== draft.revision || !draft.recipients.length || !p.confirmed || !p.opId) {deliveryReply(p,'failed',{message:'账号、草稿版本、收件人或确认无效'});break;}
+        const op = {sessionId:p.sessionId,status:flow === 'minutes-delivery-partial' ? 'partial' : 'pending',receipt:null};deliveryOperations.set(p.opId,op);
+        if (flow === 'minutes-delivery-timeout') break;
+        deliveryReply(p,op.status,{op_id:p.opId});break;
+      }
+      case 'minutes.delivery.status': {
+        const op = deliveryOperations.get(p.opId);
+        if (!op || op.sessionId !== p.sessionId) {deliveryReply(p,'not_found',{message:'没有找到这次操作，请人工核对，不自动重发'});break;}
+        if (op.status === 'pending') {op.status='sent';op.receipt={message:'模拟回执：文档已按本次所选收件人与权限交付，未向真实飞书发送。'};}
+        deliveryReply(p,op.status,{op_id:p.opId,receipt:op.receipt});break;
+      }
       case 'hello': queueMicrotask(() => emit('snapshot', { state, transcript, summary: summary(), team, insets: { top: 0, bottom: 0 } }));break;
       case 'capture.meeting':
         if (!state.capturing || state.recordingMode !== 'daily') throw new Error('请先开始日常聆听，再切换正式会议');
@@ -250,7 +321,7 @@
         const payload = {session_id: p.sessionId, requestId: p.requestId || ''};
         if (flow === 'minutes-pending') Object.assign(payload, {status: 'pending', reason: 'writing'});
         else if (changed) Object.assign(payload, {status: 'unavailable', reason: 'source_changed', message: '核对结果已变化，旧纪要需重新核对。', historical_doc_url: 'https://example.com/historical-minutes'});
-        else Object.assign(payload, {status: 'ready', doc_url: null, minutes: {version: 4, substantive: true, theme: '首版上线方案与预算', overview: '首版围绕两周内上线展开，预算上限与方案成本需要核对。', decisions: [{text: '预算上限为10万', ids: ['u1']}], actions: [{owner: '洪玉麟', task: '核对并提交新方案', due: '周五前', priority: 'main', ids: ['u2']}, {owner: '', task: '预约下周评审会议室', due: '', priority: 'other', ids: ['u3']}], topics: [{topic: '上线计划与预算', points: ['先明确首版体验与预算范围']}], open_questions: [{question: '13万方案如何满足10万预算？', quote: historicalRows.find(u => u.id === 'u3').text, id: 'u3'}], follow_ups: []}, sources: Object.fromEntries(historicalRows.map(u => [u.id, {text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}]))});
+        else Object.assign(payload, {status: 'ready', doc_url: null, minutes: {version: 4, substantive: true, theme: '首版上线方案与预算', overview: '首版围绕两周内上线展开，预算上限与方案成本需要核对。', decisions: [{text: '预算上限为10万', ids: ['u1']}], actions: [{owner: '洪玉麟', task: '核对并提交新方案', due: '周五前', priority: 'main', ids: ['u2']}, {owner: '', task: '预约下周评审会议室', due: '', priority: 'other', ids: ['u3']}], topics: [{topic: '上线计划与预算', points: ['先明确首版体验与预算范围'],ids:['u1'],source_status:'available'}], open_questions: [{question: '13万方案如何满足10万预算？', quote: historicalRows.find(u => u.id === 'u3').text, id: 'u3'}], follow_ups: []}, sources: Object.fromEntries(historicalRows.map(u => [u.id, {text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}]))});
         setTimeout(() => emit('history.minutes', payload), 220); break;
       }
       case 'history.delete': if (p.confirm) {mockMeetings = mockMeetings.filter(i => i.session_id !== p.sessionId); emit('history.delete', {deleted: true, sessionId: p.sessionId, session_id: p.sessionId, requestId: p.requestId || ''});} break;

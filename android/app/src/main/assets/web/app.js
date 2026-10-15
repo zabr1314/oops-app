@@ -10,6 +10,9 @@
   const params = new URLSearchParams(location.search);
   const deviceDemo = window.OopsDeviceListeningDemo;
   let deviceState = deviceDemo?.create();
+  // The live transcript nodes live in index.html and move between pages. Keep handles to them: a page re-render
+  // detaches them from the document, after which getElementById can no longer find them.
+  const LINES = $('lines'), PARTIAL = $('partial'), HOLDER = $('holder');
 
   const ASR_TEXT = {
     off: ['识别未连接', ''],
@@ -42,6 +45,8 @@
     tasks: { scope: 'review', mine: false, status: 'all', items: null, parsedItems: null, meetingItems: null, parsedStatus: null, parsedSerial: 0, reviewFilter: 'all', query: '', cache: new Map(), expanded: new Set(), requests: new Map(), pending: new Set(), serial: 0, refreshedAt: null, archived: [] }, openTaskCount: 0,
     homeTasks: null, homeTasksState: { loading: false, error: null },
     requests: { history: {}, projects: {}, project: {}, tasks: {} }, pendingMeetingId: null, meetingRequest: null,
+    feishu: {status:'loading', account:null, capabilities:{}, recipients:[], knownRecipients:{}, busy:false}, deliveries: new Map(), feishuSerial:0,
+    assistantJobs: {items:[],busy:false}, calendars: new Map(),
     minutes: new Map(), minutesRequest: 0, remoteEpoch: null, pendingRetention: null, retentionRequest: 0,
     projects: { items: null, open: null, section: 'decisions' }, liveProject: null,
     review: null, pendingReview: null, sessionsQuery: '', homeQuery: '',
@@ -74,6 +79,16 @@
   };
   const manualLabel = (v) => MANUAL_OTHER[v] || speakerLabel(v);
   const initial = (name) => (name ? [...String(name)][0] : '?');
+  // Avatars: "说话人 B" shows B rather than 说; the user is always colour 1, everyone else keeps a stable colour 2–6.
+  const avatarText = (name) => /^说话人 ([A-Z])$/.exec(name || '')?.[1] || initial(name);
+  function speakerTone(key) {
+    if (key == null || key === '' || MANUAL_OTHER[key]) return '';
+    if (S.state.selfName && key === S.state.selfName) return 'spk-1';
+    let h = 0;
+    for (const c of String(key)) h = (h * 31 + c.codePointAt(0)) >>> 0;
+    return `spk-${(/^\d+$/.test(String(key)) ? Number(key) : h) % 5 + 2}`;
+  }
+  const levelMeter = (id) => `<span class="level-meter is-idle" id="${id}" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>`;
   const hasTimeZone = value => typeof value === 'string' && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
   const originalDate = value => /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(String(value))
     ? `原记录时间 ${String(value).replace('T', ' ')} · 时区未记录` : '原记录时间无效 · 时区未记录';
@@ -87,7 +102,11 @@
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
-  const icon = (name, size = 22) => `<img class="icon" alt="" width="${size}" height="${size}" draggable="false" src="icons/${name}.svg">`;
+  // Icons are drawn as a mask over the text colour (oops-design.css), so they follow selected, disabled and danger states.
+  const icon = (name, size = 22) => `<span class="icon" aria-hidden="true" style="--icon:url(icons/${name}.svg);--icon-size:${size}px"></span>`;
+  // Pupu (pupu.js) appears only at emotional moments: empty, not found, done, waiting. Plain icon if the script is missing.
+  const pupu = (mood, fallback, opts) => window.OopsPupu ? window.OopsPupu.svg(mood, opts) : icon(fallback, 28);
+  const emptyArt = (mood, fallback, opts) => `<span class="empty-art">${pupu(mood, fallback, opts)}</span>`;
   const meetingName = (m) => m.title || m.display_title || m.goal || '会议';
   const reviewPending = (i) => Object.values(i.review_pending || {}).reduce((a, b) => a + b, 0);
   // Meetings over an hour read 1:23:04, shorter ones 18:24, as in the prototype.
@@ -98,13 +117,27 @@
   };
 
   let toastTimer = null;
+  /** 设计语言 Toast: a small slip (a failed request, missing input, a changed source) brings Pupu's oops; a finished
+      save brings happy. Deleting, clearing, stopping and plain notices stay neutral, without the mascot. */
+  function toastTone(message, bad) {
+    if (bad || /^(先|请|选择)|填写|不能|不允许|无法|失败|未能|已变化|缺失/.test(message)) return 'oops';
+    if (/删除|移除|撤销|撤回|关闭|清除|清空|停止|结束|取消|解除|忽略|需要|重新|待|未/.test(message)) return 'neutral';
+    return /已保存|保存成功|已确认|已核对|已创建|已建|已添加|已更新|已记录|已开始|已复制|已恢复|已采纳|已标记|已连接|已配对/.test(message) ? 'success' : 'neutral';
+  }
   function toast(message, bad = false) {
     const t = $('toast');
-    t.textContent = message;
+    const tone = toastTone(message, bad);
+    const mascot = tone !== 'neutral' && window.OopsPupu ? window.OopsPupu.svg(tone === 'oops' ? 'oops' : 'happy', { still: true }).replace('class="pupu', 'class="toast-pupu pupu') : '';
+    t.innerHTML = `${mascot}<span>${esc(message)}</span>`;
+    t.setAttribute('role', tone === 'oops' ? 'alert' : 'status');
     t.classList.toggle('bad', bad);
+    t.classList.toggle('is-oops', tone === 'oops');
+    t.classList.toggle('is-success', tone === 'success');
+    t.hidden = true;
+    void t.offsetWidth; // a new message pops in again even if the last one is still showing
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
   }
 
   function applyInsets(i) {
@@ -126,7 +159,7 @@
   };
 
   function handle(type, p) {
-    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'items.saved', 'tasks.list', 'tasks.board'].includes(type)
+    const remote = ['feishu.status', 'feishu.authorization', 'feishu.recipients', 'minutes.delivery', 'assistant.jobs', 'assistant.delivery', 'calendar.delivery', 'history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'items.saved', 'tasks.list', 'tasks.board'].includes(type)
       || type === 'error' && ['history', 'minutes', 'projects', 'review', 'items', 'tasks', 'retention'].includes(p.scope);
     if (remote) {
       if ('backendUrl' in p && S.state.backendUrl !== undefined && p.backendUrl !== S.state.backendUrl) return;
@@ -175,6 +208,16 @@
         S.historyItems = (p.items || []).filter(x => !S.deletedSessions.has(x.session_id)); S.requests.history = {}; if (['home', 'sessions'].includes(S.route.name)) render(); if (S.sheet?.kind === 'history') renderSheet(); break;
       case 'history.open': historyOpen(p); break;
       case 'history.minutes': onMinutes(p); break;
+      case 'feishu.status': onFeishuStatus(p); break;
+      case 'feishu.authorization': onFeishuAuthorization(p); break;
+      case 'feishu.recipients':
+        if (p.requestId !== S.feishu.recipientRequestId) break;
+        S.feishu.recipientSource = p.source; S.feishu.recipientSearched = true; S.feishu.recipients = p.items || []; S.feishu.knownRecipients ||= {}; S.feishu.recipients.forEach(person => { S.feishu.knownRecipients[deliveryPersonId(person)] = person; }); S.feishu.recipientsLoading = false; S.feishu.recipientsError = p.message || null;
+        if (['minutesDelivery','calendar'].includes(S.sheet?.kind)) renderSheet(); break;
+      case 'minutes.delivery': onMinutesDelivery(p); break;
+      case 'assistant.delivery': onMinutesDelivery(p); break;
+      case 'assistant.jobs': onAssistantJobs(p); break;
+      case 'calendar.delivery': onCalendar(p); break;
       case 'meeting.retained': {
         const pending=S.pendingRetention;
         if (!pending || pending.requestId!==p.requestId || pending.sessionId!==p.sessionId) break;
@@ -201,12 +244,12 @@
       case 'voiceprint.open': openSheet({ kind: 'voiceprint' }); break;
       case 'insets': if (params.get('frame') !== 'ios') applyInsets(p); break;
       case 'asr.partial':
-        $('partial').textContent = p.text ? `… ${p.text}` : '';
+        PARTIAL.textContent = p.text ? `… ${p.text}` : '';
         scrollToEnd();
         break;
       case 'asr.final':
-        $('partial').textContent = '';
-        addLine(p);
+        PARTIAL.textContent = '';
+        if (!S.lines.has(p.id)) { addLine(p); markNew(S.lines.get(p.id)); }
         renderLiveRecent();
         break;
       case 'asr.speaker': setLineSpeaker(p.id, p.speaker, p.segments, p.score, p.speakerState, p.speakerPreview, p.candidates, p.trialSegments); break;
@@ -309,12 +352,12 @@
 
   function resetTranscript() {
     S.liveProject = null;
-    $('lines').innerHTML = '';
+    LINES.innerHTML = '';
     S.lines.clear();
     S.records.clear();
-    S.commitments = []; S.summary = {}; S.board = null; S.notices.clear(); S.activeNotices = []; renderNoticeBanners();
+    S.commitments = []; S.summary = {}; S.board = null; S.notices.clear(); S.activeNotices = []; S.noticesShown = new Set(); renderNoticeBanners();
     S.ownerEdits.clear();
-    $('partial').textContent = '';
+    PARTIAL.textContent = '';
     S.pruned = false;
     S.autoScroll = true;
   }
@@ -341,6 +384,15 @@
     set('home-record-time', mmss(s.sessionMs));
     set('home-record-status', s.sourceReady ? '正在记录' : '等待收音');
     set('home-record-people', homePeopleSummary());
+    // Input level from native (0–1, twice a second) drives the meters; flat while nothing is coming in.
+    const level = Math.max(0, Math.min(1, Number(s.level) || 0)).toFixed(2), idle = !s.capturing || !s.sourceReady;
+    const navRecord = $('nav-record');
+    if (navRecord && navRecord.style) navRecord.style.setProperty('--level', idle ? '0' : level);
+    for (const id of ['home-level', 'rc-level']) {
+      const el = $(id);
+      if (el) { el.style.setProperty('--level', level); el.classList.toggle('is-idle', idle); }
+    }
+    document.querySelectorAll('.pupu-listening').forEach((el) => el.style.setProperty('--level', idle ? '0' : level));
     const warn = $('live-warn');
     if (warn) { const w = warnings(); warn.hidden = !w.length; warn.textContent = w.join('；'); }
     if (S.route.name === 'settings') set('diag', diagText());
@@ -394,7 +446,7 @@
     card.className = 'card clickable session-transcript live-line';
     card.dataset.id = u.id;
     card.dataset.start = u.startMs;
-    const list = $('lines');
+    const list = LINES;
     // Keep time order: finals may interleave after an ASR reconnect.
     const next = [...list.children].find((el) => Number(el.dataset.start) > u.startMs) || null;
     list.insertBefore(card, next);
@@ -452,7 +504,7 @@
       }).join('');
     } else body = esc(u.display || u.text);
     const tag = TAG_LABELS[u.tag] && !['chitchat', 'uncertain'].includes(u.tag) ? ` <span class="badge ${u.tag === 'decision' ? 'green' : u.tag === 'commitment' ? 'purple' : 'gray'}">${TAG_LABELS[u.tag]}</span>` : '';
-    return `<div class="session-speaker"><span class="avatar">${esc(name ? initial(name) : '?')}</span><strong class="${u.manualSpeaker ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(who)}</strong><span>${hms(u.startMs)}</span></div>
+    return `<div class="session-speaker"><span class="avatar ${name ? speakerTone(u.manualSpeaker || u.speaker) : ''}">${esc(name ? avatarText(name) : '?')}</span><strong class="${u.manualSpeaker ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(who)}</strong><span>${hms(u.startMs)}</span></div>
       <p>${body}${tag}</p>`;
   }
   function renderLine(id) {
@@ -489,26 +541,51 @@
     const b = $('rc-recall');
     if (b) b.classList.toggle('busy', busy);
   }
+  /** A sentence that was just heard slides up once (oops-design.css .is-new). The class is taken off again so that
+      moving the transcript between pages does not replay it. */
+  function markNew(el) {
+    if (!el) return;
+    el.classList.add('is-new');
+    setTimeout(() => el.classList.remove('is-new'), 600);
+  }
   /** The live overview shows the last few sentences; it is redrawn as they arrive. */
   function renderLiveRecent() {
     const box = $('live-recent');
     if (!box || S.route.name !== 'live' || S.liveTab !== 'live') return;
     const recent = [...S.records.values()].filter((u) => !u.filler).sort((a, b) => a.startMs - b.startMs).slice(-3);
-    box.innerHTML = recent.map((u) => `<div><button class="card clickable session-transcript" data-act="line-speaker" data-id="${esc(u.id)}">${lineHtml(u)}</button></div>`).join('') ||
+    const lastId = recent.length ? recent[recent.length - 1].id : null;
+    const fresh = lastId !== null && S.recentLast !== undefined && lastId !== S.recentLast;
+    S.recentLast = lastId;
+    box.innerHTML = recent.map((u) => `<div><button class="card clickable session-transcript${fresh && u.id === lastId ? ' is-new' : ''}" data-act="line-speaker" data-id="${esc(u.id)}">${lineHtml(u)}</button></div>`).join('') ||
       `<p class="meta">${S.state.capturing ? '开始说话后，原话会出现在这里。' : '开始收音后，最近 5 分钟的对话会出现在这里；事后点「找回刚才」就能找回原话。'}</p>`;
   }
 
   // ---- routing ----------------------------------------------------------------------------
 
-  const NAV = [['home', '首页', 'house'], ['sessions', '会话', 'chat-circle'], ['tasks', '任务', 'check-square'], ['memory', '记忆', 'bookmark-simple'], ['me', '设置', 'gear-six']];
+  // Four entries around the record button (设计语言 TabBar, 2 | ● | 2); Settings ("me") opens from the home header (2026-10-13).
+  const NAV = [['home', '首页', 'house'], ['sessions', '会话', 'chat-circle'], ['tasks', '任务', 'check-square'], ['memory', '记忆', 'bookmark-simple']];
+  const SETTINGS_ENTRY = ['me', '设置', 'gear-six'];
   const NAV_OF = { home: 'home', sessions: 'sessions', live: 'sessions', meeting: 'sessions', tasks: 'tasks', memory: 'memory', project: 'memory', me: 'me', settings: 'me', device: 'me' };
 
   function go(name, extra = {}) {
     if (S.sheet && S.sheet.kind !== 'pending') closeSheet();
+    const from = S.route.name;
     S.route = { name, ...extra };
     enter();
     render();
     $('scroll').scrollTop = 0;
+    if (from !== name || Object.keys(extra).length) playEnter(NAV_OF[from] !== NAV_OF[name]);
+  }
+  /** A page or tab change rises in once; a new main tab also pops (oops-design.css). render() keeps the classes while they play. */
+  let enterTimer = null;
+  function playEnter(navChanged) {
+    const root = $('root');
+    clearTimeout(enterTimer);
+    root.classList.remove('route-enter', 'nav-enter');
+    void root.offsetWidth; // restart the animation when pages change quickly
+    S.enterClasses = navChanged ? 'route-enter nav-enter' : 'route-enter';
+    root.classList.add(...S.enterClasses.split(' '));
+    enterTimer = setTimeout(() => { S.enterClasses = ''; root.classList.remove('route-enter', 'nav-enter'); }, 420);
   }
   /** What a page needs from native or the server each time it is opened. */
   function enter() {
@@ -525,14 +602,14 @@
     const root = $('root');
     const tabs = ['live', 'meeting'].includes(r);
     root.dataset.route = r;
-    root.className = `oops-root ${r === 'home' ? 'is-home' : ''} ${tabs ? 'has-session-tabs' : ''} ${S.state.capturing ? 'has-recording-controls' : ''}`;
+    root.className = `oops-root ${r === 'home' ? 'is-home' : ''} ${tabs ? 'has-session-tabs' : ''} ${S.state.capturing ? 'has-recording-controls' : ''} ${S.enterClasses || ''}`;
     $('hdr').className = `app-header ${r === 'home' ? 'home-header' : ''}`;
     $('hdr').innerHTML = headerHtml(r);
     $('tabs').hidden = !tabs;
     if (tabs) $('tabs').innerHTML = tabsHtml(r);
     const html = ({ home: homeHtml, sessions: sessionsHtml, live: liveHtml, meeting: meetingHtml, tasks: tasksHtml,
       memory: memoryHtml, project: projectHtml, me: meHtml, settings: settingsHtml, device: deviceHtml })[r];
-    $('screen').setAttribute('aria-label', NAV.find((n) => n[0] === NAV_OF[r])?.[1] || '');
+    $('screen').setAttribute('aria-label', [...NAV, SETTINGS_ENTRY].find((n) => n[0] === NAV_OF[r])?.[1] || '');
     $('screen').className = `screen-content ${r === 'home' ? 'home-main' : ''}`;
     $('screen').innerHTML = html ? html() : '';
     mountTranscript();
@@ -540,13 +617,34 @@
     renderNav();
     renderRecordingControls();
     renderStatus();
+    slideSegments();
+  }
+
+  /** 设计语言 SegmentedControl: a raised thumb (oops-design.css .segmented::before) slides to the selected view. Pages are
+      redrawn as HTML, so a control that changed selection starts its thumb at the old place and then springs across. */
+  const segmentLast = new Map();
+  function slideSegments() {
+    document.querySelectorAll('.oops-root .segmented').forEach((seg) => {
+      const buttons = [...seg.children].filter((b) => b.tagName === 'BUTTON');
+      const index = buttons.findIndex((b) => b.getAttribute('aria-selected') === 'true');
+      const key = `${seg.parentElement?.id || ''}:${buttons[0]?.dataset.act || ''}:${buttons.length}`;
+      const last = segmentLast.get(key);
+      segmentLast.set(key, index);
+      seg.style.setProperty('--n', String(Math.max(1, buttons.length)));
+      seg.classList.toggle('has-thumb', index >= 0);
+      if (index < 0) return;
+      if (last === undefined || last < 0 || last === index) { seg.style.setProperty('--i', String(index)); return; }
+      seg.style.setProperty('--i', String(last));
+      void getComputedStyle(seg, '::before').transform; // start from the old place, then move
+      (window.requestAnimationFrame || setTimeout)(() => seg.style.setProperty('--i', String(index)));
+    });
   }
 
   function mountTranscript() {
     const slot = $('slot-lines');
-    if (!slot) { $('holder').appendChild($('lines')); $('holder').appendChild($('partial')); return; }
-    slot.appendChild($('lines'));
-    slot.appendChild($('partial'));
+    if (!slot) { HOLDER.appendChild(LINES); HOLDER.appendChild(PARTIAL); return; }
+    slot.appendChild(LINES);
+    slot.appendChild(PARTIAL);
     S.records.forEach((_, id) => renderLine(id));
     scrollToEnd();
   }
@@ -557,10 +655,11 @@
     if (r === 'home') {
       const unread = [...S.notices.values()].some((n) => !n.dismissed);
       return `<img class="wordmark" alt="Oops" src="brand/wordmark.png"><div class="header-tools">
-        <button class="icon-button notification-button" data-act="notices-open" aria-label="提醒">${icon('bell', 25)}${unread ? '<i></i>' : ''}</button></div>`;
+        <button class="icon-button notification-button" data-act="notices-open" aria-label="提醒">${icon('bell', 25)}${unread ? '<i></i>' : ''}</button>
+        <button class="icon-button" aria-label="${SETTINGS_ENTRY[1]}" data-act="go" data-route="${SETTINGS_ENTRY[0]}">${icon(SETTINGS_ENTRY[2], 24)}</button></div>`;
     }
     const title = { sessions: '会话', live: '会话', meeting: '会话', tasks: '任务', memory: '记忆', project: '项目', me: '设置', settings: '收音与服务', device: '设备与自动聆听' }[r];
-    const left = ['live', 'meeting', 'project', 'settings', 'device'].includes(r) ? button('back', '返回上一页', 'caret-left', 23)
+    const left = ['live', 'meeting', 'project', 'me', 'settings', 'device'].includes(r) ? button('back', '返回上一页', 'caret-left', 23)
       : button('ask-open', '搜索全部内容', 'magnifying-glass', 23);
     const right = r === 'sessions' || r === 'live' || r === 'meeting' ? (S.state.capturing ? spacer : button('capture-start', '新建记录', 'plus'))
       : ['memory', 'me', 'project', 'settings', 'device'].includes(r) ? button('go', '回到首页', 'house').replace('data-act="go"', 'data-act="go" data-route="home"') : spacer;
@@ -573,33 +672,66 @@
     return `<div class="segmented" role="tablist">${items.map(([k, label]) => `<button role="tab" aria-selected="${k === current}" data-act="tab" data-tab="${k}">${label}</button>`).join('')}</div>`;
   }
 
+  /** 设计语言 RecordButton, raised in the middle of the tab bar: it starts a record, and while one runs it ends it after a
+      one-step confirmation (a daily capture clears its temporary full text when it stops). The halo follows the real
+      input level that renderStatus() writes into --level. */
+  function navRecordHtml() {
+    const on = !!S.state.capturing;
+    return `<span class="app-nav-center"><button type="button" class="record-button ${on ? 'is-recording' : 'is-idle'}" id="nav-record" data-act="record-button" aria-label="${on ? '结束记录' : '开始记录'}" style="--size:64px">`
+      + '<span class="record-button-ring outer" aria-hidden="true"></span><span class="record-button-ring" aria-hidden="true"></span>'
+      + `<span class="record-button-core" aria-hidden="true">${on ? '<span class="record-button-stop"></span>' : icon('microphone-bold', 26)}</span></button></span>`;
+  }
   function renderNav() {
     const current = NAV_OF[S.route.name];
-    $('nav').innerHTML = NAV.map(([k, label, ic]) => `<button aria-label="${label}" class="${k === current ? 'selected' : ''}" ${k === current ? 'aria-current="page"' : ''} data-act="go" data-route="${k}">${icon(ic, 25)}<span>${label}</span>${k === 'tasks' && S.openTaskCount ? `<b>${S.openTaskCount}</b>` : ''}</button>`).join('');
+    const tabs = NAV.map(([k, label, ic]) => `<button aria-label="${label}" class="${k === current ? 'selected' : ''}" ${k === current ? 'aria-current="page"' : ''} data-act="go" data-route="${k}">${icon(k === current ? `${ic}-duotone` : ic, 24)}<span>${label}</span>${k === 'tasks' && S.openTaskCount ? `<b>${S.openTaskCount}</b>` : ''}</button>`);
+    const html = tabs.slice(0, 2).join('') + navRecordHtml() + tabs.slice(2).join('');
+    // Only redraw when something changed, so the selected tab's pop (oops-design.css) is not restarted by data arriving.
+    if (S.navHtml !== html) { $('nav').innerHTML = html; S.navHtml = html; }
   }
 
+  // The live scene keeps the full controls. Every other page gets a compact bar where "找回刚才" and "结束" stay one tap
+  // away and the rest can be expanded. The expanded state belongs to one page and tab, so it never carries over.
+  const rcContext = () => JSON.stringify([S.state.sessionId, S.route.name, S.route.id ?? S.route.name_ ?? '', S.route.name === 'live' ? S.liveTab : S.route.name === 'meeting' ? S.meetingTab : '']);
   function renderRecordingControls() {
     const rc = $('rc');
     rc.hidden = !S.state.capturing;
-    if (!S.state.capturing) { rc.innerHTML = ''; return; }
-    rc.innerHTML = `<div class="rc-heading"><span class="rc-dot ${S.state.sourceReady ? '' : 'paused'}"></span>
-        <div class="rc-session"><strong>${esc(liveTitle())}</strong><span><span id="rc-status">${S.state.sourceReady ? '收音中' : '等待收音'}</span> · <time id="rc-time">${mmss(S.state.sessionMs)}</time></span></div>
-        ${S.route.name === 'live' && S.liveTab === 'live' ? '' : `<button class="rc-scene" data-act="go" data-route="live">现场${icon('caret-right', 13)}</button>`}</div>
+    if (!S.state.capturing) { rc.innerHTML = ''; S.rcExpanded = null; $('root').classList.remove('rc-compact'); return; }
+    const onsite = S.route.name === 'live' && S.liveTab === 'live', key = rcContext();
+    if (S.rcExpanded !== key) S.rcExpanded = null;
+    const expanded = onsite || !!S.rcExpanded;
+    rc.classList.toggle('is-compact', !expanded);
+    $('root').classList.toggle('rc-compact', !expanded);
+    const status = `<span class="rec-indicator ${S.state.sourceReady ? '' : 'is-paused'}"><i aria-hidden="true"></i><span id="rc-status">${S.state.sourceReady ? '收音中' : '等待收音'}</span><time id="rc-time">${mmss(S.state.sessionMs)}</time>${levelMeter('rc-level')}</span>`;
+    const toggle = onsite ? '' : `<button class="rc-expand" data-act="rc-expand" aria-expanded="${expanded}" aria-label="${expanded ? '收起记录控制' : '展开记录控制'}">${icon(expanded ? 'caret-down' : 'caret-up', 16)}</button>`;
+    if (!expanded) {
+      rc.innerHTML = `<div class="rc-heading">
+          <button class="rc-session" data-act="go" data-route="live" aria-label="回到记录现场"><strong>${esc(liveTitle())}</strong>${status}</button>
+          <div class="rc-compact-actions">
+            <button id="rc-recall" data-act="recall" aria-label="找回刚才">${icon('clock-counter-clockwise', 19)}</button></div>${toggle}</div>`;
+      return;
+    }
+    rc.innerHTML = `<div class="rc-heading">
+        <div class="rc-session"><strong>${esc(liveTitle())}</strong>${status}</div>
+        ${onsite ? '' : `<button class="rc-scene" data-act="go" data-route="live">现场${icon('caret-right', 13)}</button>`}${toggle}</div>
       <div class="rc-actions">
-        <button id="rc-recall" data-act="recall">${icon('clock-counter-clockwise', 19)}<span>找回刚才</span></button>
-        <button data-act="saved-list">${icon('bookmark-simple', 19)}<span id="rc-saved">已保存 ${S.state.savedCount ?? 0}</span></button>
-        <button class="rc-end" data-act="capture-stop">${icon('stop', 19)}<span>结束</span></button></div>`;
+        <button id="rc-recall" data-act="recall"><span class="rc-action-icon">${icon('clock-counter-clockwise', 20)}</span><span>找回刚才</span></button>
+        <button class="rc-saved" data-act="saved-list"><span class="rc-action-icon">${icon('bookmark-simple', 20)}</span><span id="rc-saved">已保存 ${S.state.savedCount ?? 0}</span></button>
+        <button class="rc-end" data-act="capture-stop"><span class="rc-action-icon">${icon('stop', 20)}</span><span>结束</span></button></div>`;
   }
 
   const recordingModeLabel = () => S.state.recordingMode === 'meeting' ? '正式会议' : '日常临时聆听';
 
+  function liveStartedAt() {
+    if (!S.state.sessionId) return null;
+    // Native reports elapsed session time, not the clock time it began; good to the minute.
+    S.liveStartedAt = S.liveStartedAt?.id === S.state.sessionId ? S.liveStartedAt : { id: S.state.sessionId, at: new Date(Date.now() - (S.state.sessionMs || 0)) };
+    return S.liveStartedAt.at;
+  }
   function liveTitle() {
     const a = S.state.agenda || {};
     if (a.goal) return a.goal;
-    if (!S.state.sessionId) return recordingModeLabel();
-    // Native reports elapsed session time, not the clock time it began; good to the minute.
-    S.liveStartedAt = S.liveStartedAt?.id === S.state.sessionId ? S.liveStartedAt : { id: S.state.sessionId, at: new Date(Date.now() - (S.state.sessionMs || 0)) };
-    return `${recordingModeLabel()} · ${shortDate(S.liveStartedAt.at.toISOString())}`;
+    const at = liveStartedAt();
+    return at ? `${recordingModeLabel()} · ${shortDate(at.toISOString())}` : recordingModeLabel();
   }
 
   // ---- 首页 ---------------------------------------------------------------------------------
@@ -608,6 +740,13 @@
     `<button class="list-row ${cls}" data-act="${act}" ${data}><span class="row-icon">${icon(ic)}</span><span class="row-copy"><strong>${esc(title)}</strong>${sub ? `<small>${esc(sub)}</small>` : ''}</span>${badge}${chevron ? icon('caret-right', 18) : ''}</button>`;
   const sectionTitle = (title, action = '', act = '', data = '') =>
     `<div class="section-title"><h2>${title}</h2>${action ? `<button class="text-action" data-act="${act}" ${data}>${esc(action)}${icon('caret-right', 14)}</button>` : ''}</div>`;
+
+  /** The hero's Pupu shows only what is visibly true: it listens (sound waves moving) while this capture is taking in
+      sound, holds still while waiting for the source, and is the official artwork otherwise. Never proof that a model ran. */
+  function heroMascot() {
+    if (S.state.capturing && window.OopsPupu) return window.OopsPupu.svg('listening', { still: !S.state.sourceReady, label: 'Oops伙伴' });
+    return '<img class="hero-mascot" alt="Oops伙伴" src="brand/mascot.png" draggable="false">';
+  }
 
   function homeHtml() {
     const now = new Date();
@@ -621,9 +760,9 @@
       <div class="home-date">${now.getMonth() + 1}/${now.getDate()}星期${week}</div>
       <p class="home-positioning">记住对话里的重点，陪你把下一步做好。</p>
       <section class="native-record-hero ${S.state.capturing ? 'is-active' : ''}" aria-label="记录状态">
-        <div class="native-record-heading"><div><small>${S.state.capturing ? '本场记录' : '从这一刻开始'}</small>
-          <h1>${S.state.capturing ? esc(liveTitle()) : '重要的话，<br>交给 Oops 记住。'}</h1></div><img alt="Oops伙伴" src="brand/mascot.png"></div>
-        ${S.state.capturing ? `<div class="native-record-status"><span class="recording-dot ${S.state.sourceReady ? '' : 'idle'}"></span><strong id="home-record-status">${S.state.sourceReady ? '正在记录' : '等待收音'}</strong><time id="home-record-time">${mmss(S.state.sessionMs)}</time></div>
+        <div class="native-record-heading"><div><small>${S.state.capturing ? `本场记录${liveStartedAt() ? ` · ${shortDate(liveStartedAt().toISOString())} 开始` : ''}` : '从这一刻开始'}</small>
+          <h1>${S.state.capturing ? esc(S.state.agenda?.goal || recordingModeLabel()) : '重要的话，<br>交给 Oops 记住。'}</h1></div>${heroMascot()}</div>
+        ${S.state.capturing ? `<div class="native-record-status"><span class="rec-indicator ${S.state.sourceReady ? '' : 'is-paused'}"><i aria-hidden="true"></i><strong id="home-record-status">${S.state.sourceReady ? '正在记录' : '等待收音'}</strong></span>${levelMeter('home-level')}<time id="home-record-time">${mmss(S.state.sessionMs)}</time></div>
           <p class="meta" id="home-record-people">${homePeopleSummary()}</p>
           <button class="button primary" type="button" data-act="go" data-route="live">${icon('waveform')}<span>回到记录现场</span></button>`
           : `<button class="button primary" type="button" data-act="capture-start">${icon('microphone')}<span>开始记录</span></button>`}
@@ -694,7 +833,7 @@
       ${all == null ? S.requests.history.error ? '' : spinnerHtml('正在读取会议…', '团队服务器') : `
         ${pending.length ? `<section class="session-list-group">${sectionTitle('待核对')}${pending.map(sessionCard).join('')}</section>` : ''}
         ${done.length ? `<section class="session-list-group">${sectionTitle('已保存')}${done.map(sessionCard).join('')}</section>` : ''}
-        ${!items.length ? `<div class="empty-state"><span>${icon('chat-circle-text', 28)}</span><strong>${q ? '没有找到' : '还没有会议'}</strong><p>${q ? '换个名称或项目再试试。' : '明确选择云端保存的正式会议会出现在这里；日常临时聆听不归档整场。'}</p></div>` : ''}`}
+        ${!items.length ? `<div class="empty-state">${emptyArt(q ? 'thinking' : 'sleepy', 'chat-circle-text')}<strong>${q ? '没有找到' : '还没有会议'}</strong><p>${q ? '换个名称或项目再试试。' : '明确选择云端保存的正式会议会出现在这里；日常临时聆听不归档整场。'}</p></div>` : ''}`}
       <p class="meta">新正式会议经本次确认后云端保存，原音与全文分别保留所选7、30或90天；已确认摘要、任务和短依据单独保留。历史会议沿用原保存规则。</p>
     </div>`;
   }
@@ -761,7 +900,7 @@
       ${names.length ? speakerChips(names, S.transcriptFilter.speaker) : ''}
       <p class="meta">点一句可以改说话人。${S.pruned ? (S.state.recordingMode === 'meeting' ? '更早的字幕已移出列表，已存会议按选择期限保留。' : '超过5分钟的原音和临时全文已清除；私人候选仅保留必要短依据。') : '最近 5 分钟的原声可以在「找回刚才」里回听。'}</p>
       <div class="stack" id="slot-lines"></div>
-      ${!S.records.size ? `<div class="empty-state"><span>${icon('waveform', 28)}</span><strong>还没有原话</strong><p>${S.state.capturing ? '开始说话后，转写会一句句出现在这里。' : '开始收音后，最近 5 分钟的对话会出现在这里。'}</p></div>` : ''}
+      ${!S.records.size ? `<div class="empty-state">${S.state.capturing ? emptyArt('listening', 'waveform', { still: !S.state.sourceReady }) : emptyArt('sleepy', 'waveform')}<strong>还没有原话</strong><p>${S.state.capturing ? '开始说话后，转写会一句句出现在这里。' : '开始收音后，最近 5 分钟的对话会出现在这里。'}</p></div>` : ''}
       ${S.state.capturing ? '<button class="button quiet" type="button" data-act="capture-stop"><span>结束当前记录</span></button>' : ''}
     </div>`;
   }
@@ -855,7 +994,7 @@
       ${open.length ? (board ? `<details class="session-list-group"><summary class="meta">逐句识别的原始建议 ${open.length} 条</summary>${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</details>`
         : `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>`) : ''}
       ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'commitment-open')).join('')}</section>` : ''}
-      ${!rows.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>还没有识别到待办</strong><p>有人说"我来做""你周五前给我"这类话时，会出现在这里。</p></div>` : ''}
+      ${!rows.length ? `<div class="empty-state">${emptyArt('sleepy', 'check-square')}<strong>还没有识别到待办</strong><p>有人说"我来做""你周五前给我"这类话时，会出现在这里。</p></div>` : ''}
       <button class="button primary" type="button" data-act="recall">${icon('clock-counter-clockwise')}<span>从刚才的话整理行动</span></button>
       <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button>
     </div>`;
@@ -927,7 +1066,7 @@
         const manual = u.review?.speaker;
         const name = manual ? manualLabel(manual) : speakerLabel(u.speaker);
         return `<div><div class="card clickable session-transcript" data-act="history-speaker" data-id="${esc(u.id)}">
-          <div class="session-speaker"><span class="avatar">${esc(name ? initial(name) : '?')}</span><strong class="${manual ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(name ? (manual ? `${name} · 已改` : name) : '未识别')}</strong>
+          <div class="session-speaker"><span class="avatar ${name ? speakerTone(manual || u.speaker) : ''}">${esc(name ? avatarText(name) : '?')}</span><strong class="${manual ? 'manual-name' : name ? '' : 'unknown-name'}">${esc(name ? (manual ? `${name} · 已改` : name) : '未识别')}</strong>
             <span>${hms(u.start_ms)}</span><button class="play-mini" data-act="history-play" data-id="${esc(u.id)}" data-key="h-${esc(u.id)}" aria-label="回听原声">${icon('play', 16)}</button></div>
           <p>${esc(u.text)}${TAG_LABELS[u.tag] && !['chitchat', 'uncertain'].includes(u.tag) ? ` <span class="badge ${u.tag === 'decision' ? 'green' : u.tag === 'commitment' ? 'purple' : 'gray'}">${TAG_LABELS[u.tag]}</span>` : ''}</p></div></div>`;
       }).join('') || `<div class="empty-state"><strong>${q || S.transcriptFilter.speaker ? '没有符合条件的原话' : '这场会议没有文字'}</strong></div>`}
@@ -943,7 +1082,7 @@
       return `<div class="stack sessions-feature">${heading}${stage}
         ${tasks.length ? `<section class="session-list-group">${sectionTitle('待核对')}${tasks.filter((it) => itemState(it) === 'todo').map(row).join('')}</section>
           <section class="session-list-group">${sectionTitle('已确认')}${tasks.filter((it) => itemState(it) === 'done').map(row).join('') || '<p class="meta">还没有确认的待办。</p>'}</section>`
-          : `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>纪要里没有待办</strong></div>`}
+          : `<div class="empty-state">${emptyArt('sleepy', 'check-square')}<strong>纪要里没有待办</strong></div>`}
         <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button></div>`;
     }
     const todos = h.digest?.commitment || [];
@@ -952,7 +1091,7 @@
       ${listRow({ act: 'review-start', data: `data-id="${esc(h.session_id)}"`, ic: 'sparkle', title: '识别到的任务建议', sub: '会后核对：是否是待办、谁负责' })}
       ${open.length ? `<section class="session-list-group">${sectionTitle('待承接')}${open.map((u) => commitmentCard(u, 'history-quote')).join('')}</section>` : ''}
       ${created.length ? `<section class="session-list-group">${sectionTitle('已建任务')}${created.map((u) => commitmentCard(u, 'history-quote')).join('')}</section>` : ''}
-      ${!todos.length ? `<div class="empty-state"><span>${icon('check-square', 28)}</span><strong>这场会议没有识别到待办</strong></div>` : ''}
+      ${!todos.length ? `<div class="empty-state">${emptyArt('sleepy', 'check-square')}<strong>这场会议没有识别到待办</strong></div>` : ''}
       <button class="button quiet" type="button" data-act="go" data-route="tasks"><span>查看全部任务</span></button>
     </div>`;
   }
@@ -971,7 +1110,7 @@
     if (S.playingKey || S.loadingKey) send('clip.stop');
     S.playingKey = null; S.loadingKey = null;
     S.history = null; S.historyItems = null; S.projects.items = null; S.projects.open = null; S.liveProject = null;
-    S.minutes.clear(); S.board = null; clearTaskIdentity();
+    S.minutes.clear(); S.deliveries.clear(); S.calendars.clear(); S.assistantJobs={items:[],busy:false}; S.feishu = {status:'loading',account:null,recipients:[],knownRecipients:{},capabilities:{},busy:false}; S.board = null; clearTaskIdentity();
     S.requests = { history: {}, projects: {}, project: {}, tasks: {} };
     S.pendingMeetingId = null; S.pendingReview = null; S.pendingTools = null; S.review = null; S.pendingRetention=null;
     S.itemReview = null; S.pendingDelete = null; S.deletedSessions.clear(); S.pendingReviewReturn = false;
@@ -980,7 +1119,7 @@
     S.meetingRequest = { active: false };
     S.draft = null;
     if (remoteCard) S.card = null;
-    if (['pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result', 'retain'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
+    if (['feishu', 'minutesDelivery', 'assistantJobs', 'calendar', 'pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result', 'retain'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
     if (S.route.name === 'meeting') S.route = { name: 'sessions' };
     if (S.route.name === 'project') S.route = { name: 'memory' };
     renderNav();
@@ -1140,6 +1279,7 @@
     const group = (title, rows) => rows.length ? `<section class="stack task-group"><div class="section-title"><h2>${title} <span class="meta">${rows.length}</span></h2></div>${rows.map(taskCard).join('')}</section>` : '';
     return `<div class="stack task-list">
       <div class="section-title"><div><h1 class="title">把事情往前推进</h1><p class="meta">先核对会议待办，再分别推进正式任务</p></div><button class="chip" type="button" data-act="tasks-retry" aria-label="刷新任务和核对状态">刷新</button></div>
+      <button class="button secondary" type="button" data-act="assistant-jobs"><span>查看已有工作成果</span></button>
       <div class="segmented" role="tablist">${[['review', '待核对'], ['mine', '我的任务'], ['all', '团队任务']].map(([k, label]) => `<button role="tab" aria-selected="${k === t.scope}" data-act="tasks-scope" data-value="${k}">${label}</button>`).join('')}</div>
       <div class="task-search-row"><div class="search-input">${icon('magnifying-glass', 18)}<input id="tasks-search" aria-label="搜索任务、原话或会议" placeholder="搜索任务、原话或会议" value="${esc(t.query)}"></div></div>
       ${needSelf ? `<section class="card"><h3>先选你是谁</h3><p class="meta">选好后，这里只列你负责的任务。</p><div class="inline-actions">${S.team.map((n) => `<button class="chip" data-act="tasks-self" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div></section>`
@@ -1184,7 +1324,7 @@
       ${items == null ? S.requests.projects.error ? '' : spinnerHtml('正在读取项目…', '团队服务器') : items.map((p) => `<button class="card clickable" data-act="project-open" data-name="${esc(p.name)}">
         <div class="ms-card-heading"><span class="badge purple">项目</span>${icon('folder-simple', 18)}</div><h3>${esc(p.name)}</h3>
         <p class="ms-preview">${p.meeting_count} 场会议 · 已确认决定 ${p.confirmed_decisions}</p><p class="meta">最近 ${formatDate(p.last_started_at)}</p></button>`).join('')
-        || `<div class="empty-state"><span>${icon('folder-simple', 28)}</span><strong>还没有项目</strong><p>打开一场会议，点「所属项目」新建或选择项目。</p></div>`}
+        || `<div class="empty-state">${emptyArt('sleepy', 'folder-simple')}<strong>还没有项目</strong><p>打开一场会议，点「所属项目」新建或选择项目。</p></div>`}
     </div>`;
   }
 
@@ -1200,7 +1340,7 @@
         ${p.decisions.map((d) => `<button class="card clickable" data-act="meeting-open" data-id="${esc(d.session_id)}"><div class="ms-card-heading"><span class="badge ${d.tag === 'constraint' ? 'gray' : 'green'}">${d.tag === 'constraint' ? '约束' : '决定'}</span></div>
           <h3>${esc(d.text)}</h3><p class="meta">${esc(formatDate(d.started_at))} ·《${esc(d.meeting_title || '会议')}》${d.speaker ? ` · ${esc(manualLabel(d.speaker))}` : ''}</p>
           ${d.source === 'meeting_review' ? `<p class="meta">来自会后事项人工确认${d.review?.by ? ` · ${esc(d.review.by)}` : ''}${d.source_status === 'retained' ? ' · 独立保留短依据' : ''}</p>${d.evidence?.length ? `<p class="parsed-decision-quote">“${esc(d.evidence[0].text)}”</p>` : ''}` : ''}</button>`).join('')
-          || `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>还没有确认过的决定</strong><p>在会后核对里点「是决定」。</p></div>`}`
+          || `<div class="empty-state">${emptyArt('sleepy', 'check-circle')}<strong>还没有确认过的决定</strong><p>在会后核对里点「是决定」。</p></div>`}`
       : sec === 'tasks' ? `${meetingTasks.length ? `<h3 class="parsed-source-heading">会后已确认待办 · ${meetingTasks.length}</h3>${meetingTasks.map(parsedCard).join('')}` : ''}
         ${p.tasks.length ? `<h3 class="parsed-source-heading">飞书正式任务 · ${p.tasks.length}</h3>${p.tasks.map(taskCard).join('')}` : ''}
         ${!meetingTasks.length && !p.tasks.length ? '<div class="empty-state"><strong>这个项目还没有当前有效的确认待办或飞书正式任务</strong></div>' : ''}`
@@ -1224,6 +1364,7 @@
         listRow({ act: 'go', data: 'data-route="device"', ic: 'bluetooth', title: '设备与开机自动聆听', sub: '首配独立选择 · 暂停与停止优先 · 设备示例' }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'microphone', title: '收音、唤醒与提醒偏好', sub: `${SOURCE_TEXT[s.source] || s.source || '未设置音源'} · ${s.voiceTrigger !== false ? '语音唤醒开' : '语音唤醒关'}` })])}
       ${group('连接与数据', [
+        listRow({ act: 'feishu-open', ic: 'plugs-connected', title: '我的飞书', sub: S.feishu.status === 'connected' ? S.feishu.account?.name || '已绑定我的账号' : '每人授权自己的账号 · 纪要确认后才发送' }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'plugs-connected', title: '服务连接', sub: s.backend === 'mock' ? 'Mock 后端（不连服务器）' : s.backendUrl || '未配置' }),
         listRow({ act: 'privacy-open', ic: 'shield-check', title: '隐私、保存与共享', sub: '日常临时5分钟；正式会议每次单独确认' })])}
       ${group('运行信息', [
@@ -1397,7 +1538,7 @@
   const frame = (title, body, desc = '') => `<div class="sheet-handle-zone" data-act="close"><div class="sheet-handle"></div></div>
     <div class="sheet-header"><h2 class="sheet-title">${title}</h2>${desc ? `<p class="sheet-description">${desc}</p>` : ''}</div>
     <div class="sheet-content"><div class="sheet-content">${body}</div></div>`;
-  const spinnerHtml = (title, sub) => `<div class="empty-state oops-loading"><div class="oops-spinner"></div><strong>${esc(title)}</strong><p>${esc(sub)}</p></div>`;
+  const spinnerHtml = (title, sub) => `<div class="empty-state oops-loading" role="status">${window.OopsPupu ? emptyArt('thinking') : '<div class="oops-spinner"></div>'}<strong>${esc(title)}</strong><p>${esc(sub)}</p></div>`;
   function requestNotice(request, act, hasData) {
     if (request?.error) return `<section class="card service-error" role="status"><h3>${hasData ? '刷新未成功' : '暂时无法读取'}</h3><p>${esc(request.error)}</p>${hasData ? '<p class="meta">下方保留上次读取的内容，可能不是最新。</p>' : ''}<button class="button secondary" type="button" data-act="${act}"><span>重新读取</span></button></section>`;
     return request?.loading && hasData ? '<p class="meta" role="status">正在刷新，先显示上次读取的内容…</p>' : '';
@@ -1424,6 +1565,10 @@
       review: reviewHtml,
       items: itemReviewHtml,
       minutesSource: minutesSourceHtml,
+      feishu: feishuHtml,
+      minutesDelivery: minutesDeliveryHtml,
+      assistantJobs: assistantJobsHtml,
+      calendar: calendarHtml,
       requestError: () => frame('暂时无法读取', `<p class="error-text">${esc(S.sheet.error)}</p><button class="button primary" type="button" data-act="meeting-retry"><span>重新打开会议</span></button>`),
       projectPick: projectPickHtml,
       rename: renameHtml,
@@ -1433,6 +1578,8 @@
       devicePreferences: devicePreferencesHtml,
       privacy: privacyHtml,
       captureMode: captureModeHtml,
+      stopConfirm: () => frame('结束这次记录？', `<p>${S.state.recordingMode === 'meeting' ? '已收到的原话和标记会保留，结束后可以在会后核对里整理。' : '日常临时聆听结束后，最近 5 分钟的完整原音和临时全文会清除，只留下待你核对的私人候选。'}</p>
+        <button class="button primary" type="button" data-act="capture-stop-confirm"><span>结束记录</span></button><button class="button quiet" type="button" data-act="close"><span>继续记录</span></button>`),
       dailyCandidates: () => frame('私人待核对候选', S.dailyCandidates.length ? S.dailyCandidates.map(x => `<section class="card"><span class="badge">私有 · 未确认</span><p>${esc(x.quote)}</p><p class="meta">${formatDate(x.updated_at)} · 独立短依据，完整原音/全文已不保留</p><button class="button secondary" data-act="daily-confirm-open" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">核对这条内容</button><button class="button quiet" data-act="daily-discard" data-id="${esc(x.id)}" data-session="${esc(x.session_id)}">舍弃候选</button></section>`).join('') : '<p>还没有私人候选；不会保存整场全文来填充这里。</p>'),
       dailyConfirm: () => frame('核对并保存私人记忆', `<label class="form-field"><span>要留下的内容</span><textarea id="daily-quote">${esc(S.sheet.item.quote)}</textarea></label><label class="toggle-row"><span>我已核对这条短依据，单独保存为私人记忆</span><input id="daily-confirmed" type="checkbox"></label><p class="meta">不自动创建任务、关联身份或共享。完整原音和全文不会恢复。</p><button class="button primary" data-act="daily-confirm-save">保存私人记忆</button>`),
       selfPick: selfPickHtml,
@@ -1444,6 +1591,7 @@
     const next = $('sheet').querySelector ? $('sheet').querySelector('.sheet-content') : null;
     if (next) next.scrollTop = keep;
     syncPlayButtons();
+    slideSegments();
   }
 
   function retentionHtml() {
@@ -1467,7 +1615,7 @@
   }
 
   function notFoundHtml() {
-    return frame('没找到', `<div class="empty-state"><span>${icon('magnifying-glass', 28)}</span><strong>没找到</strong><p>${esc(S.sheet.reason)}</p></div>
+    return frame('没找到', `<div class="empty-state">${emptyArt('oops', 'magnifying-glass')}<strong>没找到</strong><p>${esc(S.sheet.reason)}</p></div>
       <div class="action-grid"><button class="button secondary" type="button" data-act="close"><span>知道了</span></button>
         <button class="button primary" type="button" data-act="retry-recall"><span>再试一次</span></button></div>`);
   }
@@ -1684,7 +1832,7 @@
   function resultHtml() {
     const d = S.draft.data;
     const r = S.draft.result;
-    return frame(r.mock ? 'Mock 任务已生成' : '已创建飞书任务', `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>${esc(d.what)}</strong>
+    return frame(r.mock ? 'Mock 任务已生成' : '已创建飞书任务', `<div class="empty-state">${emptyArt('happy', 'check-circle')}<strong>${esc(d.what)}</strong>
         <p>${esc(d.who)} · ${esc(d.whenIso || '未设截止时间')}</p>${r.message ? `<p>${esc(r.message)}</p>` : ''}</div>
       <button class="button primary" type="button" data-act="open-task" ${r.taskUrl && !r.mock ? '' : 'disabled'}><span>在飞书中打开</span></button>
       <button class="button quiet" type="button" data-act="close"><span>完成</span></button>
@@ -1751,7 +1899,7 @@
     return frame('已保存 · 长期记忆', items.length
       ? items.map((it) => `<section class="card"><p class="recall-quote">${esc((it.utterances || []).map((u) => u.text).join(' '))}</p>
           <p class="meta">${esc(formatDate(it.saved_at))} · ${it.audio_expired ? '原声已过期' : '含原声'}</p></section>`).join('')
-      : `<div class="empty-state"><span>${icon('bookmark-simple', 28)}</span><strong>还没有保存的片段</strong><p>找回原话后点「保存」才会留在这里。</p></div>`);
+      : `<div class="empty-state">${emptyArt('sleepy', 'bookmark-simple')}<strong>还没有保存的片段</strong><p>找回原话后点「保存」才会留在这里。</p></div>`);
   }
   function askHtml() {
     return frame('问已有记录', `<label class="form-field"><span>范围</span><select id="ask-scope"><option value="session">本场</option><option value="history" ${S.sheet.history ? 'selected' : ''}>往期会议</option></select></label>
@@ -1793,13 +1941,17 @@
       <button class="chip" data-act="notice-dismiss" data-id="${esc(n.id)}" aria-label="关闭提醒">收起</button></div>`;
   }
   function renderNoticeBanners() {
-    $('notices').innerHTML = S.activeNotices.map((id) => S.notices.get(id)).filter((n) => n && !n.dismissed).map((n) =>
-      `<section class="card notice-banner"><span class="badge amber">${esc(n.kind === 'conflict' ? '可能冲突' : '会议提醒')}</span><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p>${noticeButtons(n)}</section>`).join('');
+    // Banners are redrawn whenever state arrives; only a notice shown for the first time drops in (oops-design.css).
+    const shown = S.noticesShown || (S.noticesShown = new Set());
+    const banners = S.activeNotices.map((id) => S.notices.get(id)).filter((n) => n && !n.dismissed);
+    $('notices').innerHTML = banners.map((n) =>
+      `<section class="card notice-banner${shown.has(n.id) ? '' : ' is-new'}"><span class="badge amber">${esc(n.kind === 'conflict' ? '可能冲突' : '会议提醒')}</span><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p>${noticeButtons(n)}</section>`).join('');
+    banners.forEach((n) => shown.add(n.id));
   }
   function noticeRecordsHtml(rows, readonly = false) {
     return rows.length ? rows.map((n) => `<section class="card"><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p>
       <p class="meta">${clock(n.atMs ?? n.at_ms)}${n.useful === false ? ' · 已反馈不准' : n.useful === true ? ' · 已反馈有用' : ''}${n.dismissed ? ' · 已收起' : ''}</p>${readonly ? '' : noticeButtons(n)}</section>`).join('')
-      : `<div class="empty-state"><span>${icon('bell', 28)}</span><strong>暂无提醒</strong><p>议程超时、跑题、和之前的决定冲突时会提醒。</p></div>`;
+      : `<div class="empty-state">${emptyArt('sleepy', 'bell')}<strong>暂无提醒</strong><p>议程超时、跑题、和之前的决定冲突时会提醒。</p></div>`;
   }
 
   // ---- past meetings ------------------------------------------------------------------------
@@ -1824,7 +1976,11 @@
     const wasVisible = S.route.name === 'meeting' && S.route.id === sid || S.history?.session_id === sid && S.sheet?.kind === 'tools';
     S.deletedSessions.add(sid); S.pendingDelete = null;
     S.historyItems = S.historyItems?.filter(x => x.session_id !== sid) || null;
-    S.minutes.delete(sid); S.projects.items = null;
+    S.minutes.delete(sid);
+    for(const [key,d] of S.deliveries)if(d.sessionId===sid)S.deliveries.delete(key);
+    for(const [key,d] of S.calendars)if(d.sessionId===sid)S.calendars.delete(key);
+    S.assistantJobs.items=(S.assistantJobs.items || []).filter(j=>j.session_id!==sid);
+    S.projects.items = null;
     if (S.projects.open) S.projects.open = visibleProject(S.projects.open);
     if (S.history?.session_id === sid) S.history = null;
     if (S.meetingRequest?.sessionId === sid) { S.meetingRequest.active = false; S.pendingMeetingId = null; }
@@ -1869,6 +2025,192 @@
     openCard({ id: 'history-search', trigger: 'ask', query: p.query, nowMs: 0, items, pool: items, single: items.length === 1, engine: p.engine, latencyMs: 0, readOnly: true });
   }
 
+  // ---- Personal Feishu binding and explicitly confirmed minutes delivery -------------------
+  const feishuAccountKey = () => JSON.stringify(S.feishu.account ? [S.feishu.bindingRevision || S.feishu.account.binding_id || S.feishu.account.bindingId || '', S.feishu.account.open_id || S.feishu.account.openId || '', S.feishu.account.tenant_key || ''] : null);
+  const deliveryBusy = d => !!d?.busy || ['pending', 'sending', 'partial', 'unknown'].includes(d?.status);
+  const deliverySent = d => ['sent', 'completed', 'succeeded'].includes(d?.status);
+  const deliveryBlocked = d => ['source_changed', 'stale', 'unavailable', 'waiting_minutes', 'unconfigured', 'expired', 'not_found', 'forbidden', 'invalidated'].includes(d?.status) || ['source_changed', 'stale'].includes(d?.data?.reason);
+  const deliveryKey = (sessionId, jobId) => jobId ? `job:${jobId}` : sessionId;
+  const activeDelivery = () => S.sheet?.kind === 'minutesDelivery' ? S.deliveries.get(deliveryKey(S.sheet.sessionId,S.sheet.jobId)) : null;
+  const deliveryAction = (d, action) => `${d.jobId ? 'assistant.delivery' : 'minutes.delivery'}.${action}`;
+  const deliveryPayload = d => d.jobId ? {jobId:d.jobId} : {};
+  const missingFeishuCapabilities = () => {
+    const caps=S.feishu.capabilities || {};
+    const missing=[['documents_create','创建文档'],['documents_write','写入正文'],['sharing_settings_read','核对文档隐私'],['sharing_settings_write','设置文档隐私'],['members_create','授权收件人'],['metadata_read','核对文档归属'],['messages_send','发送通知']].filter(([key]) => caps[key] === false).map(([,label]) => label);
+    if(caps.minutes_delivery!==true && !missing.length)missing.push('完整文档交付权限待服务核实');
+    return missing;
+  };
+  const deliveryCanConfirm = d => !!d?.draft && !deliveryBusy(d) && !deliverySent(d) && !deliveryBlocked(d) && !d.dirty && d.accountKey === feishuAccountKey() && S.feishu.status === 'connected' && !missingFeishuCapabilities().length && (!d.draft.attachments?.length || d.draft.attachment_copies_confirmed && S.feishu.capabilities.agent_file_delivery === true) && d.draft.title?.trim() && d.draft.content?.trim() && d.draft.recipients?.length > 0 && d.draft.recipients.every(person => typeof person === 'object' && person.name || S.feishu.knownRecipients?.[deliveryPersonId(person)]?.name);
+  const deliveryPersonId = p => typeof p === 'string' ? p : p.open_id || p.id || '';
+  const deliveryPersonName = p => typeof p === 'string' ? S.feishu.knownRecipients?.[p]?.name || `待核对联系人（${p}）` : p.name || p.display_name || '飞书联系人';
+  function feishuRequest(type, payload = {}) {
+    const requestId = `feishu-${++S.feishuSerial}`;
+    S.feishu.requestId = requestId; S.feishu.busy = true; S.feishu.error = null;
+    send(type, {...payload, requestId});
+    setTimeout(() => { if (S.feishu.requestId === requestId && S.feishu.busy) { S.feishu.busy = false; S.feishu.error = '尚未收到授权状态，请返回后刷新确认。'; if (S.sheet?.kind === 'feishu') renderSheet(); } }, 20000);
+    return requestId;
+  }
+  function openFeishu() { openSheet({kind:'feishu'}); feishuRequest('feishu.status'); }
+  function onFeishuStatus(p) {
+    if (p.requestId && p.requestId !== S.feishu.requestId) return;
+    const before = feishuAccountKey(), wasAuthorizing = S.feishu.status === 'authorizing';
+    Object.assign(S.feishu, {bindingRevision:p.binding_revision, status:({bound:'connected',unbound:'disconnected'}[p.status] || p.status || 'disconnected'), account:p.account || null, capabilities:p.capabilities || {}, busy:false, error:p.message || null});
+    if (wasAuthorizing && S.feishu.status === 'disconnected') S.feishu.status = 'cancelled';
+    if (before !== feishuAccountKey() || S.feishu.status !== 'connected') {
+      S.feishu.recipients = []; S.feishu.knownRecipients = {}; S.feishu.recipientSource = null; S.feishu.recipientSearched = false; S.feishu.recipientRequestId = null;
+      for (const d of S.deliveries.values()) d.confirmed = false;
+      for (const d of S.calendars.values()) d.confirmed = false;
+    }
+    if (['feishu','minutesDelivery','calendar'].includes(S.sheet?.kind)) renderSheet();
+    if (S.route.name === 'me') render();
+  }
+  function onFeishuAuthorization(p) {
+    if (p.requestId && p.requestId !== S.feishu.requestId) return;
+    S.feishu.busy = false; S.feishu.status = p.status || 'authorizing';
+    S.feishu.error = p.message || (p.authorization_url ? '请在飞书官方授权页确认，完成后返回并刷新状态。' : '未获得可用授权页面，请刷新后重试。');
+    // The native shell validates and opens the official HTTPS URL. Never open an arbitrary URL here.
+    if (S.sheet?.kind === 'feishu') renderSheet();
+  }
+  function feishuHtml() {
+    const f = S.feishu, labels = {loading:'正在读取', disconnected:'尚未绑定', connected:'已绑定我的账号', authorizing:'等待飞书授权', cancelled:'本次授权已取消', expired:'授权已过期', unconfigured:'应用尚未配置', unavailable:'飞书应用暂不可用'};
+    return frame('我的飞书', `${S.state.backend === 'mock' ? '<p class="notice">隔离模拟，不会访问真实飞书或发送消息。</p>' : ''}<section class="card"><span class="badge ${f.status === 'connected' ? 'green' : 'gray'}">${labels[f.status] || esc(f.status)}</span><h3>${esc(f.account?.name || f.account?.display_name || '绑定你自己的飞书')}</h3><p class="meta">${esc(f.account?.tenant_name || '在手机发起飞书官方授权，确认账号和权限后返回 Oops。')}</p></section>
+      ${f.error ? `<p class="meta" role="status">${esc(f.error)}</p>` : ''}
+      ${f.status === 'connected' ? `<section class="card"><h3>已授权能力</h3>${[['documents_write','创建纪要文档'],['sharing','设置选定收件人的文档权限'],['messages_send','发送纪要通知'],['calendar_delivery','创建并核实本人日程'],['calendar_invite','邀请已选日程参与人'],['agent_file_delivery','交付所选原成果文件']].map(([key,label]) => `<p class="meta">${label}：${f.capabilities?.[key] === false ? '未获授权' : f.capabilities?.[key] === true ? '已获授权' : '以服务核对结果为准'}</p>`).join('')}</section><button class="button secondary" data-act="feishu-connect" ${f.busy?'disabled':''}>重新核对并授权我的飞书</button><p>已绑定不代表同意自动发送。每份纪要仍需核对正文、收件人和文档权限。尚未开通的能力需要管理员先配置，再由本人确认授权。</p><button class="button danger" data-act="feishu-disconnect-prompt" ${f.busy ? 'disabled' : ''}>断开我的飞书</button>` : `<button class="button primary" data-act="feishu-connect" ${f.busy || ['unconfigured','unavailable'].includes(f.status) ? 'disabled' : ''}>${f.busy ? '正在读取…' : f.status === 'expired' ? '重新授权我的飞书' : '连接我的飞书'}</button>`}
+      ${['unconfigured','unavailable'].includes(f.status) ? '<p class="meta">管理员需要配置飞书应用和官方回调，当前不能发起授权。</p>' : ''}
+      <button class="button secondary" data-act="feishu-refresh" ${f.busy ? 'disabled' : ''}>返回授权后，刷新状态</button>
+      ${S.sheet.disconnectConfirm ? '<section class="card"><p>断开后停止后续访问，未发送草稿保留，原发送确认失效。已交付的文档权限需在飞书中管理。</p><button class="button danger" data-act="feishu-disconnect">确认断开</button></section>' : ''}
+      ${S.feishuReturnSession ? '<button class="button quiet" data-act="delivery-return">返回核对内容</button>' : ''}`);
+  }
+  function openMinutesDelivery(sessionId,jobId=null) {
+    if (!sessionId || S.deletedSessions.has(sessionId)) return;
+    openSheet({kind:'minutesDelivery',sessionId,jobId});
+    feishuRequest('feishu.status');
+    if (!S.deliveries.has(deliveryKey(sessionId,jobId))) deliveryRequest(jobId ? 'assistant.delivery.open' : 'minutes.delivery.open', sessionId, jobId ? {jobId} : {});
+  }
+  function deliveryRequest(type, sessionId, extra = {}) {
+    const jobId=extra.jobId || (type.startsWith('assistant.') ? S.sheet?.jobId : null), key=deliveryKey(sessionId,jobId);
+    const d = S.deliveries.get(key) || {sessionId,jobId,status:'loading',dirty:false,confirmed:false};
+    const requestId = `delivery-${++S.feishuSerial}`;
+    d.busy = true; d.requestId = requestId; d.requestAccountKey = feishuAccountKey(); d.requestType = type; d.error = null;
+    if (!type.endsWith('.status')) d.confirmed = false;
+    S.deliveries.set(key, d);
+    send(type, {sessionId, requestId, ...extra});
+    if (activeDelivery() === d) renderSheet();
+    setTimeout(() => { if (d.requestId === requestId && d.busy) { d.busy = false; d.error = type.endsWith('.confirm') ? '发送结果尚未确认，请查询原操作结果，勿重复发送。' : '暂未收到回执，请重试读取。'; if (type.endsWith('.confirm')) d.status = 'unknown'; if (activeDelivery() === d) renderSheet(); } }, 20000);
+  }
+  function onMinutesDelivery(p) {
+    const sid = p.session_id || p.sessionId, d = S.deliveries.get(deliveryKey(sid,p.job_id || p.jobId));
+    if (!d || !p.requestId || p.requestId !== d.requestId || S.deletedSessions.has(sid)) return;
+    if(d.jobId && (p.draft && p.draft.job_id!==d.jobId || p.delivery?.job_id && p.delivery.job_id!==d.jobId || p.draft?.source_session_id && p.draft.source_session_id!==sid || p.delivery?.source_session_id && p.delivery.source_session_id!==sid)) { d.busy=false;d.confirmed=false;d.draft=null;d.status='invalidated';d.error='成果回包与当前任务不一致，请重新读取。';if(activeDelivery()===d)renderSheet();return; }
+    d.busy = false; d.data = p;
+    const operation = p.delivery;
+    if(Object.prototype.hasOwnProperty.call(p,'draft') && p.draft===null)d.draft=null;
+    d.status = p.status || (operation && (operation.revision === p.draft?.revision || ['unknown','sending','partial'].includes(operation.status)) ? operation.status : 'ready'); d.error = p.message || null; d.confirmed = false;
+    if (p.draft && !(d.dirty && d.requestType.endsWith('.status'))) { d.draft = {...p.draft, recipients:[...(p.draft.recipients || [])], permission:p.draft.permission || 'view'}; d.dirty = false; d.accountKey = (p.draft.account_open_id !== undefined && p.draft.account_open_id !== S.feishu.account?.open_id || p.draft.binding_revision !== undefined && p.draft.binding_revision !== S.feishu.bindingRevision) ? 'outdated-account' : p.draft.binding_revision !== undefined && p.draft.account_open_id !== undefined ? feishuAccountKey() : d.requestAccountKey; }
+    if (p.op_id || p.opId || operation?.op_id) d.opId = p.op_id || p.opId || operation.op_id;
+    if (activeDelivery() === d) renderSheet();
+  }
+  function deliveryEdit(field, value) {
+    const d = activeDelivery(); if (!d?.draft || deliveryBusy(d) || deliverySent(d) || deliveryBlocked(d)) return;
+    d.draft[field] = value; d.dirty = true; d.confirmed = false;
+    const box = $('delivery-confirmed'); if (box) box.checked = false;
+    const btn = $('delivery-send'); if (btn) btn.disabled = true;
+    const save = $('delivery-save'); if (save) save.disabled = !d.draft.title.trim() || !d.draft.content.trim() || S.feishu.status !== 'connected';
+  }
+  function deliveryRecipientsRequest() {
+    const requestId = `recipient-${++S.feishuSerial}`;
+    S.feishu.recipientRequestId = requestId; S.feishu.recipientsLoading = true; S.feishu.recipientsError = null;
+    send('feishu.recipients', {query:$('delivery-search')?.value || '',requestId});
+  }
+  function minutesDeliveryHtml() {
+    const d = activeDelivery();
+    if (!d) return frame('核对并发送纪要', '<p>正在读取待发送草稿…</p>');
+    const draft = d.draft, locked = deliveryBusy(d) || deliverySent(d) || deliveryBlocked(d), f = S.feishu, title=d.jobId ? '核对并交付工作成果' : '核对并发送纪要';
+    const selected = draft?.recipients || [], ids = selected.map(deliveryPersonId);
+    const statuses = {invalidated:'账号或来源已变化，原操作失效',pending:'发送中，等待回执',sending:'发送中，等待回执',unknown:'发送结果待确认',partial:'部分交付，先核对原操作回执',sent:'发送成功',completed:'发送成功',succeeded:'发送成功',source_changed:'来源已变化，请重新核对',stale:'来源已失效',waiting_minutes:'等待会议纪要',unavailable:'纪要暂不可用',expired:'授权已过期',unconfigured:'应用尚未配置',failed:'操作失败，先核对结果',ready:'等待你核对',draft:'等待你核对'};
+    return frame(title, `${S.state.backend === 'mock' ? '<span class="badge gray">隔离发送模拟</span>' : ''}${d.jobId ? '<p class="meta">仅核对已有成果。交付失败恢复同一份成果，不重新生成。</p>' : ''}<p class="meta">发送账号：${esc(f.status === 'connected' ? f.account?.name || '我的飞书' : '尚未绑定或授权已失效')}</p>
+      ${f.status !== 'connected' ? '<button class="button secondary" data-act="delivery-connect">连接我的飞书</button>' : ''}
+      ${missingFeishuCapabilities().length ? `<p class="error-text">当前授权缺少：${missingFeishuCapabilities().map(esc).join('、')}。请到我的飞书补充授权后重新核对。</p><button class="button secondary" data-act="delivery-connect">补充飞书授权</button>` : ''}<p class="meta" role="status">${d.busy ? '正在读取或等待服务器回执…' : statuses[d.status] || esc(d.status)}</p>${d.error ? `<p class="error-text" role="alert">${esc(d.error)}</p>` : ''}
+      ${draft ? `<label class="form-field"><span>${d.jobId ? '成果' : '纪要'}标题</span><input id="delivery-title" value="${esc(draft.title)}" ${locked ? 'disabled' : ''}></label><label class="form-field"><span>核对${d.jobId ? '成果' : '纪要'}正文</span><textarea id="delivery-content" rows="10" ${locked ? 'disabled' : ''}>${esc(draft.content)}</textarea></label>
+      ${d.jobId && draft.artifacts?.some(a=>a.kind==='file') ? `<h3>本版本原文件</h3>${draft.artifacts.filter(a=>a.kind==='file').map(a=>`<label class="check-row"><input type="checkbox" data-delivery-file="${esc(a.name)}" ${(draft.attachments || []).includes(a.name)?'checked':''} ${locked?'disabled':''}><span>${esc(a.name)} · ${Math.ceil(a.size/1024)} KB</span></label>`).join('')}<label class="check-row"><input id="delivery-file-copies" type="checkbox" ${draft.attachment_copies_confirmed?'checked':''} ${locked?'disabled':''}><span>所选原文件将作为可下载副本发送；文档的查看／编辑权限不限制文件副本。</span></label>${draft.attachments?.length && f.capabilities.agent_file_delivery!==true?'<p class="error-text">本人账号尚未获准上传和发送原文件，请到我的飞书补充授权。</p>':''}` : ''}
+      <h3>选择收件人 · ${selected.length}人</h3><p class="meta">参会人只是线索，不会自动勾选。已选：${selected.length ? selected.map(deliveryPersonName).map(esc).join('、') : '无，请明确选择'}</p>
+      ${!locked ? `<p class="meta">已选联系人须能核对姓名；待核对联系人请搜索确认或移除后重新选择。</p><label class="form-field"><span>搜索飞书联系人</span><input id="delivery-search" value="${esc(S.feishu.recipientQuery || '')}" placeholder="输入姓名"></label><button class="button quiet" data-act="delivery-search" ${f.status !== 'connected' || f.recipientsLoading ? 'disabled' : ''}>${f.recipientsLoading ? '正在查询…' : '查询联系人'}</button>
+      ${f.recipientSource === 'bound_accounts' ? `<p class="meta">${f.capabilities?.recipients_search ? '先显示同组织已绑定的账号；输入姓名可查询飞书联系人。收件人无需绑定 Oops。' : '当前授权未包含联系人搜索，仅列出已绑定的同组织账号。'}</p>` : ''}${f.recipientSearched && !f.recipientsLoading && !f.recipients.length && !f.recipientsError ? '<p class="meta">没有符合条件的账号，可调整姓名后重新查询。</p>' : ''}${f.recipientsError ? `<p class="error-text">${esc(f.recipientsError)}</p>` : ''}${f.recipients.map(person => `<label class="check-row"><input type="checkbox" data-delivery-recipient="${esc(deliveryPersonId(person))}" ${ids.includes(deliveryPersonId(person)) ? 'checked' : ''}><span>${esc(person.name)} · ${esc(deliveryPersonId(person).slice(-8))}${person.department ? ' · ' + esc(person.department) : ''}</span></label>`).join('')}
+      ${selected.filter(p => !f.recipients.some(x => deliveryPersonId(x) === deliveryPersonId(p))).map(p => `<label class="check-row"><input type="checkbox" data-delivery-recipient="${esc(deliveryPersonId(p))}" checked><span>${esc(deliveryPersonName(p))} · 已选</span></label>`).join('')}` : ''}
+      <label class="form-field"><span>收件人的文档权限</span><select id="delivery-permission" ${locked ? 'disabled' : ''}><option value="view" ${draft.permission === 'view' ? 'selected' : ''}>仅查看</option><option value="edit" ${draft.permission === 'edit' ? 'selected' : ''}>可编辑</option></select></label>
+      ${!locked ? `<button id="delivery-save" class="button secondary" data-act="delivery-save" ${!draft.title?.trim() || !draft.content?.trim() || f.status !== 'connected' ? 'disabled' : ''}>${d.dirty ? '保存待发送草稿' : '保存本版草稿，继续核对'}</button><label class="check-row"><input id="delivery-confirmed" type="checkbox" ${d.confirmed ? 'checked' : ''} ${deliveryCanConfirm(d) ? '' : 'disabled'}><span>我已核对正文、${selected.length}位收件人与${draft.permission === 'view' ? '查看' : '编辑'}权限，同意发送本版本</span></label><button id="delivery-send" class="button primary" data-act="delivery-confirm" ${deliveryCanConfirm(d) && d.confirmed ? '' : 'disabled'}>确认发送</button><p class="meta">修改正文、收件人、权限或绑定账号后，需保存并重新核对。</p>` : ''}` : ''}
+      ${d.opId ? `<button class="button secondary" data-act="delivery-status" ${d.busy ? 'disabled' : ''}>查询原操作结果</button><p class="meta">操作记录：${esc(d.opId)}。查询不会重新发送。</p>` : ''}
+      ${d.opId && ['failed','partial'].includes(d.status) ? `<button class="button secondary" data-act="delivery-resume" ${d.busy?'disabled':''}>恢复原操作未完成的交付</button>` : ''}
+      ${d.data?.delivery ? `<section class="card"><h3>交付回执</h3><p>${esc(d.data.delivery.message || statuses[d.data.delivery.status] || '服务器已记录本次交付结果。')}</p></section>` : ''}
+      ${d.data?.delivery?.status === 'sent' && /^https:\/\/[^/]+\.(feishu\.cn|larksuite\.com)\/docx\//i.test(d.data.delivery.doc_url || '') ? '<button class="button secondary" data-act="delivery-doc">在飞书查看已发送纪要</button>' : ''}
+      ${d.data?.receipt ? `<section class="card"><h3>交付回执</h3><p>${esc(d.data.receipt.message || '服务器已记录本次交付结果。')}</p></section>` : ''}
+      ${!d.opId || deliveryBlocked(d) ? `<button class="button quiet" data-act="delivery-reload" ${d.busy ? 'disabled' : ''}>重新读取当前草稿</button>` : ''}`);
+  }
+
+  function openAssistantJobs(sessionId='') {
+    openSheet({kind:'assistantJobs'});
+    const requestId=`assistant-${++S.feishuSerial}`;
+    S.assistantJobs={items:[],busy:true,requestId,sessionId};
+    send('assistant.jobs',{sessionId,requestId});renderSheet();
+    setTimeout(()=>{if(S.assistantJobs.requestId===requestId && S.assistantJobs.busy){S.assistantJobs.busy=false;S.assistantJobs.error='读取成果超时，请重新读取。';if(S.sheet?.kind==='assistantJobs')renderSheet();}},20000);
+  }
+  function onAssistantJobs(p) {
+    if(p.requestId!==S.assistantJobs.requestId)return;
+    S.assistantJobs={...S.assistantJobs,busy:false,error:null,items:Array.isArray(p.jobs)?p.jobs:Array.isArray(p.items)?p.items:[]};
+    if(S.sheet?.kind==='assistantJobs')renderSheet();
+  }
+  function assistantJobsHtml() {
+    const a=S.assistantJobs;
+    return frame('已有工作成果',`<p class="meta">这里只读取你有权查看的已有成果，不开始生成。交付和任务业务完成分别记录。</p>${a.busy?'<p role="status">正在读取…</p>':a.error?`<p class="error-text">${esc(a.error)}</p>`:a.items.length?a.items.map(j=>`<button class="card clickable" data-act="assistant-result" data-job="${esc(j.id || j.job_id)}" data-session="${esc(j.session_id || '')}"><h3>${esc(j.title || {research:'资料查询',report:'会议报告',ppt:'演示文稿'}[j.kind] || '工作成果')}</h3><p class="meta">${esc(j.generation_status==='ready' || j.status==='done'?'成果已生成，核对后交付':({pending:'等待处理',working:'正在处理',failed:'处理未完成',unknown:'处理结果待核实'}[j.status] || '读取成果'))} · ${esc({needs_personal_review:'待本人核对',ready:'待本人核对',pending:'正在交付',sent:'已交付',partial:'交付未全部完成',failed:'交付失败',unknown:'交付结果待核实'}[j.delivery_status] || '')}</p></button>`).join(''):'<p>暂无已核实归属的可用成果。</p>'}<button class="button secondary" data-act="assistant-refresh" ${a.busy?'disabled':''}>重新读取已有成果</button>`);
+  }
+  const calendarKey=(sid,fid='manual')=>`${sid}:${fid}`;
+  const activeCalendar=()=>S.sheet?.kind==='calendar'?S.calendars.get(calendarKey(S.sheet.sessionId,S.sheet.followupId)):null;
+  const calendarLocked=d=>!!d?.busy || ['queued','creating','inviting','invitation_unknown','created_unverified','unknown','created','invalidated'].includes(d?.status) || d?.sourceChanged;
+  const calendarCanConfirm=d=>!!d?.draft && !calendarLocked(d) && !d.dirty && d.draft.reviewed===true && d.accountKey===feishuAccountKey() && S.feishu.status==='connected' && S.feishu.capabilities.calendar_delivery===true && (!d.draft.attendees?.length || S.feishu.capabilities.calendar_invite===true && d.draft.attendees.every(id=>S.feishu.knownRecipients?.[id]?.name));
+  function openCalendar(sessionId,followupId='manual') {
+    if(!sessionId || S.deletedSessions.has(sessionId))return;
+    openSheet({kind:'calendar',sessionId,followupId});feishuRequest('feishu.status');
+    if(!S.calendars.has(calendarKey(sessionId,followupId)))calendarRequest('calendar.open',sessionId,followupId);
+  }
+  function calendarRequest(type,sessionId,followupId='manual',extra={}) {
+    const key=calendarKey(sessionId,followupId),d=S.calendars.get(key) || {sessionId,followupId,status:'loading',dirty:false};
+    d.requestId=`calendar-${++S.feishuSerial}`;d.requestType=type;d.requestAccountKey=feishuAccountKey();d.busy=true;d.confirmed=false;d.error=null;
+    S.calendars.set(key,d);send(type,{sessionId,followupId,requestId:d.requestId,...extra});
+    if(activeCalendar()===d)renderSheet();
+    const requestId=d.requestId;
+    setTimeout(()=>{if(d.requestId===requestId && d.busy){d.busy=false;d.error=type==='calendar.confirm'?'结果尚未核实，请查询原日程，勿重复创建。':'暂未收到回执，请重新读取。';if(type==='calendar.confirm')d.status='unknown';if(activeCalendar()===d)renderSheet();}},20000);
+  }
+  function onCalendar(p) {
+    const sid=p.session_id || p.sessionId,fid=p.followup_id || 'manual',d=S.calendars.get(calendarKey(sid,fid));
+    if(!d || p.requestId!==d.requestId || S.deletedSessions.has(sid))return;
+    const op=p.calendar || (p.op_id?p:null);
+    if([p.draft,op].some(x=>x && (x.session_id && x.session_id!==sid || x.followup_id && x.followup_id!==fid))){d.busy=false;d.confirmed=false;d.draft=null;d.sourceChanged=true;d.status='invalidated';d.error='日程回包与当前安排不一致，请重新读取。';if(activeCalendar()===d)renderSheet();return;}
+    d.busy=false;d.error=null;d.confirmed=false;d.data=p;
+    d.sourceChanged=['source_changed','unavailable','expired','invalidated'].includes(op?.source_status) || op?.status==='invalidated';
+    if(Object.prototype.hasOwnProperty.call(p,'draft') && p.draft===null || d.sourceChanged){d.draft=null;d.dirty=false;}
+    else if(p.draft)d.sourceChanged=false;
+    d.status=d.sourceChanged?'invalidated':op?.status || p.status || 'ready';
+    if(p.draft && !(d.dirty && d.requestType==='calendar.status')){d.draft={...p.draft,attendees:[...(p.draft.attendees || [])]};d.dirty=false;d.accountKey=p.draft.account_open_id===S.feishu.account?.open_id && p.draft.binding_revision===S.feishu.bindingRevision?feishuAccountKey():'outdated-account';}
+    if(op?.op_id)d.opId=op.op_id;
+    if(activeCalendar()===d)renderSheet();
+  }
+  function calendarEdit(field,value) {
+    const d=activeCalendar();if(!d?.draft || calendarLocked(d))return;
+    d.draft[field]=value;d.dirty=true;d.confirmed=false;
+    const box=$('calendar-confirmed');if(box)box.checked=false;
+    const button=$('calendar-confirm');if(button)button.disabled=true;
+  }
+  function calendarHtml() {
+    const d=activeCalendar();if(!d)return frame('核对后续日程','<p>正在读取…</p>');
+    const a=d.draft,locked=calendarLocked(d),f=S.feishu,op=d.data?.calendar || d.data || {};
+    const names={ready:'请核对安排',queued:'已排队',creating:'正在创建',created_unverified:'日程已创建，等待回读核实',inviting:'正在邀请已选参与人',invitation_unknown:'邀请结果待核实',created:a?.attendees?.length?'日程与本次邀请已核实':'日程创建已核实',unknown:'创建结果待核实，未重复创建',failed:'操作未完成，可恢复原请求',invalidated:'账号或来源已变化'};
+    return frame('核对后续日程',`${S.state.backend==='mock'?'<p class="notice">隔离模拟，不创建真实日程或邀请。</p>':''}<p class="meta">账号：${esc(f.account?.name || '尚未连接本人飞书')}。参与人默认不选；不选参与人只创建本人日程。</p><p role="status">${d.busy?'正在读取或等待回执…':esc(names[d.status] || d.status)}</p>${d.error?`<p class="error-text">${esc(d.error)}</p>`:''}${f.status!=='connected'?'<button class="button secondary" data-act="calendar-connect">连接我的飞书</button>':''}${f.status==='connected' && f.capabilities.calendar_delivery!==true?'<p class="error-text">尚未获得日历查询、日程创建和回读权限。</p><button class="button secondary" data-act="calendar-connect">补充飞书授权</button>':''}
+      ${(d.data?.suggestions || []).length?`<h3>原会议的后续安排</h3>${d.data.suggestions.map(s=>`<button class="card clickable" data-act="calendar-suggestion" data-id="${esc(s.followup_id)}"><strong>${esc(s.title)}</strong><p>${esc(s.start)}</p><p class="meta">${esc(s.quote || '')}</p></button>`).join('')}`:''}
+      ${a?`<label class="form-field"><span>日程标题</span><input data-calendar-field="title" value="${esc(a.title)}" ${locked?'disabled':''}></label><label class="form-field"><span>开始时间（含时区）</span><input data-calendar-field="start" value="${esc(a.start)}" placeholder="2026-10-16T15:00:00+08:00" ${locked?'disabled':''}></label><label class="form-field"><span>结束时间（含时区）</span><input data-calendar-field="end" value="${esc(a.end)}" placeholder="2026-10-16T15:30:00+08:00" ${locked?'disabled':''}></label><label class="form-field"><span>时区</span><input data-calendar-field="time_zone" value="${esc(a.time_zone)}" placeholder="Asia/Shanghai" ${locked?'disabled':''}></label><label class="form-field"><span>说明</span><textarea data-calendar-field="description" ${locked?'disabled':''}>${esc(a.description)}</textarea></label><h3>明确邀请的参与人 · ${a.attendees.length}人</h3><p class="meta">已选：${a.attendees.length?a.attendees.map(deliveryPersonName).map(esc).join('、'):'无，仅本人日程'}</p>
+      ${!locked?`<label class="form-field"><span>查找飞书联系人</span><input id="delivery-search" value="${esc(f.recipientQuery || '')}"></label><button class="button quiet" data-act="delivery-search">查询联系人</button>${f.recipientsError?`<p class="error-text">${esc(f.recipientsError)}</p>`:''}${[...f.recipients,...a.attendees.filter(id=>!f.recipients.some(p=>deliveryPersonId(p)===id)).map(id=>({open_id:id,name:deliveryPersonName(id)}))].map(p=>`<label class="check-row"><input type="checkbox" data-calendar-attendee="${esc(deliveryPersonId(p))}" ${a.attendees.includes(deliveryPersonId(p))?'checked':''}><span>${esc(p.name)}</span></label>`).join('')}<button class="button secondary" data-act="calendar-save">保存本版安排</button><label class="check-row"><input id="calendar-confirmed" type="checkbox" ${d.confirmed?'checked':''} ${calendarCanConfirm(d)?'':'disabled'}><span>我已核对标题、时间、时区和${a.attendees.length}位参与人，同意创建本版日程。</span></label><button id="calendar-confirm" class="button primary" data-act="calendar-confirm" ${calendarCanConfirm(d) && d.confirmed?'':'disabled'}>确认创建日程</button>`:''}`:''}
+      ${d.opId?`<button class="button secondary" data-act="calendar-status" ${d.busy?'disabled':''}>查询原日程结果</button><p class="meta">查询只读取原操作，不重新创建。</p>`:''}${d.opId && ['failed','created_unverified','invitation_unknown'].includes(d.status) && !d.sourceChanged?`<button class="button secondary" data-act="calendar-resume" ${d.busy?'disabled':''}>核实并恢复原请求</button>`:''}${op.event_verified?'<p class="meta">已回读核实原日程存在。</p>':''}<button class="button quiet" data-act="calendar-reload" ${d.busy?'disabled':''}>重新读取当前安排</button>`);
+  }
+
   // ---- read-only AI minutes: query stored results, never generate or send --------------------
 
   function requestMinutes(sessionId) {
@@ -1884,6 +2226,8 @@
   }
   function refreshMinutesAfterReview(sessionId) {
     if (S.sheet?.kind === 'minutesSource' && S.sheet.sessionId === sessionId) closeSheet();
+    for(const d of S.deliveries.values()) if(d.sessionId===sessionId) { d.confirmed=false;if(!d.opId)d.status='source_changed'; }
+    for(const d of S.calendars.values()) if(d.sessionId===sessionId) { d.confirmed=false;d.sourceChanged=true; }
     requestMinutes(sessionId);
     if (S.route.name === 'meeting' && S.history?.session_id === sessionId) render();
   }
@@ -1909,10 +2253,13 @@
         ${itemsLead ? '<p class="meta">待办、决定和还没定的事已整理在上方「会后事项」里核对。</p>' : `${rows('主线任务', main, task, x => x.ids)}
         ${rows('决定', m.decisions, x => x.text, x => x.ids)}
         ${rows('其他事项', other, task, x => x.ids)}`}
-        ${rows('讨论要点', m.topics, x => `${x.topic || ''}：${Array.isArray(x.points) ? x.points.join('；') : x.points || ''}`, () => [])}
+        ${rows('讨论要点', m.topics, x => `${x.topic || ''}：${Array.isArray(x.points) ? x.points.join('；') : x.points || ''}${x.source_status === 'unrecorded' || !Array.isArray(x.ids) || !x.ids.length ? '（旧纪要未保存本组原话引用）' : x.source_status === 'unavailable' ? '（原话引用已不可用）' : ''}`, x => x.source_status === 'unavailable' ? [] : x.ids)}
         ${itemsLead ? '' : rows('待确认问题', m.open_questions, x => x.question, x => [x.id])}
-        ${rows('后续跟进建议', m.follow_ups, x => `${x.title || ''}${x.start ? ' · ' + x.start : ''}`, () => [])}
+        ${rows('后续跟进建议', m.follow_ups, x => `${x.title || ''}${x.start ? ' · ' + x.start : ''}`, x => x.ids)}
         ${m.substantive === false ? '<p class="meta">这场对话没有需要整理的实质内容。</p>' : ''}
+        <button class="button secondary" type="button" data-act="delivery-open"><span>核对并发送飞书纪要</span></button>
+        <button class="button quiet" type="button" data-act="calendar-open"><span>核对后续日程</span></button>
+        <button class="button quiet" type="button" data-act="assistant-jobs" data-session="${esc(sessionId)}"><span>查看本场已有工作成果</span></button>
         ${p.doc_url ? `<button class="button secondary" type="button" data-act="minutes-doc"><span>查看飞书纪要文档</span></button>` : ''}`;
     } else if (p.status === 'pending') {
       body = `<p>${p.reason === 'in_progress' ? '会议仍在进行，AI 纪要尚未整理。' : '会后纪要正在整理，稍后可重新查询。'}</p><p class="meta">查询状态不会重新生成或发送纪要。</p>`;
@@ -1952,6 +2299,7 @@
       listRow({ act: 'ask-open', ic: 'magnifying-glass', title: '问本场' }),
       listRow({ act: 'saved-list', ic: 'bookmark-simple', title: '已保存片段' }),
     ] : [
+      listRow({ act: 'delivery-open', ic: 'share-network', title: '核对并发送飞书纪要', sub: '先核对内容、收件人与文档权限' }),
       listRow({ act: 'rename-open', ic: 'pencil-simple', title: '名称', sub: meetingName(S.history || {}) }),
       listRow({ act: 'history-project', ic: 'folder-simple', title: '所属项目', sub: S.history?.project || '未归项目' }),
       listRow({ act: 'review-start', data: `data-id="${esc(S.history?.session_id || '')}"`, ic: 'check-circle', title: '会后核对', sub: `${(S.history?.review_queue || []).length}项待核对` }),
@@ -2027,7 +2375,7 @@
   function reviewHtml() {
     const r = S.review, row = S.history;
     if (r.i >= r.items.length) {
-      return frame('会后核对', `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>${r.items.length ? '核对完了' : '没有需要核对的内容'}</strong>
+      return frame('会后核对', `<div class="empty-state">${emptyArt(r.items.length ? 'cheer' : 'happy', 'check-circle')}<strong>${r.items.length ? '核对完了' : '没有需要核对的内容'}</strong>
         <p>已核对 ${r.done.size} 条${r.items.length - r.done.size ? `，跳过 ${r.items.length - r.done.size} 条（下次打开还会出现）` : ''}。</p></div>
         <button class="button primary" type="button" data-act="review-finish"><span>回到会议</span></button>`);
     }
@@ -2127,7 +2475,7 @@
     const r = S.itemReview, row = S.history, items = row?.items || [];
     const left = items.filter((it) => itemState(it) === 'todo').length;
     const it = items[r.i];
-    if (!it) return frame('会后核对', `<div class="empty-state"><span>${icon('check-circle', 28)}</span><strong>${items.length ? '这场会的事项都看完了' : '纪要里没有需要核对的事项'}</strong>
+    if (!it) return frame('会后核对', `<div class="empty-state">${emptyArt(items.length ? 'cheer' : 'sleepy', 'check-circle')}<strong>${items.length ? '这场会的事项都看完了' : '纪要里没有需要核对的事项'}</strong>
       <p>本次处理 ${r.done.size} 件${left ? `，还有 ${left} 件待核对` : ''}。</p></div><button class="button primary" type="button" data-act="items-finish"><span>回到会议</span></button>`);
     const v = itemView(it), st = itemState(it), [kindLabel, tone] = ITEM_KIND[v.kind] || ['事项', 'gray'];
     const saving = r.pending?.status === 'saving';
@@ -2290,6 +2638,20 @@
         pending.status=p.sourceChanged?'stale':'failed';pending.error=p.message;
         if (S.sheet?.kind==='retain') renderSheet();
       }
+    } else if (p.scope === 'feishu' || p.scope === 'minutes.delivery') {
+      const d = [...S.deliveries.values()].find(d=>p.requestId===d.requestId && (!p.sessionId || p.sessionId===d.sessionId));
+      const calendar = [...S.calendars.values()].find(d=>p.requestId===d.requestId && (!p.sessionId || p.sessionId===d.sessionId));
+      const matching = d && p.requestId === d.requestId || calendar && p.requestId === calendar.requestId || p.requestId === S.feishu.recipientRequestId || p.requestId === S.feishu.requestId;
+      if (matching && ['FEISHU_AUTH_EXPIRED','FEISHU_NOT_CONNECTED','FEISHU_OAUTH_UNAVAILABLE','FEISHU_CREDENTIAL_LOCKED'].includes(p.code)) {
+        S.feishu.status = p.code === 'FEISHU_AUTH_EXPIRED' || p.code === 'FEISHU_CREDENTIAL_LOCKED' ? 'expired' : p.code === 'FEISHU_NOT_CONNECTED' ? 'disconnected' : 'unconfigured';
+        for (const draft of S.deliveries.values()) draft.confirmed = false;
+        for (const draft of S.calendars.values()) draft.confirmed = false;
+      }
+      if (d && p.requestId === d.requestId) { d.busy = false; d.error = p.message; d.confirmed = false; if (p.sourceChanged || ['SOURCE_CHANGED','MINUTES_SOURCE_CHANGED','SOURCE_UNAVAILABLE','MEETING_OWNER_REQUIRED','FEISHU_BINDING_CHANGED','REVIEW_REVISION_CHANGED'].includes(p.code)) {d.status='source_changed';d.draft=null;d.dirty=false;} else if(d.opId)d.status='unknown'; if (activeDelivery() === d) renderSheet(); }
+      else if(calendar) { calendar.busy=false;calendar.error=p.message;calendar.confirmed=false;if(p.sourceChanged || ['CALENDAR_SOURCE_CHANGED','CALENDAR_SOURCE_UNAVAILABLE','FEISHU_BINDING_CHANGED'].includes(p.code)){calendar.sourceChanged=true;calendar.status='invalidated';calendar.draft=null;calendar.dirty=false;}else if(calendar.requestType==='calendar.confirm')calendar.status='unknown';if(activeCalendar()===calendar)renderSheet(); }
+      else if(p.requestId===S.assistantJobs.requestId) { S.assistantJobs.busy=false;S.assistantJobs.error=p.message;if(S.sheet?.kind==='assistantJobs')renderSheet(); }
+      else if (p.requestId === S.feishu.recipientRequestId) { S.feishu.recipientsLoading = false; S.feishu.recipientsError = p.message; if (['minutesDelivery','calendar'].includes(S.sheet?.kind)) renderSheet(); }
+      else if (p.requestId === S.feishu.requestId) { S.feishu.busy = false; S.feishu.error = p.message; if (S.sheet?.kind === 'feishu') renderSheet(); }
     } else if (p.scope === 'minutes') {
       const entry = S.minutes.get(p.sessionId);
       if (entry && (!p.requestId || p.requestId === entry.requestId)) {
@@ -2331,6 +2693,7 @@
     const r = S.route.name;
     if (r === 'project') return go('memory');
     if (['settings', 'device'].includes(r)) return go('me');
+    if (r === 'me') return go('home'); // Settings opens from the home header
     go('sessions');
   }
   function noticeFeedback(id, useful) {
@@ -2355,10 +2718,13 @@
   const ACTIONS = {
     go: (el) => go(el.dataset.route),
     back,
+    'rc-expand': () => { const key = rcContext(); S.rcExpanded = S.rcExpanded === key ? null : key; renderRecordingControls(); renderStatus(); },
     tab: (el) => {
+      const before = S.route.name === 'live' ? S.liveTab : S.meetingTab;
       if (S.route.name === 'live') S.liveTab = el.dataset.tab; else S.meetingTab = el.dataset.tab;
       S.transcriptFilter = { speaker: null, query: '' };
       render(); $('scroll').scrollTop = 0;
+      if (before !== el.dataset.tab) playEnter(false);
       if (S.route.name === 'live' && S.liveTab === 'transcript') { S.autoScroll = true; scrollToEnd(); }
     },
     close: closeSheet,
@@ -2368,6 +2734,32 @@
     'projects-retry': () => { loadProjects(); render(); if (S.sheet?.kind === 'projectPick') renderSheet(); },
     'project-retry': () => { loadProject(); render(); },
     'meeting-retry': () => openMeeting(S.sheet.sessionId),
+    'feishu-open': openFeishu,
+    'feishu-connect': () => { if (!S.feishu.busy) { feishuRequest('feishu.connect'); S.feishu.status = 'authorizing'; renderSheet(); } },
+    'feishu-refresh': () => { feishuRequest('feishu.status'); renderSheet(); },
+    'feishu-disconnect-prompt': () => { S.sheet.disconnectConfirm = true; renderSheet(); },
+    'feishu-disconnect': () => { for (const d of S.deliveries.values()) d.confirmed = false; feishuRequest('feishu.disconnect'); renderSheet(); },
+    'delivery-open': () => openMinutesDelivery(S.history?.session_id),
+    'delivery-connect': () => { S.feishuReturnSession = S.sheet.sessionId;S.feishuReturnJob=S.sheet.jobId;S.feishuReturnCalendar=null;openFeishu(); },
+    'delivery-return': () => { const sid=S.feishuReturnSession,job=S.feishuReturnJob,calendar=S.feishuReturnCalendar;S.feishuReturnSession=null;S.feishuReturnJob=null;S.feishuReturnCalendar=null;if(calendar)openCalendar(sid,calendar);else openMinutesDelivery(sid,job); },
+    'delivery-search': deliveryRecipientsRequest,
+    'delivery-reload': () => { const d=activeDelivery();if(d && !deliveryBusy(d))deliveryRequest(deliveryAction(d,'open'),d.sessionId,deliveryPayload(d)); },
+    'delivery-save': () => { const d=activeDelivery();if(!d?.draft || deliveryBusy(d) || deliverySent(d) || S.feishu.status!=='connected')return;const a=d.draft;deliveryRequest(deliveryAction(d,'save'),d.sessionId,{...deliveryPayload(d),revision:a.revision,title:a.title,content:a.content,recipients:a.recipients.map(deliveryPersonId),permission:a.permission,...(d.jobId?{attachments:a.attachments || [],attachment_copies_confirmed:a.attachment_copies_confirmed===true}:{})}); },
+    'delivery-confirm': () => { const d=activeDelivery();if(!deliveryCanConfirm(d) || !d.confirmed)return;d.opId=`${d.jobId?'result':'minutes'}-send-${Date.now().toString(36)}-${++S.feishuSerial}`;d.status='pending';deliveryRequest(deliveryAction(d,'confirm'),d.sessionId,{...deliveryPayload(d),revision:d.draft.revision,opId:d.opId,confirmed:true}); },
+    'delivery-resume': () => { const d=activeDelivery();if(!d?.opId || d.busy || !['failed','partial'].includes(d.status) || d.accountKey!==feishuAccountKey() || d.dirty || deliveryBlocked(d))return;deliveryRequest(deliveryAction(d,'confirm'),d.sessionId,{...deliveryPayload(d),revision:d.draft.revision,opId:d.opId,confirmed:true}); },
+    'delivery-doc': () => { const d = activeDelivery(), url = d?.data?.delivery?.doc_url; if (d?.data?.delivery?.status === 'sent' && /^https:\/\/[^/]+\.(feishu\.cn|larksuite\.com)\/docx\//i.test(url || '')) send('open.url', {url}); },
+    'delivery-status': () => { const d=activeDelivery();if(d?.opId && !d.busy)deliveryRequest(deliveryAction(d,'status'),d.sessionId,{...deliveryPayload(d),opId:d.opId}); },
+    'assistant-jobs': el=>openAssistantJobs(el?.dataset.session || ''),
+    'assistant-refresh': ()=>openAssistantJobs(S.assistantJobs.sessionId || ''),
+    'assistant-result': el=>{const j=S.assistantJobs.items.find(j=>(j.id || j.job_id)===el.dataset.job);if(j)openMinutesDelivery(j.session_id || j.source_session_id || el.dataset.session,j.id || j.job_id);},
+    'calendar-open': ()=>openCalendar(S.history?.session_id),
+    'calendar-suggestion': el=>{const d=activeCalendar();if(d)openCalendar(d.sessionId,el.dataset.id);},
+    'calendar-connect': ()=>{const d=activeCalendar();if(d){S.feishuReturnSession=d.sessionId;S.feishuReturnCalendar=d.followupId;S.feishuReturnJob=null;openFeishu();}},
+    'calendar-reload': ()=>{const d=activeCalendar();if(d && !d.busy)calendarRequest('calendar.open',d.sessionId,d.followupId);},
+    'calendar-save': ()=>{const d=activeCalendar();if(!d?.draft || calendarLocked(d) || S.feishu.status!=='connected')return;const a=d.draft;calendarRequest('calendar.save',d.sessionId,d.followupId,{revision:a.revision,title:a.title,description:a.description,start:a.start,end:a.end,time_zone:a.time_zone,attendees:a.attendees});},
+    'calendar-confirm': ()=>{const d=activeCalendar();if(!calendarCanConfirm(d) || !d.confirmed)return;d.opId=`calendar-${Date.now().toString(36)}-${++S.feishuSerial}`;calendarRequest('calendar.confirm',d.sessionId,d.followupId,{revision:d.draft.revision,opId:d.opId,confirmed:true});},
+    'calendar-status': ()=>{const d=activeCalendar();if(d?.opId && !d.busy)calendarRequest('calendar.status',d.sessionId,d.followupId,{opId:d.opId});},
+    'calendar-resume': ()=>{const d=activeCalendar();if(d?.draft && d.opId && !d.busy && !d.sourceChanged && !d.dirty && d.accountKey===feishuAccountKey() && ['failed','created_unverified','invitation_unknown'].includes(d.status))calendarRequest('calendar.confirm',d.sessionId,d.followupId,{revision:d.draft.revision,opId:d.opId,confirmed:true});},
     'minutes-refresh': () => { if (S.history) { requestMinutes(S.history.session_id); render(); } },
     'minutes-source': (el) => openSheet({ kind: 'minutesSource', sessionId: S.history.session_id, id: el.dataset.id }),
     'minutes-doc': () => { const p = S.minutes.get(S.history?.session_id)?.data; if (p?.status === 'ready' && p.doc_url) send('open.url', { url: p.doc_url }); },
@@ -2414,6 +2806,8 @@
     'device-resume': () => applyDeviceEvent({type:'resume'}),
     'device-reset': () => applyDeviceEvent({type:'reset'}),
     'capture-start': () => openSheet({kind:'captureMode',mode:'daily'}),
+    'record-button': () => S.state.capturing ? openSheet({ kind: 'stopConfirm' }) : ACTIONS['capture-start'](),
+    'capture-stop-confirm': () => { closeSheet(); if (S.state.capturing) ACTIONS['capture-stop'](); },
     'capture-meeting': () => openSheet({kind:'captureMode',mode:'meeting',switching:true}),
     'capture-mode': el => { S.sheet.mode = el.dataset.mode; renderSheet(); },
     'capture-before-recall': () => { closeSheet(); send('recall.trigger'); },
@@ -2619,6 +3013,25 @@
     if (act) { e.stopPropagation(); act(el); }
   });
   $('sheet').addEventListener('change', (e) => {
+    if (e.target.id === 'delivery-permission') { deliveryEdit('permission', e.target.value); renderSheet(); }
+    if (e.target.dataset?.deliveryRecipient) {
+      const d = activeDelivery(); if (d?.draft && !deliveryBusy(d) && !deliverySent(d)) {
+        const id = e.target.dataset.deliveryRecipient, selected = d.draft.recipients.filter(p => deliveryPersonId(p) !== id);
+        if (e.target.checked) selected.push(S.feishu.recipients.find(p => deliveryPersonId(p) === id) || id);
+        deliveryEdit('recipients', selected); renderSheet();
+      }
+    }
+    if (e.target.id === 'delivery-confirmed') { const d = activeDelivery(); if (d) { d.confirmed = !!e.target.checked && !!deliveryCanConfirm(d); const btn = $('delivery-send'); if (btn) btn.disabled = !d.confirmed; } }
+    if(e.target.dataset?.deliveryFile) {
+      const d=activeDelivery();if(d?.draft && !deliveryBusy(d) && !deliverySent(d)){
+        const names=(d.draft.attachments || []).filter(n=>n!==e.target.dataset.deliveryFile);
+        if(e.target.checked)names.push(e.target.dataset.deliveryFile);
+        deliveryEdit('attachments',names);deliveryEdit('attachment_copies_confirmed',false);renderSheet();
+      }
+    }
+    if(e.target.id==='delivery-file-copies'){deliveryEdit('attachment_copies_confirmed',!!e.target.checked);renderSheet();}
+    if(e.target.dataset?.calendarAttendee){const d=activeCalendar();if(d?.draft && !calendarLocked(d)){const ids=d.draft.attendees.filter(id=>id!==e.target.dataset.calendarAttendee);if(e.target.checked)ids.push(e.target.dataset.calendarAttendee);calendarEdit('attendees',ids);renderSheet();}}
+    if(e.target.id==='calendar-confirmed'){const d=activeCalendar();if(d){d.confirmed=!!e.target.checked && calendarCanConfirm(d);const button=$('calendar-confirm');if(button)button.disabled=!d.confirmed;}}
     if (e.target.id === 'vp-name') { S.voiceprintName = e.target.value; renderSheet(); }
     if (e.target.id === 'f-who') editDraftField('who', e.target.value);
     if (e.target.id === 'item-merge' && e.target.value) itemSend('merge', { into: e.target.value });
@@ -2627,6 +3040,10 @@
     }
   });
   $('sheet').addEventListener('input', (e) => {
+    if (e.target.id === 'delivery-title') deliveryEdit('title', e.target.value);
+    if (e.target.id === 'delivery-content') deliveryEdit('content', e.target.value);
+    if (e.target.id === 'delivery-search') S.feishu.recipientQuery = e.target.value;
+    if(e.target.dataset?.calendarField)calendarEdit(e.target.dataset.calendarField,e.target.value);
     const field = { 'f-who': 'who', 'f-what': 'what', 'f-when': 'whenIso', 'f-constraint': 'constraint' }[e.target.id];
     if (field) editDraftField(field, e.target.value || (field === 'whenIso' ? null : ''));
   });
@@ -2655,7 +3072,7 @@
     if (act) { e.stopPropagation(); act(el); }
   });
   // A live transcript card opens "who said it"; it is built outside the page templates.
-  $('lines').addEventListener('click', (e) => {
+  LINES.addEventListener('click', (e) => {
     const card = e.target.closest('[data-id]');
     if (card) ACTIONS['line-speaker'](card);
   });

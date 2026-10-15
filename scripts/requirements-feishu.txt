@@ -1,0 +1,2 @@
+# Personal OAuth storage, server only; compatible with Python >= 3.9.
+cryptography==50.0.2

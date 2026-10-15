@@ -67,7 +67,8 @@ android {
 // source then offers only the simulator.
 val soundcoreAar = file("libs/soundcore").listFiles { f -> f.name.endsWith(".aar") }?.maxOrNull()
 if (soundcoreAar != null) {
-    android.sourceSets.getByName("main").java.srcDir("src/soundcore/java")
+    // AGP 9's built-in Kotlin compiler only reads custom Kotlin roots registered as Kotlin sources.
+    android.sourceSets.getByName("main").kotlin.srcDir("src/soundcore/java")
 }
 
 dependencies {

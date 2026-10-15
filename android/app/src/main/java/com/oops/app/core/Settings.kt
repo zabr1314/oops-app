@@ -7,6 +7,9 @@ import com.oops.app.asr.VolcCredentials
 
 /** Debug-drawer settings layered over BuildConfig defaults from local.properties. */
 class Settings(context: Context) {
+    private val feishuIdentity = FeishuSessionStore(context)
+    fun feishuSessionFor(url: String): String = feishuIdentity.read(url)
+    fun setFeishuSessionFor(url: String, token: String) = feishuIdentity.write(url, token)
     private val prefs = context.getSharedPreferences("oops_settings", Context.MODE_PRIVATE)
 
     var voiceTrigger: Boolean

@@ -9,6 +9,7 @@
 """
 import base64
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -131,37 +133,108 @@ def render_slides(folder):
     return out
 
 
+def checkpoint(folder, name, value):
+    fd, tmp = tempfile.mkstemp(dir=folder)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            json.dump(value, output, ensure_ascii=False)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(tmp, os.path.join(folder, name))
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+
+
 def do(server, token, job):
     kind, p = job["kind"], job["payload"]
-    stamp = dt.datetime.now().strftime("%m%d-%H%M")
-    folder = os.path.join(WORK, f"{stamp}-{kind}-{job['id'][:8]}")
-    os.makedirs(folder, exist_ok=True)
-    with open(os.path.join(folder, "job.json"), "w", encoding="utf-8") as f:
-        json.dump(job, f, ensure_ascii=False, indent=1)
+    endpoint = hashlib.sha256(server.rstrip('/').encode()).hexdigest()
+    folder = os.path.join(WORK, endpoint[:12] + '-' + job['id'])
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    checkpoint(folder, 'job.json', dict(job, endpoint_fingerprint=endpoint))
     title = {"research": (p.get("question") or "资料查询")[:40], "report": f"会后报告 · {p.get('title', '')}",
              "ppt": f"演示文稿 · {p.get('title', '')}"}[kind]
+    phase = 'generation'
     try:
-        run_claude(job, folder)
-        markdown = read(folder, "result.md", 200_000)
-        if not markdown.strip():
-            raise RuntimeError("没有生成结果文件")
-        if kind == "ppt":
-            upload(server, token, job["id"], render_slides(folder), re.sub(r"[^\w一-鿿-]", "", p.get("title", "")) + "-演示文稿.pptx")
-        call(server, token, f"/v1/agent/jobs/{job['id']}/result",
-             {"ok": True, "title": title, "markdown": markdown, "brief": read(folder, "brief.txt", 600).strip()})
+        receipt = inside(folder, 'accepted.json')
+        if receipt:
+            return True
+        generated = inside(folder, 'generated.json')
+        if generated:
+            with open(generated, encoding='utf-8') as source:
+                fixed = json.load(source)
+        else:
+            if inside(folder, 'generation-started.json'):
+                raise RuntimeError('生成结果尚未核实，不会自动重新调用模型')
+            checkpoint(folder, 'generation-started.json', {'job_id': job['id'], 'endpoint': endpoint})
+            run_claude(job, folder)
+            markdown = read(folder, "result.md", 200_001)
+            if not markdown.strip() or len(markdown) > 200000:
+                raise RuntimeError("没有生成有效结果文件")
+            fixed = dict(ok=True, title=title, markdown=markdown, brief=read(folder, 'brief.txt', 600).strip())
+            # Persist the paid output BEFORE rendering, uploads or result HTTP.
+            checkpoint(folder, 'generated.json', fixed)
+        phase = 'transfer'
+        pending = inside(folder, 'transfer.json')
+        if pending:
+            with open(pending, encoding='utf-8') as source:
+                fixed = json.load(source)
+        else:
+            fixed['files'] = []
+            if kind == 'ppt':
+                path = inside(folder, 'slides.pptx') or render_slides(folder)
+                with open(path, 'rb') as original: data = original.read()
+                name = re.sub(r'[^\w一-鿿-]', '', p.get('title', ''))[:60] + '-演示文稿.pptx'
+                fixed['files'] = [dict(name=name, local_name='slides.pptx', size=len(data), sha256=hashlib.sha256(data).hexdigest())]
+            checkpoint(folder, 'transfer.json', fixed)
+        for item in fixed['files']:
+            path = inside(folder, item['local_name'])
+            if not path:
+                raise RuntimeError('原成果文件缺失，未重新生成')
+            with open(path, 'rb') as original: data = original.read()
+            if len(data) != item['size'] or hashlib.sha256(data).hexdigest() != item['sha256']:
+                raise RuntimeError('原成果文件已变化，未重新生成')
+            upload(server, token, job['id'], path, item['name'])
+        body = dict(fixed, files=[{k: v for k, v in item.items() if k != 'local_name'} for item in fixed['files']])
+        reply = call(server, token, f"/v1/agent/jobs/{job['id']}/result", body)
+        if reply.get('generation_status') != 'ready':
+            raise RuntimeError('服务端尚未确认保存完整成果')
+        checkpoint(folder, 'accepted.json', reply)
+        return True
     except Exception as error:  # noqa: BLE001 - report the failure so the requester hears back
         log(f"job {job['id'][:8]} failed: {error}")
         try:
-            call(server, token, f"/v1/agent/jobs/{job['id']}/result", {"ok": False, "title": title, "error": str(error)[:300]})
+            call(server, token, f"/v1/agent/jobs/{job['id']}/result", {"ok": False, "phase": phase, "title": title, "error": str(error)[:300]})
         except Exception as report:  # noqa: BLE001 - e.g. the server already gave up on this job; keep polling
             log(f"job {job['id'][:8]} failure not reported: {type(report).__name__}: {str(report)[:120]}")
+        return False
 
 
 def upload(server, token, job_id, path, name):
-    data = open(path, "rb").read()
-    for offset in range(0, len(data), CHUNK):
-        call(server, token, f"/v1/agent/jobs/{job_id}/chunk",
+    with open(path, 'rb') as original: data = original.read()
+    offset = 0
+    while offset < len(data):
+        reply = call(server, token, f"/v1/agent/jobs/{job_id}/chunk",
              {"name": name, "offset": offset, "data": base64.b64encode(data[offset:offset + CHUNK]).decode()}, timeout=60)
+        received = reply.get('received')
+        if type(received) is not int or not offset < received <= len(data):
+            raise RuntimeError('文件分片回执不匹配')
+        offset = received
+
+
+def resume_pending(server, token):
+    """Retry local rendering/transport only; never start paid generation here."""
+    endpoint = hashlib.sha256(server.rstrip('/').encode()).hexdigest()
+    for name in sorted(os.listdir(WORK)):
+        folder = os.path.join(WORK, name)
+        if os.path.islink(folder) or not os.path.isdir(folder) or not inside(folder, 'generated.json') or inside(folder, 'accepted.json'):
+            continue
+        job_path = inside(folder, 'job.json')
+        if not job_path: continue
+        with open(job_path, encoding='utf-8') as source:
+            job = json.load(source)
+        if job.get('endpoint_fingerprint') == endpoint:
+            do(server, token, job)
 
 
 def clean_old(now=None):
@@ -170,6 +243,25 @@ def clean_old(now=None):
     for name in os.listdir(WORK):
         path = os.path.join(WORK, name)
         if os.path.isdir(path) and not os.path.islink(path) and os.path.getmtime(path) < cutoff:
+            if not inside(path, 'accepted.json'):
+                continue  # legacy/unknown/unacknowledged outputs are preserved
+            # Only this version's managed namespace with a matching durable
+            # backend acceptance can use its existing retention period. Merely
+            # finding a file named accepted.json in an old folder is no proof.
+            if not re.fullmatch(r'[a-f0-9]{12}-[a-f0-9]{32}', name) or not inside(path, 'job.json'):
+                continue
+            try:
+                with open(inside(path, 'accepted.json'), encoding='utf-8') as source:
+                    receipt = json.load(source)
+                with open(inside(path, 'job.json'), encoding='utf-8') as source:
+                    job = json.load(source)
+                if (receipt.get('status') != 'done' or receipt.get('generation_status') != 'ready' or
+                        job.get('id') != name[13:] or not isinstance(job.get('endpoint_fingerprint'), str) or
+                        not re.fullmatch(r'[a-f0-9]{64}', job['endpoint_fingerprint']) or
+                        not job['endpoint_fingerprint'].startswith(name[:12])):
+                    continue
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
             shutil.rmtree(path, ignore_errors=True)
             log(f"removed old job folder {name}")
 
@@ -187,6 +279,7 @@ def main():
             time.sleep(30)
             continue
         try:
+            resume_pending(server, token)
             job = call(server, token, "/v1/agent/poll", {"agent": agent, "wait": 10}, timeout=25)["job"]
             failures = 0
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:

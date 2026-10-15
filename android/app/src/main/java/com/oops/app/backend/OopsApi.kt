@@ -6,6 +6,8 @@ import com.oops.app.buffer.SpeakerSegment
 
 /** App ↔ backend contract; the wire format is documented in docs/api.md. */
 interface OopsApi {
+    /** Phone-scoped personal Feishu connection; no shared-account fallback. */
+    suspend fun feishuCall(action: String, request: org.json.JSONObject): org.json.JSONObject? = null
     val name: String
     suspend fun notice(request: org.json.JSONObject): org.json.JSONObject? = null
     suspend fun syncMeeting(request: org.json.JSONObject): org.json.JSONObject? = null

@@ -32,6 +32,14 @@ def fixture(resolver=None, generate=True):
     return actions, meetings, calls, resolver
 
 
+def legacy_job(actions, kind):
+    """A job queued by the old server, before personal mobile authorization."""
+    row = actions.backend.meetings.load("s")
+    job, _ = actions.jobs.add(kind, dict(session_id="s", transcript="旧稿输入", title="旧会议",
+        minutes_source_fingerprint=actions.minutes_fingerprint(row)), ["ou_lin"], key=kind + "-s")
+    return job
+
+
 def review(actions, uid="u1", **fields):
     return Backend.meeting_call(actions.backend, "review", dict(session_id="s", utterance_id=uid, **fields))
 
@@ -118,17 +126,18 @@ def test_old_card_buttons_cannot_create_new_actions_but_existing_receipt_is_read
                                    dict(a="ppt", sid="s"), dict(a="report", sid="s"))):
         click(actions, "blocked-" + str(index), "ou_lin", value)
     assert not actions.jobs.all()
-    assert len(texts(calls)) == 4 and all("旧纪要不能继续" in line for line in texts(calls))
+    assert len(texts(calls)) == 4 and all("回到 Oops" in line for line in texts(calls))
     assert all(call[:2] == ["im", "+messages-send"] for call in calls)
     click(actions, "history", "ou_lin", dict(a="calendar", sid="s", i=1))
-    assert "https://history/calendar" in texts(calls)[-1]
+    assert "回到 Oops" in texts(calls)[-1]
+    assert actions.state.get("calendar", "s:1")["url"] == "https://history/calendar"
     assert not any(call[:2] == ["calendar", "+create"] for call in calls)
 
 
 def test_queued_and_legacy_manual_jobs_stop_at_poll_when_their_minutes_change():
     for legacy in (False, True):
         actions, meetings, calls, _ = fixture()
-        actions.hand_to_mac("ppt", "s", None, "ou_lin")
+        legacy_job(actions, "ppt")
         job = actions.jobs.all()[0]
         assert job["payload"]["minutes_source_fingerprint"]
         if legacy:
@@ -144,7 +153,7 @@ def test_queued_and_legacy_manual_jobs_stop_at_poll_when_their_minutes_change():
 def test_running_job_cannot_return_stale_success_or_deliver_preaccepted_output():
     for accepted in (False, True):
         actions, meetings, calls, _ = fixture()
-        actions.hand_to_mac("report", "s", None, "ou_lin")
+        legacy_job(actions, "report")
         job = actions.agent_call("poll", dict(agent="test", wait=0))["job"]
         if accepted:
             stored = actions.jobs.load(job["id"])
@@ -156,76 +165,65 @@ def test_running_job_cannot_return_stale_success_or_deliver_preaccepted_output()
         if accepted:
             actions.deliver(job["id"], result)
         else:
-            assert actions.agent_call("result", result, job["id"]) == dict(status="failed", reason="source_changed")
-        assert actions.jobs.load(job["id"])["status"] == "failed" and calls == []
+            receipt = actions.agent_call("result", result, job["id"])
+            assert receipt["generation_status"] == "ready" and receipt["delivery_status"] == "invalidated"
+        saved = actions.jobs.load(job["id"])
+        # Generation really finished; withdrawing its source must block delivery,
+        # not label it a generation failure that could authorize another run.
+        assert saved["status"] == "done" and saved["generation_status"] == "ready"
+        assert saved["delivery_status"] == "invalidated" and saved["reason"] == "source_changed" and calls == []
 
 
-def test_review_while_creating_result_doc_prevents_sharing_and_result_messages():
+def test_old_pending_result_stays_private_then_source_change_blocks_reuse():
     actions, meetings, calls, _ = fixture()
-    actions.hand_to_mac("report", "s", None, "ou_lin")
-    job = actions.agent_call("poll", dict(agent="test", wait=0))["job"]
-    stored = actions.jobs.load(job["id"])
-    stored.update(status="delivering", title="报告")
-    actions.jobs.save(stored)
-    doc = actions.bot.doc
-
-    def concurrent_review(*args, **kwargs):
-        result = doc(*args, **kwargs)
-        review(actions, "u0", verdict="rejected")
-        return result
-
-    actions.bot.doc = concurrent_review
-    calls.clear()
-    actions.deliver(job["id"], dict(markdown="# 报告", brief="结果"))
-    assert actions.jobs.load(job["id"])["status"] == "failed"
-    assert len(calls) == 1 and calls[0][:2] == ["docs", "+create"]  # created doc stays private
-    assert not sent_to(calls)
-
-
-def test_review_while_creating_minutes_doc_prevents_sharing_and_cards():
-    actions, meetings, calls, _ = fixture(generate=False)
-    doc = actions.bot.doc
-
-    def concurrent_review(*args, **kwargs):
-        result = doc(*args, **kwargs)
-        review(actions, owner="江古月")
-        return result
-
-    actions.bot.doc = concurrent_review
-    try:
-        actions.after_meeting(meetings.load("s"))
-        raise AssertionError("stale minutes document shared")
-    except ValueError:
-        pass
-    assert_stale(actions, meetings)
-    assert len(calls) == 1 and calls[0][:2] == ["docs", "+create"]
-
-
-def test_review_between_result_messages_stops_remaining_delivery_and_keeps_completed_history():
-    actions, meetings, calls, _ = fixture()
-    actions.hand_to_mac("report", "s", None, "ou_lin")
-    job = actions.agent_call("poll", dict(agent="test", wait=0))["job"]
-    stored = actions.jobs.load(job["id"])
-    stored.update(status="delivering", title="报告", requesters=["ou_lin", "ou_hong"])
-    actions.jobs.save(stored)
-    dm_card = actions.bot.dm_card
-
-    def concurrent_review(*args, **kwargs):
-        result = dm_card(*args, **kwargs)
-        review(actions, owner="江古月")
-        return result
-
-    actions.bot.dm_card = concurrent_review
+    job = legacy_job(actions, "report")
+    actions.agent_call("poll", dict(agent="test", wait=0))
     calls.clear()
     actions.deliver(job["id"], dict(markdown="# 报告", brief="结果"))
     done = actions.jobs.load(job["id"])
-    assert done["status"] == "done" and done["doc_url"] and done["brief"] == "结果"
-    assert sent_to(calls) == ["ou_lin"]  # the sent snapshot remains; the next recipient is blocked
+    assert done["status"] == "done" and done["private_result"] and not done.get("doc_url")
+    assert calls == []
+    review(actions, "u0", verdict="rejected")
+    try:
+        actions.send_result(done, ["ou_lin"], "retry")
+        raise AssertionError("old private result shared")
+    except ValueError:
+        pass
+    assert calls == [] and actions.jobs.load(job["id"])["status"] == "done"
+
+
+def test_minutes_generation_never_creates_a_document_or_bypasses_mobile_review():
+    actions, meetings, calls, _ = fixture(generate=False)
+
+    def unexpected_document(*args, **kwargs):
+        raise AssertionError("private generation submitted a Feishu document")
+
+    actions.bot.doc = unexpected_document
+    actions.after_meeting(meetings.load("s"))
+    assert calls == [] and actions.state.get("meetings", "s", "delivery_status") == "needs_review"
+    review(actions, owner="江古月")
+    assert_stale(actions, meetings)
+    actions.after_meeting(meetings.load("s"))
+    assert calls == []  # neither automatic retry nor a changed source can publish
+
+
+def test_old_result_completion_keeps_historical_receipts_without_new_delivery():
+    actions, meetings, calls, _ = fixture()
+    job = legacy_job(actions, "report")
+    stored = actions.jobs.load(job["id"])
+    stored.update(status="delivering", title="报告", requesters=["ou_lin", "ou_hong"],
+                  doc_url="https://history/report", sent=True)
+    actions.jobs.save(stored)
+    calls.clear()
+    actions.deliver(job["id"], dict(markdown="# 报告", brief="结果"))
+    done = actions.jobs.load(job["id"])
+    assert done["status"] == "done" and done["doc_url"] == "https://history/report" and done["sent"]
+    assert done["private_result"] and calls == []
 
 
 def test_completed_result_history_survives_but_cannot_be_resent_from_stale_minutes():
     actions, meetings, calls, _ = fixture()
-    actions.hand_to_mac("ppt", "s", None, "ou_lin")
+    legacy_job(actions, "ppt")
     job = actions.jobs.all()[0]
     job.update(status="done", title="已发送 PPT", doc_url="https://history/ppt", brief="历史结果")
     actions.jobs.save(job)
@@ -253,7 +251,7 @@ def test_manual_review_precedes_generation_and_rejected_candidates_do_not_become
     assert view["minutes"]["actions"][0]["owner"] == "江古月" and resolver.asked == RUNS
 
 
-def test_legacy_reviewed_minutes_are_not_assumed_current_and_automatic_jobs_keep_their_rules():
+def test_legacy_reviewed_minutes_and_unbound_automatic_jobs_cannot_publish():
     actions, meetings, calls, _ = fixture()
     # Simulate a cache from the server before fingerprints were saved.
     with actions.state.lock:
@@ -264,11 +262,11 @@ def test_legacy_reviewed_minutes_are_not_assumed_current_and_automatic_jobs_keep
     assert_stale(actions, meetings)  # also catches review written outside the HTTP method
     auto, _ = actions.jobs.add("research", dict(session_id="s", auto=True, question="横屏分辨率", quote="原话"), ["ou_lin"])
     calls.clear()
-    job = actions.agent_call("poll", dict(agent="test", wait=0))["job"]
-    assert job["id"] == auto["id"]
-    assert actions.agent_call("result", dict(ok=True, markdown="# 独立检索结果", title="检索", brief="结果"), job["id"])["status"] == "delivering"
-    wait_for(lambda: actions.jobs.load(job["id"])["status"] == "done")
-    assert any(call[:2] == ["docs", "+create"] for call in calls)
+    assert actions.agent_call("poll", dict(agent="test", wait=0))["job"] is None
+    stopped = actions.jobs.load(auto["id"])
+    assert stopped["status"] == "failed" and stopped["reason"] == "source_changed"
+    assert calls == []
+
 
 
 if __name__ == "__main__":

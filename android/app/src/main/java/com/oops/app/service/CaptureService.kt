@@ -93,6 +93,7 @@ class CaptureService : Service() {
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_oops)
+            .setColor(getColor(R.color.oops_brand))
             .setContentTitle(getString(R.string.notif_capture_title))
             .setContentText(getString(R.string.notif_capture_text))
             .setOngoing(true)

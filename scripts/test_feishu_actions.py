@@ -125,24 +125,19 @@ def test_after_meeting_and_buttons():
     later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5)
     meetings.sync(dict(session_id="s1", started_at=started, ended_at=dt.datetime.now(dt.timezone.utc).isoformat(), utterances=[]))
     actions.after_meeting(meetings.load("s1"))
-    sent = [c for c in calls if c[:2] == ["im", "+messages-send"]]
-    assert set(sent_to(calls)) == {"ou_lin", "ou_hong"}, sent
-    body = json.loads(sent[0][sent[0].index("--content") + 1])
+    assert calls == []  # generation only stores private minutes; no document, grants, messages or ledger
+    row = meetings.load("s1")
+    checked = actions.state.get("meetings", "s1", "analysis")
+    body = actions.summary_card(row, checked, None, "林春源")  # historical explicit buttons remain available
     assert body["schema"] == "2.0"
     text = json.dumps(body, ensure_ascii=False)
-    assert "样片评审" in text and "帮我查" in text and "打开纪要" in text and "过去的会" not in text and "编造原话" not in text
-    assert "编造的决定" not in text and "没有出处" not in text and "春源周五之前" not in text  # model items only, never raw lines
-    doc = next(c for c in calls if c[:2] == ["docs", "+create"])
-    minutes = doc[doc.index("--content") + 1]
+    assert "样片评审" in text and "帮我查" in text and "过去的会" not in text and "编造原话" not in text
+    assert "编造的决定" not in text and "没有出处" not in text and "春源周五之前" not in text
+    minutes = actions.minutes_markdown(row, checked)
     assert "## 决定" in minutes and "**林春源**：周五前把样片发给洪玉麟（周五前）" in minutes and "负责人不在团队里（负责人未定）" in minutes
     assert "## 讨论要点" in minutes and "约束" not in minutes and "编造" not in minutes
     assert "参会：林春源、洪玉麟" in minutes and "江古月" not in minutes
-    shared = [c for c in calls if c[:2] == ["api", "POST"] and "doxDOC" in c[2]]
-    assert len(shared) == 2
-    tables = [c for c in calls if c[:2] == ["base", "+record-batch-create"]]
-    assert [c[c.index("--table-id") + 1] for c in tables] == ["会议", "决定", "待办"]
-    todo_rows = json.loads(tables[2][tables[2].index("--json") + 1])["rows"]
-    assert [r[:3] for r in todo_rows] == [["周五前把样片发给洪玉麟", "林春源", "周五前"], ["负责人不在团队里", "", ""]]
+    assert actions.state.get("meetings", "s1", "delivery_status") == "needs_review"
     assert actions.state.get("meetings", "s1", "analysis", "open_questions")[0]["id"] == "u4"
     # Done once: a second pass sends nothing more.
     n = len(calls)
@@ -150,73 +145,46 @@ def test_after_meeting_and_buttons():
     time.sleep(0.2)
     assert len(calls) == n
 
-    # 建日程 button: attendees are the clicker and the people named for the follow-up; done once.
-    click(actions, "e1", "ou_hong", {"a": "calendar", "sid": "s1", "i": 0})
-    created = [c for c in calls if c[:2] == ["calendar", "+create"]]
-    assert len(created) == 1 and set(created[0][created[0].index("--attendee-ids") + 1].split(",")) == {"ou_hong"}
-    click(actions, "e1", "ou_hong", {"a": "calendar", "sid": "s1", "i": 0})
-    click(actions, "e2", "ou_lin", {"a": "calendar", "sid": "s1", "i": 0})
-    assert len([c for c in calls if c[:2] == ["calendar", "+create"]]) == 1
-    assert any("已经建好了：https://applink/evt1" in t for t in texts(calls))
-
-    # 帮我查 → a job for the Mac helper; the helper takes it, uploads two files and reports back.
-    click(actions, "e3", "ou_lin", {"a": "research", "sid": "s1", "i": 0})
-    job = actions.agent_call("poll", {"agent": "test", "wait": 0})["job"]
-    assert job["kind"] == "research" and "分辨率" in job["payload"]["question"]
-    assert actions.jobs.load(job["id"])["key"] == "q-s1-u4"  # shared with an automatic look-up of the same sentence
-    assert actions.agent_call("poll", {"agent": "test", "wait": 0})["job"] is None
-    data = b"PK fake pptx"
-    actions.agent_call("chunk", {"name": "结果.pptx", "offset": 0, "data": base64.b64encode(data[:4]).decode()}, job["id"])
-    actions.agent_call("chunk", {"name": "结果.pptx", "offset": 4, "data": base64.b64encode(data[4:]).decode()}, job["id"])
-    actions.agent_call("chunk", {"name": "附录.md", "offset": 0, "data": base64.b64encode(b"# x").decode()}, job["id"])
-    try:
-        actions.agent_call("chunk", {"name": "结果.pptx", "offset": 0, "data": "AA=="}, job["id"])
-        raise AssertionError("wrong offset accepted")
-    except ValueError:
-        pass
+    # Legacy shared-account cards cannot substitute for personal mobile review.
     calls.clear()
-    out = actions.agent_call("result", {"ok": True, "title": "分辨率", "markdown": "# 结论\n1080×1920", "brief": "推荐 1080p"}, job["id"])
-    assert out["status"] == "delivering"
-    try:
-        actions.agent_call("result", {"ok": False, "error": "timeout"}, job["id"])
-        raise AssertionError("finished job accepted twice")
-    except ValueError:
-        pass
-    wait_for(lambda: actions.jobs.load(job["id"])["status"] == "done")
-    files = [c for c in calls if "--file" in c]
-    keys = {c[c.index("--idempotency-key") + 1] for c in files}
-    assert len(files) == 2 and len(keys) == 2, files  # every file arrives, not just the first
-    assert actions.jobs.load(job["id"])["doc_url"] and any(c[:2] == ["docs", "+create"] for c in calls)
-
-    # Clicking again once it is done sends the result again instead of "already working on it".
-    calls.clear()
-    click(actions, "e4", "ou_hong", {"a": "research", "sid": "s1", "i": 0})
-    assert sent_to(calls).count("ou_hong") == 3 and "ou_hong" in actions.jobs.load(job["id"])["requesters"]
+    for index, action in enumerate(("calendar", "research", "ppt", "report")):
+        click(actions, "legacy-" + str(index), "ou_lin", {"a": action, "sid": "s1", "i": 0})
+    assert len(texts(calls)) == 4 and all("回到 Oops" in t for t in texts(calls))
+    assert actions.jobs.all() == []
+    assert not any(c[:2] in (["docs", "+create"], ["calendar", "+create"]) for c in calls)
 
 
-def test_failed_job_is_reported_and_can_be_redone():
-    tmp = tempfile.mkdtemp()
-    actions, meetings, calls = make(tmp, None)
+def test_legacy_queued_job_finishes_privately_and_cannot_be_resent():
+    actions, meetings, calls = make(tempfile.mkdtemp(), None)
     started = dt.datetime.now(dt.timezone.utc).isoformat()
     meetings.sync(dict(session_id="s5", started_at=started, time_zone="Asia/Shanghai", utterances=[utter(0, "做个PPT", "林春源")]))
-    click(actions, "e1", "ou_lin", {"a": "ppt", "sid": "s5"})
-    job = actions.agent_call("poll", {"agent": "test", "wait": 0})["job"]
-    calls.clear()
-    assert actions.agent_call("result", {"ok": False, "error": "没有生成 slides.pptx"}, job["id"])["status"] == "failed"
-    wait_for(lambda: texts(calls))
-    assert "没有做成：没有生成 slides.pptx" in texts(calls)[0]
-    click(actions, "e2", "ou_lin", {"a": "ppt", "sid": "s5"})
-    again = actions.agent_call("poll", {"agent": "test", "wait": 0})["job"]
-    assert again and again["id"] != job["id"]
+    job, _ = actions.jobs.add("ppt", {"session_id": "s5", "transcript": "做个PPT"}, ["ou_lin"], key="old-ppt")
+    taken = actions.agent_call("poll", {"agent": "test", "wait": 0})["job"]
+    assert taken["id"] == job["id"]
+    # Internal result HTTP acknowledges only after local artifacts are durable.
+    assert actions.agent_call("result", {"ok": True, "title": "旧成果", "markdown": "# 结果", "brief": "完成"}, job["id"])["status"] == "done"
+    wait_for(lambda: actions.jobs.load(job["id"])["status"] == "done")
+    done = actions.jobs.load(job["id"])
+    assert done["private_result"] and done["delivery_status"] == "needs_personal_review" and not done.get("sent")
+    assert os.path.isfile(os.path.join(actions.jobs.dir, "files", job["id"], "结果.md")) and calls == []
+    try:
+        actions.send_result(done, ["ou_hong"], "retry")
+        raise AssertionError("old job resent without personal review")
+    except fa.MinutesSourceChanged:
+        pass
+    assert calls == []
 
-    # A job whose last allowed attempt ran out of time is given up and its requester told.
-    stuck = actions.jobs.load(again["id"])
-    stuck.update(attempts=fa.JOB_ATTEMPTS, lease_until=(dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)).isoformat())
-    actions.jobs.save(stuck)
-    calls.clear()
-    actions.tick()
-    wait_for(lambda: texts(calls))
-    assert actions.jobs.load(again["id"])["status"] == "failed" and "都没有做完" in texts(calls)[0]
+
+def test_failed_legacy_job_is_visible_without_external_notice_or_card_retry():
+    actions, meetings, calls = make(tempfile.mkdtemp(), None)
+    started = dt.datetime.now(dt.timezone.utc).isoformat()
+    meetings.sync(dict(session_id="s5", started_at=started, time_zone="Asia/Shanghai", utterances=[utter(0, "做个PPT", "林春源")]))
+    job, _ = actions.jobs.add("ppt", {"session_id": "s5"}, ["ou_lin"], key="old-ppt")
+    actions.agent_call("poll", {"agent": "test", "wait": 0})
+    assert actions.agent_call("result", {"ok": False, "error": "没有生成 slides.pptx"}, job["id"])["status"] == "failed"
+    assert actions.jobs.load(job["id"])["error"] == "没有生成 slides.pptx" and calls == []
+    click(actions, "retry-old", "ou_lin", {"a": "ppt", "sid": "s5"})
+    assert len(actions.jobs.all()) == 1 and "回到 Oops" in texts(calls)[0]
 
 
 def test_meeting_end_is_inferred_when_the_phone_never_says():
@@ -265,46 +233,28 @@ def test_generated_title_is_waited_for():
     meetings.sync(dict(session_id="s6", started_at=started, ended_at=started, time_zone="Asia/Shanghai",
                        utterances=[utter(i, f"第{i}句关于样片的讨论", "林春源") for i in range(6)]))
     actions.after_meeting_safe("s6")
-    doc = next(c for c in calls if c[:2] == ["docs", "+create"])
-    assert made == ["s6"] and doc[doc.index("--title") + 1] == "会议纪要 · 样片排期"
+    assert made == ["s6"] and meetings.load("s6")["display_title"] == "样片排期"
+    assert calls == [] and actions.state.get("meetings", "s6", "delivery_status") == "needs_review"
 
 
-def test_ledger_failures_resume_without_duplicates():
+def test_legacy_ledger_retries_are_retired_without_sharing():
     tmp = tempfile.mkdtemp()
-    analysis = dict(EMPTY, substantive=True, decisions=[{"text": "周五交样片", "ids": ["u0"]}],
-                    actions=[{"owner": "林春源", "task": "发样片", "due": "", "ids": ["u0"]}])
-    broken = {"决定表": 1, "待办行": 1}
-
-    def fail(args):
-        if args[:2] == ["base", "+table-create"] and args[args.index("--name") + 1] == "决定" and broken["决定表"]:
-            broken["决定表"] -= 1
-            return RuntimeError("no permission")
-        if args[:2] == ["base", "+record-batch-create"] and args[args.index("--table-id") + 1] == "待办" and broken["待办行"]:
-            broken["待办行"] -= 1
-            return RuntimeError("rate limited")
-        return None
-    actions, meetings, calls = make(tmp, FakeResolver({"analysis": analysis}), fail=fail)
+    analysis = dict(EMPTY, substantive=True, decisions=[{"text": "周五交样片", "ids": ["u0"]}])
+    actions, meetings, calls = make(tmp, FakeResolver({"analysis": analysis}))
     started = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=5)).isoformat()
     meetings.sync(dict(session_id="s7", started_at=started, ended_at=started, time_zone="Asia/Shanghai",
                        utterances=[utter(i, f"第{i}句", "林春源") for i in range(6)]))
     actions.after_meeting(meetings.load("s7"))
-    assert actions.state.get("meetings", "s7", "done") and set(sent_to(calls)) == {"ou_lin"}  # cards still went out
-    assert actions.state.get("meetings", "s7", "ledger_pending")
-    for _ in range(3):
-        actions.ledger_safe("s7")
-    assert actions.state.get("meetings", "s7", "ledger") and not actions.state.get("meetings", "s7", "ledger_pending")
-    assert len([c for c in calls if c[:2] == ["base", "+base-create"]]) == 1
-    created = [c[c.index("--name") + 1] for c in calls if c[:2] == ["base", "+table-create"]]
-    assert sorted(created) == sorted(fa.LEDGER_TABLES)
-    written = [c[c.index("--table-id") + 1] for c in calls if c[:2] == ["base", "+record-batch-create"]]
-    assert sorted(written) == ["会议", "决定", "待办"], written  # each table once, though two attempts failed
-    # The loop only retries the ledger, never the cards.
     actions.state.put(True, "meetings", "s7", "ledger_pending")
-    actions.state.put(True, "meetings", "s7", "ledger_tables", "待办")
-    n = len(sent_to(calls))
     actions.tick(now=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2))
-    wait_for(lambda: not actions.state.get("meetings", "s7", "ledger_pending"))
-    assert len(sent_to(calls)) == n
+    assert not actions.state.get("meetings", "s7", "ledger_pending")
+    actions.ledger_safe("s7")
+    assert calls == []
+    try:
+        actions.ledger(meetings.load("s7"), None, analysis)
+        raise AssertionError("legacy ledger bypassed mobile confirmation")
+    except fa.MinutesSourceChanged:
+        pass
 
 
 def finish_job(actions, ok=True):
@@ -343,7 +293,7 @@ def test_question_is_researched_at_once_and_shown_only_if_nobody_answers():
     question_meeting(meetings, "s2", [utter(2, "我们先说下一个", "林春源", start=100_000)])
     assert actions.scan_questions(meetings.load("s2"))
     assert actions.state.get("questions", "s2", "u0")["final"] == "release"
-    assert {c[c.index("--user-id") + 1] for c in dms(calls)} == {"ou_lin", "ou_hong"}
+    assert calls == []  # automatic research may finish privately but never publishes to inferred recipients
     n = len(dms(calls))
     actions.scan_questions(meetings.load("s2"), final=True)
     assert len(dms(calls)) == n  # settled questions are not asked or sent again
@@ -359,7 +309,8 @@ def test_answered_question_keeps_the_result_for_the_minutes_only():
     finish_job(actions)
     assert actions.state.get("questions", "s3", "u0")["final"] == "answered" and dms(calls) == []
     markdown = actions.minutes_markdown(meetings.load("s3"), dict(EMPTY, substantive=True))
-    assert "## 会上查到的资料" in markdown and "A 和 B 哪个便宜" in markdown
+    assert "## 会上查到的资料" not in markdown  # no unreviewed external research document was created
+    assert not any(c[:2] == ["docs", "+create"] for c in calls)
 
 
 def test_concept_question_gets_a_quick_answer_without_a_search():
@@ -372,7 +323,7 @@ def test_concept_question_gets_a_quick_answer_without_a_search():
         utter(0, "AWS 是什么来着？", "洪玉麟", start=0), utter(1, "我们继续", "林春源", start=100_000)]))
     assert actions.scan_questions(meetings.load("s4"))
     assert actions.jobs.all() == [] and actions.state.get("questions", "s4", "u0")["final"] == "quick"
-    assert any("亚马逊" in json.dumps(c, ensure_ascii=False) for c in dms(calls))
+    assert calls == []  # saved in private question state, never automatically messaged
 
 
 def test_question_check_backs_off_after_an_error():
@@ -416,7 +367,7 @@ def test_buttons_always_answer():
     assert texts(calls) == ["找不到这条任务，可能已经删除了。"]
     calls.clear()
     click(actions, "e3", "ou_hong", {"a": "report", "sid": "deleted-meeting"})
-    assert "没做成：这场会议已被删除" in texts(calls)[0]
+    assert "回到 Oops" in texts(calls)[0] and "重新核对" in texts(calls)[0]
 
 
 def test_nothing_worth_sending():
@@ -447,7 +398,8 @@ def test_minutes_view_for_the_app():
     actions.after_meeting(meetings.load("m1"))
     asked = resolver.asked
     view = actions.minutes_view(meetings.load("m1"))
-    assert view["status"] == "ready" and view["doc_url"] == "https://x.feishu.cn/docx/doxDOC"
+    assert view["status"] == "ready" and view["doc_url"] is None
+    assert calls == []
     assert [d["text"] for d in view["minutes"]["decisions"]] == ["周五交样片"]  # the made-up item never reached storage
     assert list(view["sources"]) == ["u0", "u1", "u2"] and view["sources"]["u1"]["speaker"] == "洪玉麟"
     assert view["sources"]["u2"]["text"] == "横屏分辨率是多少？"

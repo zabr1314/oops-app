@@ -73,6 +73,8 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
         webView = WebView(this).apply {
+            // Paint the Oops canvas until the page draws, so launching never flashes white.
+            setBackgroundColor(this@MainActivity.getColor(R.color.oops_bg))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = false
@@ -149,6 +151,10 @@ class MainActivity : ComponentActivity() {
 
     /** Notification "Oops 一下", plus adb hooks in debug builds for scripted end-to-end runs. */
     private fun handleIntent(intent: Intent?) {
+        if (intent?.data?.let { it.scheme == "oops" && it.host == "feishu" && it.path == "/complete" } == true) {
+            OopsEngine.feishu("feishu.status", JSONObject())
+            return
+        }
         when (intent?.action) {
             ACTION_RECALL -> OopsEngine.triggerRecall("notification", intent.getStringExtra(EXTRA_QUERY))
             ACTION_DEBUG_START -> if (BuildConfig.DEBUG) {
@@ -223,6 +229,11 @@ class MainActivity : ComponentActivity() {
                 "history.open" -> OopsEngine.history("open", p.getString("sessionId"), requestId = p.optString("requestId"))
                 "meeting.retain" -> OopsEngine.retainMeeting(p)
                 "history.minutes" -> OopsEngine.minutes(p.getString("sessionId"), p.optString("requestId"))
+                "feishu.connect" -> OopsEngine.feishu(type, p) { url -> runOnUiThread { openExternal(url) } }
+                "feishu.status", "feishu.disconnect", "feishu.recipients",
+                "minutes.delivery.open", "minutes.delivery.save", "minutes.delivery.confirm", "minutes.delivery.status",
+                "assistant.jobs", "assistant.delivery.open", "assistant.delivery.save", "assistant.delivery.confirm", "assistant.delivery.status",
+                "calendar.open", "calendar.save", "calendar.confirm", "calendar.status" -> OopsEngine.feishu(type, p)
                 "history.delete" -> OopsEngine.history("delete", p.getString("sessionId"), p.optBoolean("confirm"), p.optString("requestId"))
                 "projects.list" -> OopsEngine.projects()
                 "project.open" -> OopsEngine.projects(p.getString("name"))
