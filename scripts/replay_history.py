@@ -140,7 +140,7 @@ def deployed_pipeline(source_dir):
 class StoredHistory:
     """Read the current owning store directly; no resync, cleanup write or model replay."""
     def __init__(self, state_dir, builder=None, minutes_file=None, backend_source_dir=None, reanalyses_dir=None,
-                 reanalysis_builder=None):
+                 reanalysis_builder=None, replays_dir=None):
         self.state_dir = os.path.realpath(state_dir)
         self.directory = os.path.join(self.state_dir, 'meetings')
         self.builder = builder
@@ -148,6 +148,23 @@ class StoredHistory:
         self.backend_source_dir = backend_source_dir
         self.reanalyses_dir = os.path.realpath(reanalyses_dir) if reanalyses_dir else None
         self.reanalysis_builder = reanalysis_builder
+        self.replays_dir = os.path.realpath(replays_dir) if replays_dir else None
+
+    def replay(self, sid):
+        """A prepared replay file (e.g. an offline recording run through the pipeline), or None.
+
+        Kept apart from the backend's meeting store; shown only to a scope that lists its ID.
+        """
+        if not self.replays_dir:
+            return None
+        path = os.path.join(self.replays_dir, identifier(sid) + '.json')
+        if os.path.realpath(path) != path or not os.path.isfile(path):
+            return None
+        value = read_json(path)
+        if not isinstance(value, dict) or value.get('version') != 2 or not isinstance(value.get('sentences'), list) \
+                or (value.get('source') or {}).get('kind') != 'replay':
+            raise HistoryError(503, 'replay_invalid')
+        return value
 
     def row(self, sid):
         sid = identifier(sid)
@@ -237,6 +254,14 @@ class StoredHistory:
     def listing(self, scope):
         rows = []
         for sid in scope:
+            replay = self.replay(sid)
+            if replay is not None:
+                source = replay.get('source') or {}
+                rows.append(dict(session_id=sid, title=source.get('title') or source.get('label') or '录音回放',
+                    started_at=source.get('started_at'), ended_at=None, utterance_count=len(replay['sentences']),
+                    trace_count=sum(len(row.get('forks') or []) for row in replay['sentences']),
+                    transcript_status='available', minutes_status='ready' if replay.get('post') else 'unavailable', kind='replay'))
+                continue
             try:
                 row = self.row(sid)
             except HistoryError as error:
@@ -256,6 +281,10 @@ class StoredHistory:
         identifier(sid)
         if sid not in scope:
             raise HistoryError(403, 'meeting_outside_scope')
+        replay = self.replay(sid)
+        if replay is not None:
+            replay.setdefault('source', {})['snapshot_hash'] = digest({key: replay.get(key) for key in ('sentences', 'post')})
+            return replay
         row = self.row(sid)
         if self.builder is None:
             from funnel_replay import build_stored
@@ -786,7 +815,8 @@ def main(argv=None):
         return
     handler = make_handler(StoredHistory(args.state_dir, minutes_file=args.minutes_file,
                            backend_source_dir=args.backend_source_dir,
-                           reanalyses_dir=args.reanalyses_dir or os.path.join(os.path.dirname(os.path.abspath(args.access_db)), 'reanalyses')),
+                           reanalyses_dir=args.reanalyses_dir or os.path.join(os.path.dirname(os.path.abspath(args.access_db)), 'reanalyses'),
+                           replays_dir=os.path.join(os.path.dirname(os.path.abspath(args.access_db)), 'replays')),
                            access, args.public_dir, args.url_prefix,
                            secure_cookie=not args.insecure_local_cookie)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), handler)

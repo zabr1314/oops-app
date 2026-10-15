@@ -76,7 +76,7 @@
 
     const replay = data.source && ['replay', 'history', 'reanalysis'].includes(data.source.kind);
     const historical = data.source?.kind === 'history';
-    ui.badge.textContent = data.source?.kind === 'reanalysis' ? '重新分析 · Jev' : historical ? '后端历史 · 只读' : replay ? '分析回放 · 仅本机' : '示例数据';
+    ui.badge.textContent = data.source?.kind === 'reanalysis' ? '重新分析 · Jev' : historical ? '后端历史 · 只读' : replay ? (privateHistory ? '事后分析 · 只读' : '分析回放 · 仅本机') : '示例数据';
     ui.badge.className = 'badge ' + (replay ? 'replay' : 'example');
     ui.label.textContent = (data.source && data.source.label) || '';
     ui.note.textContent = (data.source && data.source.note) || '';
@@ -238,7 +238,7 @@
     renderBars(c, total, heard);
     renderStream();
     renderSpark();
-    ui.statusLeft.textContent = 'oops@funnel · ' + sentences.length + ' 句 · ' + (data.source?.kind === 'reanalysis' ? '重新分析（只读）' : data.source?.kind === 'history' ? '后端历史（只读）' : data.source?.kind === 'replay' ? '重新分析回放（仅本机）' : '示例数据') + ' · ' + mmss(now);
+    ui.statusLeft.textContent = 'oops@funnel · ' + sentences.length + ' 句 · ' + (data.source?.kind === 'reanalysis' ? '重新分析（只读）' : data.source?.kind === 'history' ? '后端历史（只读）' : data.source?.kind === 'replay' ? (privateHistory ? '事后分析回放（只读）' : '重新分析回放（仅本机）') : '示例数据') + ' · ' + mmss(now);
     ui.statusRight.textContent = '岔口 ' + total + ' · 规则 ' + c.code + ' · Jev ' + c.jev + ' · DeepSeek ' + c.model + ' · 你 ' + c.you + (c.unknown ? ' · 来源未记录 ' + c.unknown : '');
   }
 

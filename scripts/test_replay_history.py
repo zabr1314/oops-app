@@ -183,6 +183,22 @@ class AccessTest(unittest.TestCase):
             self.assertNotIn(session, str(db.execute('SELECT * FROM access').fetchall()))
         self.assertEqual(0o600, os.stat(self.access.path).st_mode & 0o777)
 
+    def test_prepared_replays_are_listed_and_read_only_inside_scope(self):
+        from replay_history import StoredHistory, HistoryError
+        os.makedirs(self.temp.name + '/state/meetings')
+        os.makedirs(self.temp.name + '/replays')
+        replay = dict(version=2, source=dict(kind='replay', title='讨论 0238', started_at='2026-10-05T23:26:47+08:00'),
+                      sentences=[dict(id='u1', text='好', end_ms=1, forks=[dict(layer='jev')])], post=None)
+        with open(self.temp.name + '/replays/dji-0238.json', 'w') as stream:
+            json.dump(replay, stream)
+        history = StoredHistory(self.temp.name + '/state', replays_dir=self.temp.name + '/replays')
+        listed = history.listing(['dji-0238'])['meetings']
+        self.assertEqual([('dji-0238', '讨论 0238', 1, 'replay')], [(m['session_id'], m['title'], m['utterance_count'], m['kind']) for m in listed])
+        self.assertEqual('replay', history.detail('dji-0238', ['dji-0238'])['source']['kind'])
+        with self.assertRaises(HistoryError):
+            history.detail('dji-0238', ['other'])
+        self.assertEqual([], history.listing(['missing'])['meetings'])
+
     def test_open_access_file_lists_meetings_and_is_revoked_by_deleting_it(self):
         self.assertIsNone(self.access.open_scope())
         path = os.path.join(os.path.dirname(os.path.abspath(self.access.path)), 'open-access.json')
