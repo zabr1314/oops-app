@@ -728,6 +728,11 @@
       else if (currentHistorySid && navigation === requestVersion) clearHistoricalData('当前会议已不在可读列表，已清除旧历史。');
       if (navigation === requestVersion) statusMessage(meetings.length + ' 场可读历史。选择会议后查看；已有最终标签不等于保存了 Jev 的概率和推理步骤。');
       listing = await refreshReanalyses(version, navigation);
+      // Only one readable meeting and nothing chosen yet: open it rather than leaving the example on screen.
+      if (meetings.length === 1 && !currentHistorySid && !currentReanalysisId && !pendingRequestedRun && navigation === requestVersion && version === listVersion) {
+        historySelect.value = meetings[0].session_id;
+        await loadHistoryMeeting(meetings[0].session_id, false);
+      }
     } catch (error) {
       if (version !== listVersion) return { ok: false, aborted: true };
       if (navigation === requestVersion) {
