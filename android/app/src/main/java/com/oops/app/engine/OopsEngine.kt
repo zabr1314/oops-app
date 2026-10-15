@@ -1735,7 +1735,9 @@ object OopsEngine {
         val request = operation.request
         val draftId = request.draft.draftId
         val client = if (operation.mock) api.takeIf { it.name == "mock" } ?: MockOopsApi(Settings.TEAM)
-            else HttpOopsApi(http, operation.backendUrl, settings.backendTokenFor(operation.backendUrl))
+            else HttpOopsApi(http, operation.backendUrl, settings.backendTokenFor(operation.backendUrl),
+                personalToken = { settings.feishuSessionFor(operation.backendUrl) },
+                savePersonalToken = { settings.setFeishuSessionFor(operation.backendUrl, it) }, enablePersonalIdentity = true)
         emit(OopsEvent.ActionUpdate(draftId,
             if (!submit && operation.result.sourceBlocked) ActionWorkflow.restoredPending(operation.result).copy(polling = true)
             else ActionResult(request.opId, ActionResult.PENDING, polling = true, mock = operation.mock,
@@ -2289,6 +2291,50 @@ object OopsEngine {
         }
     }
 
+    /** Only the native HTTP client owns the phone's opaque personal credential. */
+    fun feishu(action: String, request: JSONObject, openAuthorization: ((String) -> Unit)? = null) {
+        val frozenRequest = JSONObject(request.toString())
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", action)
+            .put("sessionId", frozenRequest.optString("sessionId")).put("jobId", frozenRequest.optString("jobId"))
+            .put("followupId", frozenRequest.optString("followupId", "manual")).put("requestId", frozenRequest.optString("requestId"))
+        scope.launch {
+            try {
+                val reply = client.feishuCall(action, frozenRequest)
+                if (epoch != serviceEpoch) return@launch
+                if (reply == null) { fail("feishu", "当前服务尚未提供个人飞书连接", context); return@launch }
+                val result = HttpOopsApi.validatePersonalReply(action, frozenRequest, reply)
+                val event = when (action) {
+                    "feishu.connect" -> "feishu.authorization"
+                    "feishu.disconnect" -> "feishu.status"
+                    else -> when {
+                        action.startsWith("minutes.delivery.") -> "minutes.delivery"
+                        action.startsWith("assistant.delivery.") -> "assistant.delivery"
+                        action.startsWith("calendar.") -> "calendar.delivery"
+                        else -> action
+                    }
+                }
+                result.put("requestId", frozenRequest.optString("requestId"))
+                    .put("session_id", frozenRequest.optString("sessionId"))
+                    .put("job_id", frozenRequest.optString("jobId"))
+                    .put("followup_id", frozenRequest.optString("followupId", "manual"))
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))
+                emit(OopsEvent.Json(event, result))
+                if (action == "feishu.connect") {
+                    val url = result.optString("authorization_url")
+                    val parsed = android.net.Uri.parse(url)
+                    require(parsed.scheme == "https" && parsed.host == "accounts.feishu.cn" && parsed.userInfo == null) { "授权地址无效，请重新连接" }
+                    openAuthorization?.invoke(url)
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (epoch == serviceEpoch) fail("feishu", error.message ?: "飞书操作未完成，请重试", context
+                    .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: "FEISHU_REQUEST_FAILED"))
+            }
+        }
+    }
+
     // ---- people's corrections, archived audio, tasks -----------------------------------------
 
     /**
@@ -2628,7 +2674,9 @@ object OopsEngine {
             }
         }
         configuredService = nextService
-        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken, sessionMode = { sessionModes[it] })
+        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken,
+            sessionMode = { sessionModes[it] }, personalToken = { settings.feishuSessionFor(url) },
+            savePersonalToken = { settings.setFeishuSessionFor(url, it) }, enablePersonalIdentity = true)
         val previewUrl = if (com.oops.app.BuildConfig.DEBUG) settings.speakerPreviewUrl else ""
         previewApi = if (previewUrl.isBlank()) api else HttpOopsApi(http, previewUrl, settings.backendTokenFor(previewUrl), sessionMode = { sessionModes[it] })
         _state.update {

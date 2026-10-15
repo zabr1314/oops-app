@@ -23,6 +23,18 @@ def project(analysis, row):
     out = copy.deepcopy(analysis)
     rows = [u for u in row.get('utterances', []) if isinstance(u, dict)]
     by_id = {u.get('id'): u for u in rows}
+    # Older minutes did not keep topic IDs. Keep those words as historical
+    # summaries, but never infer citations from matching text or current ASR.
+    topics = []
+    for topic in out.get('topics') or []:
+        if not isinstance(topic, dict):
+            continue
+        ids = list(dict.fromkeys(i for i in topic.get('ids', []) if isinstance(i, str)))
+        status = ('unrecorded' if not ids else
+                  'available' if all(i in by_id for i in ids) and row.get('transcript_status') != 'expired'
+                  else 'unavailable')
+        topics.append(dict(topic, ids=ids, source_status=status))
+    out['topics'] = topics
     kept, review = [], list(out.get('undecided') or [])
     rejected = list(out.get('quality_rejected') or [])
     for action in out.get('actions') or []:
