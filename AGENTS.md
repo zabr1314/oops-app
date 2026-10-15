@@ -239,6 +239,10 @@ When any text-entry control loses focus, dismiss the simulated keyboard. If the 
 
 本轮后端与Redmi已实际更新：11场旧会议、三场16个核对站候选、0条正式任务；App已人工确认纪要待办当前为0，不能把核对站的人次答案冒充本库确认。发布保护20份服务端文件，覆盖安装前后19份手机私有文件哈希一致。未运行测试，只做必要静态检查、28文件运行时完整性检查、APK打包和交付回读；不代表异常退出/长期录音已实录验收。详情见 `docs/mobile-data-alignment.md`。
 
+## 会后逐句复核：MiMo 只给纪要参考（2026-10-14）
+
+用户选定：会中仍用火山流式识别；会后由服务器按已有起止时间逐句截音频交给小米 `mimo-v2.5-asr` 再识别，结果只作为写纪要时的参考（行末「另一识别」），不改原话、不在界面显示、不自动替换。原因：MiMo 不返回时间戳和说话人，实测与火山各有对错。由 `MIMO_API_KEY` 开关，每场/每天有音频秒数上限，结果随录音删除、随转写到期删除。纪要最多等 10 分钟。详情见 `docs/asr-review-20261014.md`。
+
 ## 实时漏斗可视化页（2026-10-14）
 
 用户参考「每个词一个岔口」的蜘蛛视频，要求把 Oops 的实时处理做成同类页面。本轮只做可视化，不改后端判断：`public/funnel.html` 是体验中心的独立页，逐句回放每句话经过的岔口，按谁来答分成规则 / Jev / DeepSeek / 你四层。规则岔口用当前后端代码（`TextClean` 语气词、`rules_tag`、`looks_like_question`、`assess_item`）重算，Jev 与 DeepSeek 结果只取回放记录，概率没记录就留空，不编。数据由 `scripts/funnel_replay.py` 生成。
