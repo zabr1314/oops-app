@@ -61,3 +61,20 @@ test('after the meeting, items, evidence, checks and order appear only in their 
   const queue = afterScene({ ...base, phase: 'queue', at: 3500 });
   assert.ok(queue.nodes.some(n => n.order));
 });
+
+test('the crawler plants eight feet around its body on both sides of its heading', () => {
+  const crawler = vm.createContext({ window: {} });
+  vm.runInContext(readFileSync('public/funnel-crawler.js', 'utf8'), crawler, { filename: 'public/funnel-crawler.js' });
+  const feet = crawler.window.OopsCrawler.footTargets(100, 100, 0);
+  assert.equal(feet.length, 8);
+  assert.equal(feet.filter(f => f.y < 100).length, 4);
+  assert.ok(feet.every(f => Math.hypot(f.x - 100, f.y - 100) > 30));
+});
+
+test('the page-wide crawler only labels saved answers and is off for reduced motion', () => {
+  const source = readFileSync('public/funnel-crawler.js', 'utf8');
+  assert.match(source, /reduce\.matches/);
+  assert.doesNotMatch(source, /fetch\(|innerHTML/);
+  const studio = readFileSync('public/funnel-studio.js', 'utf8');
+  assert.match(studio, /event\.f\.a \|\| '未记录'/);
+});

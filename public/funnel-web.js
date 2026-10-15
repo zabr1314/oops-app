@@ -89,11 +89,11 @@
   if (typeof document === 'undefined' || !document.createElement) return;
 
   /* ------------------------------------------------------------ canvas renderer */
-  function createWeb(canvas, { onPick } = {}) {
+  function createWeb(canvas, { onPick, outsideSpider } = {}) {
     const ctx = canvas.getContext?.('2d');
     if (!ctx) return { draw() {}, stop() {} };
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let scene = { spokes: [], rings: [], nodes: [], empty: true }, pos = { angle: 0, reach: 0 }, raf = 0, last = 0, phase = 0, hits = [];
+    let scene = { spokes: [], rings: [], nodes: [], empty: true }, pos = { angle: 0, reach: 0 }, raf = 0, last = 0, phase = 0, hits = [], anchors = { hub: null, spokes: [], nodes: [] };
     let W = 0, H = 0;
     function size() {
       const box = canvas.getBoundingClientRect(); const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -142,6 +142,7 @@
     function draw(t) {
       size(); ctx.clearRect(0, 0, W, H); hits = [];
       const cx = W / 2, cy = H / 2 + 6, R = Math.max(40, Math.min(W * 0.42, H * 0.43));
+      anchors = { hub: { x: cx, y: cy }, spokes: [], nodes: [] };
       frameLines(cx, cy, R);
       if (scene.empty) { label('等待来源', cx, cy, '#6f6a86', 'center', 13); return; }
       // Finished sentences make the web grow outward, newest ring innermost-out.
@@ -152,6 +153,7 @@
         ctx.strokeStyle = COLOR[s.layer]; ctx.lineWidth = s.measured ? 1 + 2.4 * (s.p || 0) : 1.2; ctx.setLineDash(s.measured ? [] : [4, 4]);
         ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = COLOR[s.layer]; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+        anchors.spokes.push({ x, y, layer: s.layer, label: s.answer + (s.measured ? ' ' + pct(s.p) : '') });
         const right = Math.cos(s.angle) >= 0, lx = x + (right ? 10 : -10);
         label(s.answer, lx, y - 7, '#ece8f7', right ? 'left' : 'right', 12, 600);
         label((LAYER[s.layer] || '') + (s.measured ? ' · ' + pct(s.p) : ' · 无概率'), lx, y + 9, COLOR[s.layer], right ? 'left' : 'right', 10);
@@ -168,11 +170,13 @@
         label(n.title, lx, y - 7, n.selected ? '#ffffff' : '#ddd8ea', right ? 'left' : 'right', 12, 600);
         label(n.kindName + (n.evidence ? ' · ' + n.evidence + ' 句依据' : ''), lx, y + 9, '#9a93b4', right ? 'left' : 'right', 10);
         hits.push({ id: n.id, x, y });
+        anchors.nodes.push({ id: n.id, x, y, label: n.kindName + ' · ' + n.title });
       }
       ctx.fillStyle = '#16131f'; ctx.strokeStyle = '#6d5aa8'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(cx, cy, 18, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       if (pos.reach > 0.05) label(scene.hub, cx, cy, '#cbbcff', 'center', 11, 700);
-      spider(cx, cy, R, t);
+      // A page-wide crawler, when running, is the spider; the web keeps only its own hub then.
+      if (!outsideSpider?.()) spider(cx, cy, R, t);
     }
     function tick(t) {
       raf = 0;
@@ -200,6 +204,11 @@
       draw(next) { scene = next; if (next.empty) pos = { angle: 0, reach: 0 }; if (!raf) raf = requestAnimationFrame(tick); },
       stop() { if (raf) cancelAnimationFrame(raf); raf = 0; },
       get time() { return phase; },
+      /* Viewport positions of what is drawn now: hub, reached strands, item nodes. */
+      anchors() {
+        const box = canvas.getBoundingClientRect(); const at = p => p && { ...p, x: p.x + box.left, y: p.y + box.top };
+        return { hub: at(anchors.hub), spokes: anchors.spokes.map(at), nodes: anchors.nodes.map(at) };
+      },
     };
   }
   window.OopsWeb = Object.freeze({ reachedForks, liveScene, afterScene, COLOR, createWeb });

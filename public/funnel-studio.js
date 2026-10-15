@@ -57,13 +57,35 @@
   }
   const stations = [...document.querySelectorAll('[data-station]')];
   const roleNames = { listen: '聆听 Oops', judge: '判断 Oops', query: '查询 Oops', minutes: '纪要 Oops', delivery: '飞书 Oops' };
-  const web = window.OopsWeb?.createWeb ? window.OopsWeb.createWeb($('studio-web')) : null;
+  const web = window.OopsWeb?.createWeb ? window.OopsWeb.createWeb($('studio-web'), { outsideSpider: () => mode === 'live' && !!window.OopsCrawler?.active }) : null;
+  const crawler = () => (mode === 'live' ? window.OopsCrawler : null);
+  const hub = () => web?.anchors().hub || null;
+  /* Walk Jev to what the replay just reached: the sentence, its new strand, then the saved step card. */
+  function crawl(events) {
+    const rows = snapshot.sentences || [];
+    const steps = [];
+    for (const event of events.slice(-2)) {
+      const row = rows[event.i]; if (!row) continue;
+      const k = (row.forks || []).indexOf(event.f);
+      if (k <= 0) steps.push({ el: sentenceNodes[event.i]?.button, label: '原话 ' + String(event.i + 1).padStart(2, '0'), tone: 'idle', dwell: 160, ax: 0.9 });
+      steps.push({ point: () => web?.anchors().spokes.at(-1) || null, label: (event.f.a || '未记录') + (Number.isFinite(event.f.p) ? ' · ' + percentage(event.f.p) : ''), tone: event.f.layer, dwell: 260 });
+      steps.push({ el: document.querySelectorAll('#studio-inspector-content .detail-step')[k], tone: event.f.layer, dwell: 160, ax: 0.92, ay: 0.2 });
+      if (k === (row.forks || []).length - 1 && event.f.layer === 'jev') steps.push({ el: stations.find(b => b.dataset.station === 'judge'), label: row.outcome || event.f.a, tone: 'jev', dwell: 300, ax: 0.5, ay: 0.3 });
+    }
+    crawler()?.visit(steps);
+  }
   stations.forEach(button => {
     button.setAttribute('aria-label', '查看' + roleNames[button.dataset.station] + '的分工');
     button.addEventListener('click', () => { chosenStation = button.dataset.station; detailKey = ''; renderInspector(); openInspector(); });
   });
   function openInspector() { if (window.innerWidth <= 900) $('studio-inspector').classList.add('is-open'); }
-  function select(index) { chosenStation = 'judge'; detailKey = ''; api()?.select(index); render(api()?.state() || snapshot); openInspector(); }
+  function select(index) {
+    chosenStation = 'judge'; detailKey = ''; api()?.select(index); render(api()?.state() || snapshot); openInspector();
+    // A chosen sentence: Jev reads it, then visits each saved strand once.
+    const forks = (snapshot.sentences || [])[index]?.forks || [];
+    crawler()?.visit([{ el: sentenceNodes[index]?.button, tone: 'idle', dwell: 120, ax: 0.9 }, { el: document.querySelector('#studio-room .current-paper'), tone: 'idle', dwell: 120, ax: 0.94, ay: 0.3 },
+      ...forks.map((fork, k) => ({ point: () => web?.anchors().spokes[k] || null, label: (fork.a || '未记录') + (Number.isFinite(fork.p) ? ' · ' + percentage(fork.p) : ''), tone: fork.layer, dwell: 240 }))]);
+  }
   function rebuildSentences(rows) {
     previousCurrent = -1;
     sentenceNodes = rows.map((row, index) => {
@@ -81,14 +103,16 @@
     const data = snapshot.data;
     const rows = data?.sentences?.length ? (snapshot.sentences || data.sentences) : [];
     if (data !== currentData) {
-      currentData = data; detailKey = ''; chosenStation = 'judge'; stopPresentation(); lastFired = snapshot.fired || 0; $('studio-inspector').classList.remove('is-open');
+      window.OopsCrawler?.clear(); currentData = data; detailKey = ''; chosenStation = 'judge'; stopPresentation(); lastFired = snapshot.fired || 0; $('studio-inspector').classList.remove('is-open');
       rebuildSentences(rows);
       $('studio-title').textContent = data?.source?.label || (rows.length ? '会议回放' : '请选择会议');
     }
+    let pendingCrawl = null;
     if (!snapshot.playing || mode !== 'live' || !rows.length || (snapshot.fired || 0) < lastFired) stopPresentation();
     if (snapshot.playing && (snapshot.fired || 0) > lastFired) {
       const fresh = (snapshot.timeline || []).slice(lastFired, snapshot.fired);
       if (fresh.some(event => event.f?.layer === 'jev' && event.real > 0 && performance.now() - event.real < 250)) presentResult();
+      pendingCrawl = fresh.filter(event => event.i >= 0 && event.f);
     }
     lastFired = snapshot.fired || 0;
     const current = rows.length ? currentIndex(snapshot) : -1;
@@ -126,6 +150,8 @@
     }
     previousCurrent = current;
     renderInspector();
+    if (mode === 'live' && rows.length) crawler()?.rest(hub);
+    if (pendingCrawl?.length && mode === 'live') crawl(pendingCrawl);
   }
   function statsLine(rows, state) {
     if (!rows.length) return '';
@@ -213,7 +239,7 @@
   document.addEventListener('funnel:data', ev => { currentData = null; render({ ...(api()?.state() || {}), data: ev.detail, sentences: api()?.state()?.sentences || ev.detail?.sentences || [] }); });
   document.addEventListener('funnel:selection', stopPresentation);
   ['funnel:tick', 'funnel:selection', 'funnel:play'].forEach(name => document.addEventListener(name, ev => render(ev.detail?.data !== undefined ? ev.detail : api()?.state() || snapshot)));
-  document.addEventListener('funnel:mode', ev => { mode = ev.detail?.mode || 'live'; $('studio-inspector').classList.remove('is-open'); sync(); });
+  document.addEventListener('funnel:mode', ev => { window.OopsCrawler?.clear(); mode = ev.detail?.mode || 'live'; $('studio-inspector').classList.remove('is-open'); sync(); });
   $('studio-follow').addEventListener('click', () => { chosenStation = 'judge'; api()?.follow(); sync(); });
   $('inspector-close').addEventListener('click', () => { $('studio-inspector').classList.remove('is-open'); const index = currentIndex(snapshot); sentenceNodes[index]?.button.focus({ preventScroll: true }); });
   $('studio-sentences').addEventListener('wheel', () => { lastScroll = performance.now(); }, { passive: true });

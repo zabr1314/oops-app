@@ -43,9 +43,36 @@
   const PHASES = ['纪要成果', '对回原话', '规则复核', '待核对顺序'];
   let snapshot = {}, currentData = null, selectedItem = null, selectedStation = 'minutes', detailKey = '', itemButtons = [], mode = document.body.classList.contains('mode-after') ? 'after' : 'live';
   const buttons = [...document.querySelectorAll('[data-after-station]')];
-  const web = window.OopsWeb?.createWeb && $('after-web') ? window.OopsWeb.createWeb($('after-web'), { onPick: id => pickItem(id) }) : null;
+  const web = window.OopsWeb?.createWeb && $('after-web') ? window.OopsWeb.createWeb($('after-web'), { onPick: id => pickItem(id), outsideSpider: () => mode === 'after' && !!window.OopsCrawler?.active }) : null;
+  const crawler = () => (mode === 'after' ? window.OopsCrawler : null);
+  const STATION_OF_PHASE = ['minutes', 'review', 'review', 'review'];
+  let crawlKey = '';
+  /* Jev visits each item as it is revealed or checked: list entry, then its node on the minutes web. */
+  function crawl(post, phase, playing) {
+    if (!post || !playing || !web) return;
+    const scene = window.OopsWeb.afterScene(snapshot, selectedItem);
+    if (!scene.nodes.length) return;
+    const at = snapshot.at ?? snapshot.now ?? 0;
+    const node = phase === 0 ? scene.nodes.reduce((a, b) => (post.items.findIndex(i => i.id === b.id) > post.items.findIndex(i => i.id === a.id) ? b : a)) : scene.nodes[Math.floor(at / 900) % scene.nodes.length];
+    const key = phase + ':' + node.id;
+    if (key === crawlKey) return;
+    const phaseChanged = !crawlKey.startsWith(phase + ':');
+    crawlKey = key;
+    const item = post.items.find(i => i.id === node.id);
+    const steps = [];
+    if (phaseChanged) steps.push({ el: buttons.find(b => b.dataset.afterStation === STATION_OF_PHASE[phase]), label: PHASES[phase], tone: 'jev', dwell: 260, ax: 0.5, ay: 0.3 });
+    steps.push({ el: itemButtons.find(b => b.id === node.id)?.button, tone: 'idle', dwell: 140, ax: 0.92 });
+    const tagText = phase === 0 ? (KIND[item.kind] || '事项') : phase === 1 ? (item.ids?.length || 0) + ' 句依据' : phase === 2 ? (item.quality?.label || item.quality?.status || '复核未记录') : '待核对 #' + ((post.queue || []).findIndex(q => q.id === item.id) + 1 || '—');
+    steps.push({ point: () => web.anchors().nodes.find(n => n.id === node.id) || null, label: tagText, tone: phase === 2 && item.quality?.status === 'accepted' ? 'code' : 'jev', dwell: 240 });
+    crawler()?.visit(steps);
+  }
   function openInspector() { if (window.innerWidth <= 900) $('after-studio-inspector').classList.add('is-open'); }
-  function pickItem(id) { api()?.pause(); selectedItem = id; detailKey = ''; render(api()?.state() || snapshot); openInspector(); }
+  function pickItem(id) {
+    api()?.pause(); selectedItem = id; detailKey = ''; render(api()?.state() || snapshot); openInspector();
+    const item = (snapshot.data?.post?.items || []).find(i => i.id === id);
+    crawler()?.visit([{ point: () => web?.anchors().nodes.find(n => n.id === id) || null, label: item ? (KIND[item.kind] || '事项') + ' · ' + (item.ids?.length || 0) + ' 句依据' : '', tone: 'jev', dwell: 200 },
+      ...[...document.querySelectorAll('#after-inspector-content .after-detail-evidence')].slice(0, 3).map(el => ({ el, tone: 'idle', dwell: 160, ax: 0.94, ay: 0.3 }))]);
+  }
   function buildItems(post) {
     const items = post?.items || [];
     itemButtons = items.map(item => {
@@ -63,7 +90,7 @@
     const data = snapshot.data;
     const post = data?.sentences?.length ? data.post : null;
     if (data !== currentData || (!post && itemButtons.length)) {
-      currentData = data; selectedItem = null; selectedStation = 'minutes'; detailKey = '';
+      if (mode === 'after') window.OopsCrawler?.clear(); crawlKey = ''; currentData = data; selectedItem = null; selectedStation = 'minutes'; detailKey = '';
       $('after-studio-inspector').classList.remove('is-open'); buildItems(post);
     }
     const roles = derive(snapshot); const phase = phaseAt(snapshot);
@@ -98,6 +125,8 @@
     });
     $('after-room-footnote').textContent = '展示顺序不代表历史发生顺序；人工核对和发送不自动推进。';
     if (web && mode === 'after') web.draw(window.OopsWeb.afterScene(mode === 'after' ? snapshot : { ...snapshot, playing: false }, selectedItem));
+    if (mode === 'after' && post) crawler()?.rest(() => web?.anchors().hub || null);
+    crawl(post, phase, playing);
     itemButtons.forEach(item => item.button.classList.toggle('is-selected', item.id === selectedItem));
     renderDetail(post, roles);
   }
