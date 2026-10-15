@@ -183,6 +183,18 @@ class AccessTest(unittest.TestCase):
             self.assertNotIn(session, str(db.execute('SELECT * FROM access').fetchall()))
         self.assertEqual(0o600, os.stat(self.access.path).st_mode & 0o777)
 
+    def test_open_access_file_lists_meetings_and_is_revoked_by_deleting_it(self):
+        self.assertIsNone(self.access.open_scope())
+        path = os.path.join(os.path.dirname(os.path.abspath(self.access.path)), 'open-access.json')
+        with open(path, 'w') as stream:
+            json.dump({'meetings': ['m2', 'm1', 'm1']}, stream)
+        self.assertEqual(['m1', 'm2'], self.access.open_scope())
+        with open(path, 'w') as stream:
+            json.dump({'meetings': ['../escape']}, stream)
+        self.assertIsNone(self.access.open_scope())
+        os.unlink(path)
+        self.assertIsNone(self.access.open_scope())
+
     def test_expired_sessions_do_not_return_scope(self):
         invite = self.access.mint(['safe'], 60)
         session, _ = self.access.exchange(invite)

@@ -560,6 +560,27 @@ class ReplayAccess:
     def key(token):
         return hashlib.sha256(token.encode()).hexdigest()
 
+    def open_scope(self):
+        """Optional no-invite access: open-access.json beside the access database lists the meetings.
+
+        Read on every request, so deleting the file restores invite-only access at once.
+        """
+        path = os.path.join(os.path.dirname(os.path.abspath(self.path)), 'open-access.json')
+        try:
+            with open(path, encoding='utf-8') as stream:
+                value = json.load(stream)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return None
+        meetings = value.get('meetings') if isinstance(value, dict) else None
+        if not isinstance(meetings, list) or not meetings or len(meetings) > 200:
+            return None
+        try:
+            return sorted({identifier(sid) for sid in meetings})
+        except HistoryError:
+            return None
+
     def mint(self, scope, seconds=7200):
         if not scope or not 60 <= seconds <= 86400:
             raise ValueError('Specify meeting IDs and a lifetime from 60 to 86400 seconds')
@@ -643,7 +664,14 @@ def make_handler(history, access, public_dir, url_prefix='/oops-meeting/history/
             return token
 
         def authenticated(self):
-            return access.scope(self.session_token())
+            try:
+                return access.scope(self.session_token())
+            except HistoryError as error:
+                # A personal session wins; otherwise an explicitly opened set of meetings, if any.
+                shared = access.open_scope() if error.status == 401 and hasattr(access, 'open_scope') else None
+                if shared:
+                    return shared
+                raise
 
         def do_GET(self):
             try:
