@@ -1,12 +1,12 @@
 // Oops 会后整理：回放 scripts/funnel_replay.py 输出里的 post 段。
-// 第 1 步 DeepSeek 一次读完全文写纪要（真实耗时来自回放）；第 2–4 步是后端现有代码：
+// 第 1 步展示已有纪要，历史调用次数有记录才显示；第 2–4 步是当前确定性代码：
 // minutes_items 把纪要变成事项并对回原话，item_quality 复核，review_queue 排出会后核对顺序。
 // 蜘蛛按原话顺序爬过全文，抓住被引用的句子，把事项标题提出来放到右侧。文字一律用 textContent 写入。
 (() => {
   'use strict';
   const KIND = { task: { name: '待办', color: '#3fd9a0' }, decision: { name: '决定', color: '#f2896b' }, open: { name: '未决问题', color: '#ff3dd2' } };
   const KIND_ORDER = ['task', 'decision', 'open'];
-  const QUEUE = { commitment: '核对待办', decision: '核对决定', speaker: '补说话人' };
+  const QUEUE = { task: '核对待办', commitment: '核对待办', decision: '核对决定', open: '核对未决', speaker: '补说话人' };
   const PINK = '#ff3d8b', CYAN = '#5cc3ff';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const $ = (id) => document.getElementById(id);
@@ -25,7 +25,7 @@
   const ctx = ui.canvas.getContext('2d');
 
   let data = null, post = null, rows = [], items = [], events = [], next = 0;
-  let at = 0, playing = false, speed = 1, lastFrame = 0, started = false, total = 1;
+  let at = 0, playing = false, speed = 1, lastFrame = 0, started = false, total = 1, lastPublished = 0;
   let here = -1, grabUntil = 0, flyers = [], phases = [0, 0, 0, 0], ends = [0, 0, 0, 0];
   const spider = { x: 0, y: 0, ready: false, feet: [] };
 
@@ -36,21 +36,33 @@
   }
 
   function build(raw) {
-    data = raw; post = raw && raw.post;
-    events = []; next = 0; at = 0; here = -1; flyers = []; phases = [0, 0, 0, 0]; spider.ready = false;
+    // Invalidated history must leave no private text in the last canvas frame.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
+    ctx.restore();
+    const validSource = Array.isArray(raw?.sentences) && raw.sentences.length > 0 && raw.source?.kind !== 'empty';
+    data = validSource ? raw : { ...raw, source: raw?.source || { kind: 'empty' }, sentences: [], post: null };
+    post = data.post;
+    rows = []; items = [];
+    events = []; next = 0; at = 0; total = 1; speed = 1; playing = false; started = false; here = -1; flyers = []; phases = [0, 0, 0, 0]; ends = [0, 0, 0, 0]; spider.ready = false; spider.feet = [];
     ui.queue.replaceChildren(); KIND_ORDER.forEach((k) => { ui.boards[k].replaceChildren(); ui.counts[k].textContent = '0'; });
     ui.pipeline.forEach((li) => { li.classList.remove('active', 'done'); li.style.setProperty('--p', '0%'); });
     ['p0', 'p1', 'p2', 'p3'].forEach((id) => { $(id).textContent = ''; });
-    const replay = data.source && data.source.kind === 'replay';
-    ui.docTitle.textContent = replay ? 'replay.full' : 'transcript.full';
+    const replay = data.source && data.source.kind !== 'example';
+    ui.docTitle.textContent = data.source?.kind === 'history' ? 'history.full' : replay ? 'analysis.full' : 'transcript.example';
+    renderPipelineLabels();
     if (!post) {
-      ui.doc.replaceChildren(el('li', null, '这份回放没有会后纪要，看不了会后整理。'));
-      ui.note.textContent = ''; ui.overview.replaceChildren(); ui.cost.replaceChildren();
+      const state = data.post_status || {};
+      const reasons = { in_progress: '会议尚未结束', writing: '已有后台尚在整理', source_changed: '来源已变更，旧纪要不能作为当前依据', source_expired: '完整转写已到期', before_bot: '该会议早于纪要服务启用', failed: '已有生成记录失败', no_end: '未保存会议结束状态', bot_off: '此后端未启用纪要服务' };
+      ui.doc.replaceChildren(el('li', null, state.message || reasons[state.reason] || '没有可用的已存会后纪要。'));
+      ui.note.textContent = '这里只读历史结果；打开页面不会生成或重试纪要。'; ui.overview.replaceChildren(); ui.cost.replaceChildren();
       setPlaying(false); started = false;
+      emitAfterState('funnel:after-data');
       return;
     }
-    ui.note.textContent = '纪要由 DeepSeek 一次读完全文生成；下面按原话顺序展示每条结果引用了哪些原话，再用规则复核、排进核对队列。第 2–4 步都是现有后端代码，不调模型。' +
-      (replay ? ' 真实会议回放，仅限本机查看。' : ' 示例会议，纪要内容为演示编写。');
+    ui.note.textContent = '读取已有纪要，再按当前确定性代码对回原话、规则复核和排事项核对队列；这三个步骤不调模型。蜘蛛爬行是引用关系的动画，不是模型实时思考。' +
+      (data.source?.kind === 'reanalysis' ? ' 复用原有纪要；本次重新分析只调用 Jev，没有调用 DeepSeek 生成新纪要。' : data.source?.kind === 'history' ? ' 后端历史只读；历史调用次数有记录才显示。' : replay ? ' 重新运行的分析回放，不能证明会议当时如何判断。' : ' 示例会议，纪要为演示编写。');
 
     const byId = new Map();
     rows = data.sentences.map((s, i) => {
@@ -68,7 +80,7 @@
     items = post.items.map((it, n) => {
       const card = el('li', 'card');
       const meta = el('div', 'm');
-      const who = [it.owner, it.due].filter(Boolean).join(' · ');
+      const who = [it.owner ? '负责人线索：' + it.owner + '（待人确认）' : '', it.due].filter(Boolean).join(' · ');
       if (who) meta.append(el('span', null, who));
       const ev = el('span', 'ev');
       const q = el('span', 'q', '');
@@ -93,7 +105,15 @@
     ui.docMeta.textContent = '已读 0 / ' + rows.length;
     started = false;
     if (reduceMotion) { at = total; runUntil(total); }
-    if (!ui.after.hidden) start();
+    setPlaying(false);
+    emitAfterState('funnel:after-data');
+  }
+
+  function renderPipelineLabels() {
+    const configured = data?.pipeline?.minutes_configured_runs;
+    const pipeline = data?.pipeline || {};
+    $('asr-review-note').textContent = pipeline.asr_review_supported ? '纪要前可选步骤：部署源码支持等待录音上传与第二次 ASR 复核' + (pipeline.asr_review_wait_min ? '（配置等待上限 ' + pipeline.asr_review_wait_min + ' 分钟）' : '') + '。' + (pipeline.asr_review_configured === true ? '部署已配置启用；' : pipeline.asr_review_configured === false ? '部署未配置启用；' : '部署是否启用未知；') + '本场是否实际执行只以历史记录为准，页面不会运行 ASR。' : '纪要前的上传与 ASR 复核：此数据未提供部署配置或本场执行记录；页面不会启动复核。';
+    $('minutes-generation').textContent = configured ? (pipeline.scope === 'deployed_source' ? '部署源码' : '本地源码') + '：' + configured + ' 次生成后投票；历史另核对' : '读取已存纪要；历史生成次数另核对';
   }
 
   function renderCost() {
@@ -104,10 +124,22 @@
       rest.set(key, (rest.get(key) || 0) + 1);
     });
     const restText = [...rest.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => k + ' ' + n).join(' · ');
-    const a = el('div'); a.append(el('div', 'big l-model', '1 次'), el('p', null, 'DeepSeek 写纪要' + (post.latency_ms ? '，耗时 ' + fmt(post.latency_ms) : '') + '。会后只调这一次模型。'));
+    const generation = post.generation || {};
+    const calls = Number.isInteger(generation.recorded_calls) ? generation.recorded_calls : null;
+    const reused = generation.evidence === 'reused_history';
+    const a = el('div'); a.append(el('div', 'big l-model', reused ? '复用原纪要' : calls == null ? '次数未记录' : calls + ' 次'), el('p', null, (reused ? '本次没有调用 DeepSeek。以下是原纪要的已存生成记录：' : '该次历史生成调用') + (post.latency_ms ? '，记录耗时 ' + fmt(post.latency_ms) : '；耗时未记录') + '。' + (data.source?.kind === 'example' ? '示例内容不代表真实调用。' : '当前源码配置不补作历史调用证据。')));
+    if (Number.isInteger(generation.successful_runs)) a.append(el('p', null, '已存成功投票结果：' + generation.successful_runs + ' 份；不等于精确调用次数。'));
     const b = el('div'); b.append(el('div', 'big l-code', cited + ' / ' + rows.length), el('p', null, '句被纪要引用为依据。没被引用的：' + (restText || '—')));
-    const c = el('p', 'verdict', '对回原话、规则复核、排核对队列都是本地代码：' + items.length + ' 个事项，' + post.queue.length + ' 项待你核对。');
+    const c = el('p', 'verdict', '当前代码派生；规则通过也仍需人确认：' + items.length + ' 个事项，' + post.queue.length + ' 项待你核对。');
     ui.cost.replaceChildren(a, b, c);
+    const delivery = post.delivery_record;
+    if (delivery && typeof delivery === 'object') {
+      const flag = (value, yes, no) => value === true ? yes : value === false ? no : '未记录';
+      const sent = Number.isInteger(delivery.sent_receipts) && delivery.sent_receipts >= 0 ? String(delivery.sent_receipts) : '未记录';
+      ui.cost.append(el('p', 'verdict', '历史回执摘要：文档创建 ' + flag(delivery.document_created, '有记录', '无记录') +
+        '；已存发送回执 ' + sent + '；台账写入 ' + flag(delivery.ledger_written, '有记录', '无记录') +
+        '；后台处理标记 ' + flag(delivery.done, '完成', '未完成') + '。这里只展示已保存状态，不表示本页执行过发送或本次会话已重新执行。'));
+    }
   }
 
   // ---------------------------------------------------------------- schedule
@@ -140,7 +172,7 @@
     events.push({ t, fn: () => { step(2, 'done'); step(3, 'active'); } });
     const start3 = t;
     post.queue.forEach((q, n) => { t += 240; events.push({ t, fn: () => enqueue(q, n) }); });
-    if (!post.queue.length) events.push({ t, fn: () => ui.queue.append(el('li', 'empty', '没有需要你核对的项。')) });
+    if (!post.queue.length) events.push({ t, fn: () => ui.queue.append(el('li', 'empty', '没有当前待核对事项。')) });
     ends[3] = t + 300; t = ends[3];
     phases.start3 = start3;
     events.push({ t, fn: () => { step(3, 'done'); $('p3').textContent = post.queue.length + ' 项 · ' + summary(); } });
@@ -149,9 +181,9 @@
   }
 
   function summary() {
-    const c = { commitment: 0, decision: 0, speaker: 0 };
-    post.queue.forEach((q) => { c[q.kind] = (c[q.kind] || 0) + 1; });
-    return Object.entries(c).filter(([, n]) => n).map(([k, n]) => QUEUE[k].replace('核对', '') + ' ' + n).join(' · ');
+    const c = {};
+    post.queue.forEach((q) => { const kind = q.item_kind || q.kind; c[kind] = (c[kind] || 0) + 1; });
+    return Object.entries(c).filter(([, n]) => n).map(([k, n]) => (QUEUE[k] || k).replace('核对', '') + ' ' + n).join(' · ');
   }
 
   function step(n, state) {
@@ -220,11 +252,14 @@
   }
 
   function enqueue(q, n) {
-    const r = rows.find((x) => x.id === q.id);
+    const kind = q.item_kind || q.kind;
+    const item = items.find(x => x.id === q.id);
+    const target = q.ids?.[0] || item?.ids?.[0] || q.id;
+    const r = rows.find((x) => x.id === target);
     const li = el('li');
-    li.append(el('span', 'k ' + (q.kind === 'commitment' ? 'l-code' : q.kind === 'decision' ? 'l-model' : 'l-you'), QUEUE[q.kind] || q.kind),
-      el('span', 'id', q.id), el('span', 'x', r ? r.text : ''));
-    li.addEventListener('click', () => ping(q.id));
+    li.append(el('span', 'k ' + (kind === 'task' || kind === 'commitment' ? 'l-code' : kind === 'decision' ? 'l-model' : 'l-you'), QUEUE[kind] || kind),
+      el('span', 'id', q.id), el('span', 'x', item ? item.title : r ? r.text : ''));
+    li.addEventListener('click', () => ping(target));
     ui.queue.append(li);
     ui.queue.scrollTop = ui.queue.scrollHeight;
     $('p3').textContent = (n + 1) + ' / ' + post.queue.length + ' 项';
@@ -251,13 +286,56 @@
   }
 
   function runUntil(t) {
-    while (next < events.length && events[next].t <= t) { events[next].fn(); next++; }
+    // Deterministic playback: every action uses its own presentation timestamp,
+    // including when scrubbing across many events in one frame.
+    while (next < events.length && events[next].t <= t) {
+      const event = events[next++];
+      at = event.t;
+      settleFlyers(at);
+      event.fn();
+      settleFlyers(at);
+    }
+    at = t;
+    settleFlyers(at);
+  }
+
+  function settleFlyers(t) {
+    flyers = flyers.filter(flyer => {
+      if (flyer.start + flyer.dur > t) return true;
+      flyer.done();
+      return false;
+    });
   }
 
   // ---------------------------------------------------------------- playback
   function setPlaying(on) {
-    playing = on && post && at < total;
+    playing = Boolean(on && post && at < total && !ui.after.hidden && !document.hidden);
     ui.play.textContent = playing ? '❚❚ 暂停' : '▶ 播放';
+    emitAfterState('funnel:after-play');
+  }
+
+  function afterState() {
+    const phase = !post ? 'missing' : at < ends[0] ? 'minutes' : at < ends[1] ? 'evidence' :
+      at < ends[2] ? 'quality' : at < ends[3] ? 'queue' : 'complete';
+    return { data, post, rows, items, events, next, at, total, now: at, duration: total, here, phases, ends,
+      playing, speed, started, available: Boolean(post), phase, timeline_kind: 'presentation',
+      mode: ui.after.hidden ? 'live' : 'after' };
+  }
+
+  function emitAfterState(name) {
+    document.dispatchEvent(new CustomEvent(name, { detail: afterState() }));
+  }
+
+  function seek(value) {
+    if (!data || !post || !Number.isFinite(Number(value))) return;
+    const raw = data, chosenSpeed = speed, target = Math.max(0, Math.min(total, Number(value)));
+    build(raw);
+    speed = chosenSpeed; ui.speed.value = String(speed);
+    runUntil(target);
+    started = target > 0;
+    setPlaying(false);
+    draw(lastFrame);
+    emitAfterState('funnel:after-tick');
   }
 
   function start() {
@@ -274,6 +352,7 @@
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     ui.canvas.width = Math.round(r.width * dpr); ui.canvas.height = Math.round(r.height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (post && !ui.after.hidden) draw(lastFrame);
   }
 
   function rel(r, base) { return { x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height }; }
@@ -284,7 +363,7 @@
     if (!post || !base.width) return;
     const doc = rel(ui.doc.getBoundingClientRect(), base);
 
-    // step 1: one sweep over the whole transcript while DeepSeek reads it
+    // step 1: illustrative sweep over the stored minutes; no model runs here
     if (at < ends[0]) {
       const p = at / ends[0];
       const y = doc.y + p * doc.h;
@@ -294,7 +373,7 @@
       ctx.strokeStyle = '#f2896b'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(doc.x, y); ctx.lineTo(doc.x + doc.w, y); ctx.stroke();
       ctx.font = '12px ' + getComputedStyle(document.body).fontFamily; ctx.fillStyle = '#f2896b';
-      ctx.fillText('DeepSeek 正在读全文' + (post.latency_ms ? ' · 实际 ' + fmt(post.latency_ms) : ''), doc.x + 12, Math.max(doc.y + 16, y - 8));
+      ctx.fillText('展示已有纪要' + (post.latency_ms ? ' · 记录耗时 ' + fmt(post.latency_ms) : ' · 历史耗时未记录'), doc.x + 12, Math.max(doc.y + 16, y - 8));
       ui.pipeline[0].style.setProperty('--p', Math.round(p * 100) + '%');
     } else if (at < ends[1] && phases.len1) {
       ui.pipeline[1].style.setProperty('--p', Math.round(((at - phases.start1) / phases.len1) * 100) + '%');
@@ -317,8 +396,7 @@
       if (k < lift) { const e = k / lift; x = sx + 8 * e; y = sy - 26 * e; size = (f.big ? 13 + 11 * e : 11); alpha = e; }
       else { const e = (k - lift) / (1 - lift), ease = e * e * (3 - 2 * e); x = sx + 8 + (tx - sx - 8) * ease; y = sy - 26 + (ty - sy + 26) * ease; size = f.big ? 24 - 11 * ease : 11; alpha = 1 - 0.35 * ease; }
       glitch(f.text, x, y, size, f.color, alpha, f.big);
-      if (k >= 1) { f.done(); return false; }
-      return true;
+      return k < 1;
     });
   }
 
@@ -386,13 +464,17 @@
   function frame(realNow) {
     const dt = Math.min(100, realNow - lastFrame);
     lastFrame = realNow;
-    if (post && !ui.after.hidden) {
+    if (post && !ui.after.hidden && !document.hidden) {
       if (playing) {
         at = Math.min(total, at + dt * speed);
         runUntil(at);
         if (at >= total) setPlaying(false);
+        draw(realNow);
+        if (realNow - lastPublished >= 33 || !playing) {
+          lastPublished = realNow;
+          emitAfterState('funnel:after-tick');
+        }
       }
-      draw(realNow);
     }
     requestAnimationFrame(frame);
   }
@@ -405,13 +487,14 @@
     document.body.classList.toggle('mode-after', after);
     if (after) {
       if (window.oopsFunnel) window.oopsFunnel.pause();
+      setPlaying(false);
       sizeCanvas();
-      if (!started) start(); else if (at < total) setPlaying(true);
     } else {
       setPlaying(false);
-      if (window.oopsFunnel) window.oopsFunnel.resume();
+      if (window.oopsFunnel) window.oopsFunnel.pause();
     }
     try { history.replaceState(null, '', after ? '#after' : '#live'); } catch (e) { /* hash is optional */ }
+    document.dispatchEvent(new CustomEvent('funnel:mode', { detail: { mode } }));
   }
   ui.tabs.forEach((b, n) => {
     b.addEventListener('click', () => showMode(b.dataset.mode));
@@ -422,8 +505,25 @@
   });
   ui.play.addEventListener('click', () => { if (at >= total) { restart(); return; } if (!started) start(); else setPlaying(!playing); });
   ui.restart.addEventListener('click', restart);
-  ui.speed.addEventListener('change', () => { speed = Number(ui.speed.value) || 1; });
+  ui.speed.addEventListener('change', () => { speed = Number(ui.speed.value) || 1; emitAfterState('funnel:after-tick'); });
+  window.OopsAfterReplay = Object.freeze({
+    state: afterState,
+    pause: () => setPlaying(false),
+    play: on => {
+      if (!on) { setPlaying(false); return; }
+      if (at >= total) { restart(); return; }
+      started = true; setPlaying(true);
+    },
+    seek,
+    restart,
+    setSpeed: value => {
+      if (![1, 2, 4].includes(Number(value))) return;
+      speed = Number(value); ui.speed.value = String(speed); emitAfterState('funnel:after-tick');
+    },
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) setPlaying(false); });
 
+  document.addEventListener('funnel:pipeline', (ev) => { if (data) { data.pipeline = ev.detail; renderPipelineLabels(); } });
   document.addEventListener('funnel:data', (ev) => {
     build(ev.detail);
     if (location.hash === '#after' && ui.after.hidden) showMode('after');

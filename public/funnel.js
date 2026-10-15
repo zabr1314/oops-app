@@ -9,6 +9,8 @@
     model: { name: 'DeepSeek', color: '#f2896b', delay: 950 },
     you: { name: '你', color: '#f4cc4e', delay: 300 },
   };
+  LAYERS.unknown = { name: '未记录', color: '#7d848d', delay: 1 };
+  const PROVENANCE = { recorded: '历史记录', stored: '已存结果', recomputed: '当前规则重算', required: '确认要求', example: '编写示例', missing: '未记录', reanalysis: '本次重新分析' };
   const ORDER = ['code', 'jev', 'model', 'you'];
   const IDX = { code: 0, jev: 1, model: 2, you: 3 };
   const SPEEDS = [1, 2, 5, 10, 30, 60];
@@ -33,49 +35,53 @@
 
   let data = null, sentences = [], timeline = [], duration = 1;
   let now = 0, fired = 0, playing = false, speed = 1, lastFrame = 0, lastRendered = -1;
-  let selected = null, userScrolledAt = 0;
+  let selected = null, userScrolledAt = 0, lastStudioTick = 0;
+  const openCallDetails = new Set();
   const spider = { x: 0, y: 0, ready: false };
 
   // ---------------------------------------------------------------- data
   function validate(raw) {
-    if (!raw || raw.version !== 1 || !Array.isArray(raw.sentences)) throw new Error('不是 funnel_replay.py 生成的漏斗数据（version 1）');
+    if (!raw || ![1, 2].includes(raw.version) || !Array.isArray(raw.sentences)) throw new Error('不是 funnel_replay.py 生成的漏斗数据（version 1 / 2）');
     for (const s of raw.sentences) {
-      if (typeof s.text !== 'string' || !Number.isFinite(s.end_ms) || !Array.isArray(s.forks) || !s.forks.length) throw new Error('句子格式无效：' + (s.id || '?'));
+      if (typeof s.text !== 'string' || !Number.isFinite(s.end_ms) || !Array.isArray(s.forks)) throw new Error('句子格式无效：' + (s.id || '?'));
       for (const f of s.forks) if (!LAYERS[f.layer]) throw new Error('未知的层：' + f.layer);
     }
-    return raw;
+    const legacy = raw.version === 1;
+    return { ...raw, source: { ...raw.source, note: (raw.source?.note || '') + (legacy ? ' 旧版文件：来源标签与中间步骤未完整记录；0.95 仅为旧展示值，不能证明后端自动结束。' : '') }, thresholds: { tag_floor: 0.5, ...raw.thresholds } };
   }
 
   function load(raw) {
-    data = validate(raw);
-    timeline = [];
+    data = validate(deployedPipeline && !['history', 'reanalysis'].includes(raw.source?.kind) ? { ...raw, pipeline: deployedPipeline } : raw);
+    timeline = []; openCallDetails.clear();
     sentences = data.sentences.map((s, i) => {
       const out = { ...s, i, start_ms: Number.isFinite(s.start_ms) ? s.start_ms : s.end_ms, state: '', firedSteps: 0 };
       let cursor = s.end_ms;
       s.forks.forEach((f, k) => {
-        cursor += Number.isFinite(f.ms) && f.ms > 0 ? f.ms : LAYERS[f.layer].delay;
+        cursor += Number.isFinite(f.ms) && f.ms >= 0 ? f.ms : LAYERS[f.layer].delay;
         timeline.push({ t: cursor, i, k, f });
       });
       out.doneAt = cursor;
-      out.route = out.route || s.forks.reduce((a, f) => (IDX[f.layer] > IDX[a] ? f.layer : a), 'code');
+      out.route = LAYERS[out.route] ? out.route : 'unknown';
       out.outcome = s.outcome || LAYERS[out.route].name + ' 结束';
-      out.filler = s.forks.length === 1 && s.forks[0].layer === 'code' && s.forks[0].settled;
+      out.filler = s.forks.length === 1 && s.forks[0].layer === 'code' && s.forks[0].settled && raw.source?.kind !== 'history';
       return out;
     });
     for (const e of data.session || []) {
       if (e && e.fork && LAYERS[e.fork.layer]) timeline.push({ t: (e.at_ms || 0) + (e.fork.ms || 0), i: -1, k: 0, f: e.fork });
     }
     timeline.sort((a, b) => a.t - b.t);
-    const seq = { code: 0, jev: 0, model: 0, you: 0 };
+    const seq = { code: 0, jev: 0, model: 0, you: 0, unknown: 0 };
     timeline.forEach((e) => { e.slot = (seq[e.f.layer]++ * GOLD + 0.5 * GOLD) % 1; e.real = 0; });
     duration = Math.max(1, ...timeline.map((e) => e.t), ...sentences.map((s) => s.end_ms)) + 1500;
 
-    const replay = data.source && data.source.kind === 'replay';
-    ui.badge.textContent = replay ? '真实回放 · 仅本机' : '示例数据';
+    const replay = data.source && ['replay', 'history', 'reanalysis'].includes(data.source.kind);
+    const historical = data.source?.kind === 'history';
+    ui.badge.textContent = data.source?.kind === 'reanalysis' ? '重新分析 · Jev' : historical ? '后端历史 · 只读' : replay ? '分析回放 · 仅本机' : '示例数据';
     ui.badge.className = 'badge ' + (replay ? 'replay' : 'example');
     ui.label.textContent = (data.source && data.source.label) || '';
     ui.note.textContent = (data.source && data.source.note) || '';
-    $('pane-title').textContent = replay ? 'replay.local' : 'meeting.example';
+    $('pane-title').textContent = data.source?.kind === 'reanalysis' ? 'reanalysis.readonly' : historical ? 'history.readonly' : replay ? 'replay.local' : 'meeting.example';
+    renderPipeline();
 
     buildTranscript();
     buildDots();
@@ -85,8 +91,18 @@
     ui.speed.value = String(speed);
     selected = null; ui.follow.hidden = true;
     seek(reduceMotion ? duration : 0);
-    setPlaying(!reduceMotion && !document.getElementById('mode-live').hidden);
+    // Loaded records wait for an explicit playback action; opening a source is read-only.
+    setPlaying(false);
     document.dispatchEvent(new CustomEvent('funnel:data', { detail: data }));
+    emitReplayState('funnel:tick');
+  }
+
+  function renderPipeline() {
+    const pipeline = data?.pipeline || {};
+    const deployed = pipeline.scope === 'deployed_source';
+    $('research-state').textContent = deployed ? (pipeline.in_meeting_research === true ? '部署源码包含会中研究；执行看记录' : pipeline.in_meeting_research === false ? '部署源码未进入会中研究；历史另核对' : '部署的会中自动研究状态未知') : '部署配置暂不可读取';
+    const configured = pipeline.minutes_configured_runs;
+    $('pipeline-note').textContent = (deployed ? '流程来源：已部署源码' : '部署配置暂不可读取；当前工作区源码供比较，不代表线上部署') + (pipeline.verified_at ? ' · 核对于 ' + pipeline.verified_at : '') + (configured ? ' · 纪要配置 ' + configured + ' 次独立生成后投票' : '') + '。这些是源码配置；每场实际执行只以保存记录为准。' + (pipeline.legacy_auto_delivery_supported === true ? ' 部署源码还包含旧自动共享链路；本页只读取历史，不触发发送。' : '');
   }
 
   function clauses(text) {
@@ -104,7 +120,7 @@
       s.boxes = clauses(s.text).map((c) => el('span', 'box', c));
       li.append(s.txt);
       li.title = '点开看这句话经过的每个问题';
-      const pick = () => { selected = i; ui.follow.hidden = false; markSelected(); lastRendered = -1; };
+      const pick = () => selectSentence(i);
       li.addEventListener('click', pick);
       li.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); } });
       s.row = li;
@@ -118,7 +134,7 @@
 
   function buildExits() {
     const rows = [];
-    ORDER.forEach((k) => {
+    [...ORDER, 'unknown'].forEach((k) => {
       const counts = new Map();
       sentences.filter((s) => s.route === k).forEach((s) => counts.set(s.outcome, (counts.get(s.outcome) || 0) + 1));
       [...counts.entries()].sort((a, b) => b[1] - a[1]).forEach(([label]) => {
@@ -133,9 +149,30 @@
 
   // ---------------------------------------------------------------- state
   function setPlaying(on) {
-    playing = on && now < duration;
+    playing = Boolean(on && data && now < duration && !document.hidden);
     ui.play.textContent = playing ? '❚❚ 暂停' : '▶ 播放';
     ui.play.setAttribute('aria-label', playing ? '暂停' : '播放');
+    emitReplayState('funnel:play');
+  }
+
+  const replayState = () => ({ data, sentences, timeline, now, duration, playing, speed, selected, fired });
+  function emitReplayState(name) {
+    document.dispatchEvent(new CustomEvent(name, { detail: replayState() }));
+  }
+
+  function selectSentence(index) {
+    if (!Number.isInteger(index) || !sentences[index]) return;
+    setPlaying(false);
+    selected = index; ui.follow.hidden = false;
+    // Selecting an already saved sentence reveals its complete recorded steps.
+    seek(sentences[index].doneAt);
+    markSelected();
+    emitReplayState('funnel:selection');
+  }
+
+  function followPlayback() {
+    selected = null; ui.follow.hidden = true; markSelected(); lastRendered = -1;
+    render(true); emitReplayState('funnel:selection');
   }
 
   function seek(t) {
@@ -149,6 +186,7 @@
     }
     lastRendered = -1;
     render(true);
+    emitReplayState('funnel:tick');
   }
 
   const stateOf = (s) => now < s.start_ms ? 'hidden' : now < s.end_ms ? 'partial' : now >= s.doneAt ? 'done' : 'thinking';
@@ -179,17 +217,17 @@
     if (fired === lastRendered && !full) return;
     lastRendered = fired;
 
-    const c = { code: 0, jev: 0, model: 0, you: 0 };
+    const c = { code: 0, jev: 0, model: 0, you: 0, unknown: 0 };
     for (let j = 0; j < fired; j++) c[timeline[j].f.layer]++;
-    const total = c.code + c.jev + c.model + c.you;
+    const total = c.code + c.jev + c.model + c.you + c.unknown;
     $('c-sent').textContent = heard; $('c-fork').textContent = total;
-    const ended = { code: new Map(), jev: new Map(), model: new Map(), you: new Map() };
-    const endedN = { code: 0, jev: 0, model: 0, you: 0 };
+    const ended = { code: new Map(), jev: new Map(), model: new Map(), you: new Map(), unknown: new Map() };
+    const endedN = { code: 0, jev: 0, model: 0, you: 0, unknown: 0 };
     for (const s of sentences) if (now >= s.doneAt) { ended[s.route].set(s.outcome, (ended[s.route].get(s.outcome) || 0) + 1); endedN[s.route]++; }
     ORDER.forEach((k) => {
       $('c-' + k).textContent = c[k];
       $('r-' + k).textContent = c[k];
-      $('r-' + k + '-sub').textContent = '在这层结束 ' + endedN[k] + ' 句';
+      $('r-' + k + '-sub').textContent = '最后有记录的处理方 ' + endedN[k] + ' 句';
       const top = [...ended[k].entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
       $('r-' + k + '-top').replaceChildren(...top.map(([l, n]) => { const li = el('li'); li.append(el('span', null, l), el('span', null, String(n))); return li; }));
     });
@@ -200,8 +238,8 @@
     renderBars(c, total, heard);
     renderStream();
     renderSpark();
-    ui.statusLeft.textContent = 'oops@funnel · ' + sentences.length + ' 句 · ' + (data.source && data.source.kind === 'replay' ? '真实回放（仅本机）' : '示例数据') + ' · ' + mmss(now);
-    ui.statusRight.textContent = '岔口 ' + total + ' · 规则 ' + c.code + ' · Jev ' + c.jev + ' · DeepSeek ' + c.model + ' · 你 ' + c.you;
+    ui.statusLeft.textContent = 'oops@funnel · ' + sentences.length + ' 句 · ' + (data.source?.kind === 'reanalysis' ? '重新分析（只读）' : data.source?.kind === 'history' ? '后端历史（只读）' : data.source?.kind === 'replay' ? '重新分析回放（仅本机）' : '示例数据') + ' · ' + mmss(now);
+    ui.statusRight.textContent = '岔口 ' + total + ' · 规则 ' + c.code + ' · Jev ' + c.jev + ' · DeepSeek ' + c.model + ' · 你 ' + c.you + (c.unknown ? ' · 来源未记录 ' + c.unknown : '');
   }
 
   function renderBars(c, total, heard) {
@@ -219,7 +257,7 @@
       li.children[2].textContent = c[k];
     });
     $('routed-n').textContent = total;
-    $('routed-sub').textContent = '个岔口 · 来自 ' + heard + ' 句';
+    $('routed-sub').textContent = '个岔口 · 来自 ' + heard + ' 句' + (c.unknown ? ' · ' + c.unknown + ' 条来源未记录' : '');
   }
 
   function renderStream() {
@@ -236,17 +274,48 @@
     }
     ui.stream.replaceChildren(...rows.map((e) => {
       const li = el('li', e.pending ? 'pending' : '');
+      li.title = (PROVENANCE[e.f.provenance] || '旧文件未记来源') + (e.f.engine ? ' · ' + e.f.engine : '');
       const s = e.i >= 0 ? sentences[e.i] : null;
       const w = el('button', 'w', s ? clip(s.text, 12) : '本场');
       w.type = 'button';
-      if (s) w.addEventListener('click', () => { selected = s.i; ui.follow.hidden = false; markSelected(); lastRendered = -1; });
+      if (s) w.addEventListener('click', () => selectSentence(s.i));
       const a = el('span', 'a', e.pending ? '等待…' : e.f.a);
-      if (!e.pending && e.f.settled) a.append(el('span', 'stop', '  ← 到此为止'));
-      const p = el('span', 'p' + (e.f.p != null && e.f.p < data.thresholds.settle ? ' low' : ''), !e.pending && e.f.p != null ? 'p ' + e.f.p.toFixed(2) : '');
+      if (!e.pending) {
+        const source = PROVENANCE[e.f.provenance] || '旧文件未记来源';
+        a.append(el('span', 'evidence-origin', ' · ' + source + (e.f.historical_only ? '（旧研究流程）' : '')));
+        const detail = [e.f.engine, e.f.recorded_at, e.f.task_clause].filter(Boolean).join(' · ');
+        if (detail) { const details = el('details', 'trace-details'); details.append(el('summary', null, '模型 / 记录时间'), el('span', null, detail)); a.append(details); }
+      }
+      const p = el('span', 'p' + (e.f.p != null && e.f.p < data.thresholds.tag_floor ? ' low' : ''), !e.pending && e.f.p != null ? 'p ' + e.f.p.toFixed(2) : '');
       li.append(el('span', 't', e.t != null ? mmss(e.t) : '#' + (e.k + 1)), w, el('span', 'q', e.f.q), a, p, el('span', 'to l-' + e.f.layer, '→ ' + LAYERS[e.f.layer].name));
+      if (!e.pending && e.f.request) li.append(renderRequestDetail(e.f));
       return li;
     }));
-    if (!rows.length) ui.stream.append(el('li', 'muted', '还没有岔口。'));
+    if (!rows.length) {
+      const s = selected != null ? sentences[selected] : null;
+      ui.stream.append(el('li', 'muted', s ? (s.tag ? s.outcome + '；没有 Jev 概率、模型及中间判断记录。' : '这句话没有历史判断记录；不补算或重新调用 Jev。') : '还没有判断记录。'));
+    }
+  }
+
+  function renderRequestDetail(f) {
+    const detail = el('details', 'call-detail');
+    detail.append(el('summary', null, '实际请求 / 输入上下文 / 全部选项概率'));
+    const detailKey = String(f.call_index) + ':' + f.q;
+    detail.open = openCallDetails.has(detailKey);
+    detail.addEventListener('toggle', () => { if (detail.open) openCallDetails.add(detailKey); else openCallDetails.delete(detailKey); });
+    const model = [f.requested_model ? '请求模型 ' + f.requested_model : '请求模型未记录', f.response_model ? '返回模型 ' + f.response_model : '返回模型未记录', Number.isFinite(f.call_latency_ms) ? '实际请求耗时 ' + f.call_latency_ms + ' ms' : '耗时未记录', Number.isInteger(f.attempt) ? '尝试 ' + f.attempt : ''].filter(Boolean).join(' · ');
+    detail.append(el('p', null, model));
+    if (f.instructions) detail.append(el('p', 'call-instruction', f.instructions));
+    const table = el('table', 'probabilities');
+    const head = el('tr'); ['选项', '判定标准（实际请求）', '返回概率'].forEach(text => head.append(el('th', null, text))); table.append(head);
+    const keys = [...new Set([...Object.keys(f.criteria || {}), ...Object.keys(f.probabilities || {})])];
+    keys.forEach(key => {
+      const tr = el('tr', f.choice === key ? 'chosen' : '');
+      tr.append(el('td', null, key + (f.choice === key ? ' ← 返回选择' : '')), el('td', null, f.criteria?.[key] || '未记录标准'), el('td', null, Number.isFinite(f.probabilities?.[key]) ? String(f.probabilities[key]) : '未返回'));
+      table.append(tr);
+    });
+    detail.append(table, el('p', null, '实际输入 state（原话与上下文）'), el('pre', null, JSON.stringify(f.request.state || {}, null, 2)));
+    return detail;
   }
 
   function markSelected() { sentences.forEach((s) => s.row.classList.toggle('selected', selected === s.i)); }
@@ -258,30 +327,35 @@
     const NS = 'http://www.w3.org/2000/svg';
     const svg = ui.spark; svg.replaceChildren();
     const add = (tag, attrs) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); svg.append(n); return n; };
-    add('line', { x1: 0, x2: W, y1: y(data.thresholds.settle), y2: y(data.thresholds.settle), stroke: '#3fd9a0', 'stroke-dasharray': '3 4', 'vector-effect': 'non-scaling-stroke' });
     add('line', { x1: 0, x2: W, y1: y(data.thresholds.tag_floor), y2: y(data.thresholds.tag_floor), stroke: '#4a5058', 'stroke-dasharray': '2 5', 'vector-effect': 'non-scaling-stroke' });
     if (ps.length > 1) {
       const step = W / 39, x0 = W - (ps.length - 1) * step;
       const pts = ps.map((p, k) => (x0 + k * step).toFixed(1) + ',' + y(p).toFixed(1));
       add('polygon', { points: x0.toFixed(1) + ',' + H + ' ' + pts.join(' ') + ' ' + W + ',' + H, fill: 'rgba(255,61,139,.10)' });
       add('polyline', { points: pts.join(' '), fill: 'none', stroke: PINK, 'stroke-width': 1.6, 'vector-effect': 'non-scaling-stroke' });
-      ps.forEach((p, k) => add('rect', { x: (x0 + k * step - 2).toFixed(1), y: (y(p) - 2).toFixed(1), width: 4, height: 4, fill: p >= data.thresholds.settle ? '#3fd9a0' : '#f4cc4e' }));
+      ps.forEach((p, k) => add('rect', { x: (x0 + k * step - 2).toFixed(1), y: (y(p) - 2).toFixed(1), width: 4, height: 4, fill: p >= data.thresholds.tag_floor ? '#5cc3ff' : '#f4cc4e' }));
     }
     const avg = ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : null;
-    const steady = ps.filter((p) => p >= data.thresholds.settle).length;
-    ui.sparkFoot.textContent = avg == null ? '绿线 0.95：到这条线以上当场定' : '平均 ' + avg.toFixed(3) + ' · 当场定 ' + steady + ' / ' + ps.length + ' · 绿线 0.95';
+    ui.sparkFoot.textContent = (avg == null ? '没有已记录概率' : '平均 ' + avg.toFixed(3) + ' · ' + ps.length + ' 条已记录概率') + '；虚线 0.5 为本地源码分类下限，不表示自动执行许可。';
   }
 
   function renderLens() {
-    const L = data.lens || {}, n = sentences.length || 1;
-    const decided = L.rules_decided || 0, agree = L.agree || 0, shape = L.question_shape || 0, skipped = L.question_skipped || 0;
-    const pct = Math.round((decided / n) * 100);
-    const a = el('div'); a.append(el('div', 'big l-code', decided + ' / ' + sentences.length), el('p', null, '句关键词规则能直接定（待办 / 约束），其中 Jev 也这么判的 ' + agree + ' 句'));
-    const b = el('div'); b.append(el('div', 'big l-model', skipped + ' / ' + shape), el('p', null, '句被「像在提问」送去 DeepSeek，结论是不用查'));
-    const v = el('p', 'verdict', pct < 30
-      ? '模型只该在规则定不了的地方思考。现在规则只能定 ' + pct + '% 的句子，要让规则扛大头，得先补强规则，最快见效的是收紧「像在提问」。'
-      : '规则能定 ' + pct + '% 的句子，可以让它先判，省下这部分 Jev 调用。');
-    ui.lens.replaceChildren(a, b, v);
+    if (data.source?.kind === 'reanalysis') {
+      ui.lens.replaceChildren(el('div', 'big l-jev', (data.source.request_count ?? '—') + ' 次实际请求'), el('p', null, '显示本次重新分析的请求、完整选项和返回概率。'), el('p', 'verdict', '原会议历史保持原样；会后纪要若有展示，是复用原有结果，本次没有调用 DeepSeek。'));
+      return;
+    }
+    if (data.source?.kind === 'history') {
+      const traced = sentences.filter(s => s.forks.length).length;
+      const stored = sentences.filter(s => s.tag_provenance === 'stored').length;
+      ui.lens.replaceChildren(el('div', 'big l-jev', traced + ' / ' + sentences.length),
+        el('p', null, '句有历史处理记录；另有 ' + stored + ' 句仅保存最终标签。'),
+        el('p', 'verdict', '缺失的概率、模型与中间步骤保持空白。打开历史只读取，不重跑分类，不把当前规则当作过去的判断。'));
+      return;
+    }
+    const L = data.lens || {};
+    const a = el('div'); a.append(el('div', 'big l-code', (L.rules_decided || 0) + ' / ' + sentences.length), el('p', null, '句被当前关键词规则识别为待办或约束；与已有分类一致 ' + (L.agree || 0) + ' 句。'));
+    const b = el('div'); b.append(el('div', 'big l-model', String(L.question_skipped || 0)), el('p', null, '条历史研究记录最后跳过；只反映此文件，不代表当前会中运行状态。'));
+    ui.lens.replaceChildren(a, b, el('p', 'verdict', '规则重算是旁路比较，不改写历史分类，不能据此估算真实准确率或节省调用量。'));
   }
 
   function autoScroll(row) {
@@ -427,6 +501,7 @@
     const fresh = [];
     for (let j = 0; j < fired; j++) {
       const e = timeline[j];
+      if (e.f.layer === 'unknown') continue;
       const age = e.real ? (realNow - e.real) / 1000 : 99;
       const P = arcPoint(g, IDX[e.f.layer], e.slot);
       const color = LAYERS[e.f.layer].color;
@@ -486,6 +561,7 @@
   // ---------------------------------------------------------------- loop & controls
   const flashTimers = {};
   function flash(layer) {
+    if (!ORDER.includes(layer)) return;
     const card = ui.cards[IDX[layer]];
     card.classList.add('flash');
     clearTimeout(flashTimers[layer]);
@@ -509,24 +585,31 @@
       }
       render(false);
       draw(realNow);
+      if (playing && realNow - lastStudioTick >= 33) {
+        lastStudioTick = realNow;
+        emitReplayState('funnel:tick');
+      }
     }
     requestAnimationFrame(frame);
   }
 
-  ui.play.addEventListener('click', () => { if (now >= duration) seek(0); setPlaying(!playing); });
-  ui.restart.addEventListener('click', () => { seek(0); setPlaying(true); });
-  ui.speed.addEventListener('change', () => { speed = Number(ui.speed.value) || 1; });
+  ui.play.addEventListener('click', () => { if (selected != null) followPlayback(); if (now >= duration) seek(0); setPlaying(!playing); });
+  ui.restart.addEventListener('click', () => { followPlayback(); seek(0); setPlaying(true); });
+  ui.speed.addEventListener('change', () => { speed = Number(ui.speed.value) || 1; emitReplayState('funnel:tick'); });
   ui.scrub.addEventListener('input', () => seek((Number(ui.scrub.value) / 1000) * duration));
-  ui.follow.addEventListener('click', () => { selected = null; ui.follow.hidden = true; markSelected(); lastRendered = -1; });
+  ui.follow.addEventListener('click', followPlayback);
   ['wheel', 'touchmove'].forEach((t) => ui.transcript.addEventListener(t, () => { userScrolledAt = performance.now(); }, { passive: true }));
   document.addEventListener('keydown', (ev) => {
-    if (ev.code !== 'Space' || /^(INPUT|SELECT|BUTTON|TEXTAREA|LI)$/.test(ev.target.tagName)) return;
+    if (ev.code !== 'Space' || ev.target.closest('dialog, details') || /^(INPUT|SELECT|BUTTON|TEXTAREA|LI|SUMMARY)$/.test(ev.target.tagName)) return;
     ev.preventDefault(); ui.play.click();
   });
 
   function readFile(file) {
     if (!file) return;
-    file.text().then((text) => load(JSON.parse(text))).catch((err) => {
+    pendingRequestedRun = '';
+    if (['history', 'reanalysis'].includes(data?.source?.kind)) clearHistoricalData('已清除私有内容，正在打开本机回放。');
+    const version = ++requestVersion; currentHistorySid = ''; currentReanalysisId = ''; currentSnapshot = '';
+    file.text().then((text) => { if (version === requestVersion) load(JSON.parse(text)); }).catch((err) => {
       ui.note.textContent = '打不开这个文件：' + err.message + '。请选 scripts/funnel_replay.py 生成的 build/funnel-*.json。';
     });
   }
@@ -538,10 +621,256 @@
   window.addEventListener('drop', (ev) => { ev.preventDefault(); dragDepth = 0; ui.drop.hidden = true; readFile(ev.dataTransfer?.files?.[0]); });
 
   window.oopsFunnel = { pause: () => setPlaying(false), resume: () => { if (data && now < duration) setPlaying(true); } };
+  window.OopsReplay = Object.freeze({
+    state: replayState,
+    select: selectSentence,
+    seek,
+    play: (on) => {
+      if (on && selected != null) followPlayback();
+      if (on && now >= duration) seek(0);
+      setPlaying(on);
+    },
+    setSpeed: (value) => { if (SPEEDS.includes(Number(value))) { speed = Number(value); ui.speed.value = String(speed); emitReplayState('funnel:tick'); } },
+    follow: followPlayback,
+    renderRequestDetail,
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) setPlaying(false); });
   new ResizeObserver(sizeCanvas).observe(ui.stage);
   sizeCanvas();
-  fetch('./funnel-sample.json').then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(load)
-    .catch((err) => { ui.badge.textContent = '载入失败'; ui.note.textContent = '示例数据载入失败：' + err.message; });
+
+  let requestVersion = 0;
+  let listVersion = 0;
+  let deployedPipeline = null;
+  let currentHistorySid = '', currentReanalysisId = '', currentSnapshot = '', checkingHistory = false;
+  function clearHistoricalData(message) {
+    ++requestVersion;
+    currentHistorySid = ''; currentReanalysisId = ''; currentSnapshot = '';
+    load({ version: 2, source: { kind: 'empty', label: '未载入私有历史', note: message }, sentences: [], session: [], post: null, thresholds: { tag_floor: 0.5 }, lens: null });
+    setPlaying(false);
+    ui.badge.textContent = '历史内容已清除';
+    ui.statusLeft.textContent = 'oops@funnel · 未载入私有历史';
+  }
+  const snapshotOf = result => result.source?.snapshot_hash || JSON.stringify({ sentences: result.sentences, post: result.post, post_status: result.post_status });
+  async function loadExample() {
+    if (['history', 'reanalysis'].includes(data?.source?.kind)) clearHistoricalData('已清除历史内容，正在载入示例。');
+    currentHistorySid = ''; currentReanalysisId = ''; currentSnapshot = '';
+    const version = ++requestVersion;
+    const response = await fetch('./funnel-sample.json');
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const example = await response.json();
+    if (version === requestVersion) load(example);
+  }
+
+  const privateHistory = /\/oops-meeting\/history\/?(?:index\.html|funnel\.html)?$/.test(location.pathname);
+  const historyStatus = $('history-status');
+  const historySelect = $('history-meeting');
+  const reanalysisSelect = $('reanalysis-run');
+  const statusMessage = (message) => { historyStatus.textContent = message; };
+  let historyConnected = false;
+  let pendingRequestedRun = privateHistory ? new URLSearchParams(location.search).get('run') || '' : '';
+  async function historyRequest(path, options = {}) {
+    const readOnly = (options.method || 'GET').toUpperCase() === 'GET';
+    const waitToRead = attempt => new Promise(resolve => setTimeout(resolve, (attempt + 1) * 500));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let response;
+      try { response = await fetch('./api/' + path, { ...options, credentials: 'same-origin', cache: 'no-store' }); }
+      catch (_) {
+        if (readOnly && attempt < 2) { await waitToRead(attempt); continue; }
+        const error = new Error('历史服务网络连接失败，请刷新列表重试。'); error.code = 'network_failure'; throw error;
+      }
+      if (response.ok) {
+        if (response.status === 204) return {};
+        try { return await response.json(); }
+        catch (_) { const error = new Error('历史服务返回格式错误，请刷新列表重试。'); error.status = response.status; error.code = 'invalid_json'; throw error; }
+      }
+      if (readOnly && [429, 502, 503, 504].includes(response.status) && attempt < 2) { await waitToRead(attempt); continue; }
+      let message = '读取失败（HTTP ' + response.status + '），可刷新重试。';
+      if ([401, 403].includes(response.status)) message = '当前会话无读取权限，请通过私有邀请重新进入。';
+      if ([404, 410].includes(response.status)) message = '会议已删除、来源已到期或当前邀请不包含这场会议。';
+      if ([502, 503, 504].includes(response.status)) message = '历史服务暂不可用（HTTP ' + response.status + '），请刷新列表重试。';
+      if (response.status === 429) message = '历史读取过于频繁（HTTP 429），请稍后刷新列表重试。';
+      const error = new Error(message); error.status = response.status;
+      try { const body = await response.json(); const code = body?.error?.code; if (typeof code === 'string' && /^[a-z0-9_]{1,80}$/.test(code)) error.code = code; } catch (_) { /* HTTP status remains the root cause. */ }
+      throw error;
+    }
+  }
+  async function loadHistoryMeeting(sid, userInitiated = true) {
+    if (userInitiated) pendingRequestedRun = '';
+    if (!sid || !historyConnected) return;
+    const version = ++requestVersion;
+    statusMessage('正在读取已有会议…');
+    try {
+      const result = await historyRequest('meetings/' + encodeURIComponent(sid));
+      if (version !== requestVersion || !historyConnected) return;
+      load(result);
+      currentHistorySid = sid; currentReanalysisId = ''; reanalysisSelect.value = ''; currentSnapshot = snapshotOf(result);
+      statusMessage('已读取历史；缺失的 Jev 概率与模型步骤保持空白。未发起模型调用或外部操作。');
+    } catch (error) { if (version === requestVersion) { clearHistoricalData(error.message); statusMessage(error.message + ' 已清除先前历史内容。'); } }
+  }
+  async function refreshHistory() {
+    historySelect.disabled = true; reanalysisSelect.disabled = true;
+    const version = ++listVersion, navigation = requestVersion;
+    statusMessage('正在读取会议列表…');
+    let listing;
+    try {
+      const result = await historyRequest('meetings');
+      if (version !== listVersion) return { ok: false, aborted: true };
+      historyConnected = true;
+      const meetings = Array.isArray(result.meetings) ? result.meetings : [];
+      const previous = historySelect.value;
+      historySelect.replaceChildren(el('option', null, meetings.length ? '选择一场历史会议…' : '没有可读取的会议'));
+      historySelect.firstChild.value = '';
+      meetings.forEach(meeting => {
+        const option = el('option', null, (meeting.title || '未命名会议') + ' · ' + (meeting.started_at || '').slice(0, 16) + ' · ' + meeting.utterance_count + ' 句 · ' + (meeting.trace_count || 0) + ' 条过程记录');
+        option.value = meeting.session_id; historySelect.append(option);
+      });
+      if (meetings.some(meeting => meeting.session_id === previous)) historySelect.value = previous;
+      else if (currentHistorySid && navigation === requestVersion) clearHistoricalData('当前会议已不在可读列表，已清除旧历史。');
+      if (navigation === requestVersion) statusMessage(meetings.length + ' 场可读历史。选择会议后查看；已有最终标签不等于保存了 Jev 的概率和推理步骤。');
+      listing = await refreshReanalyses(version, navigation);
+    } catch (error) {
+      if (version !== listVersion) return { ok: false, aborted: true };
+      if (navigation === requestVersion) {
+        if (currentReanalysisId) pendingRequestedRun = currentReanalysisId;
+        historyConnected = false; historySelect.replaceChildren(el('option', null, '历史读取失败，请刷新重试')); reanalysisSelect.replaceChildren(el('option', null, '列表尚未载入，请刷新重试'));
+        clearHistoricalData(error.message); statusMessage(error.message + ' 已清除先前历史内容。');
+      }
+      listing = { ok: false, error };
+    } finally {
+      if (version === listVersion) {
+        historySelect.disabled = !historyConnected || ![...historySelect.options].some(option => option.value && !option.disabled);
+        reanalysisSelect.disabled = !historyConnected || ![...reanalysisSelect.options].some(option => option.value && !option.disabled);
+      }
+    }
+    if (!listing?.ok || version !== listVersion) return listing || { ok: false, aborted: true };
+    if (pendingRequestedRun && historyConnected) {
+      const requestedRun = pendingRequestedRun;
+      if (listing.analyses.some(run => run.run_id === requestedRun && run.status === 'ready')) {
+        reanalysisSelect.value = requestedRun;
+        const selected = await loadReanalysis(requestedRun, false);
+        if (selected?.ok && pendingRequestedRun === requestedRun) pendingRequestedRun = '';
+        return { ...listing, selected };
+      }
+      pendingRequestedRun = '';
+      clearHistoricalData('指定的重新分析当前不可读取，请核对查看权限或来源是否仍然有效。');
+      statusMessage('指定的重新分析当前不可读取；未载入其他会议代替。');
+    }
+    return listing;
+  }
+  async function refreshReanalyses(version, navigation) {
+    reanalysisSelect.disabled = true;
+    try {
+      const result = await historyRequest('reanalyses');
+      if (version !== listVersion || !historyConnected) return { ok: false, aborted: true };
+      const analyses = Array.isArray(result.reanalyses) ? result.reanalyses : [];
+      reanalysisSelect.replaceChildren(el('option', null, '选择已完成的重新分析…')); reanalysisSelect.firstChild.value = '';
+      analyses.forEach(run => {
+        const option = el('option', null, '重新分析 · ' + (run.title || run.source_session_id || '') + ' · ' + (run.created_at || '').slice(0, 16) + ' · ' + run.utterance_count + ' 句' + (run.status === 'ready' ? '' : ' · 来源已失效'));
+        option.value = run.run_id; option.disabled = run.status !== 'ready'; reanalysisSelect.append(option);
+      });
+      if (analyses.some(run => run.run_id === currentReanalysisId && run.status === 'ready')) reanalysisSelect.value = currentReanalysisId;
+      else if (currentReanalysisId && navigation === requestVersion) clearHistoricalData('这次重新分析的来源已失效，已清除内容。');
+      return { ok: true, analyses };
+    } catch (error) {
+      if (version !== listVersion) return { ok: false, aborted: true };
+      if (navigation === requestVersion) {
+        if (currentReanalysisId) pendingRequestedRun = currentReanalysisId;
+        reanalysisSelect.replaceChildren(el('option', null, '重新分析列表读取失败，请刷新重试'));
+        if ([401, 403].includes(error.status)) historyConnected = false;
+        clearHistoricalData(error.message); statusMessage(error.message + ' 已清除私有内容。');
+      }
+      return { ok: false, error };
+    }
+  }
+  async function loadReanalysis(runId, userInitiated = true) {
+    if (userInitiated) pendingRequestedRun = '';
+    if (!runId || !historyConnected) return { ok: false, aborted: true };
+    const version = ++requestVersion;
+    statusMessage('正在只读载入重新分析结果；不会再次调用模型…');
+    try {
+      const result = await historyRequest('reanalyses/' + encodeURIComponent(runId));
+      if (version !== requestVersion || !historyConnected) return { ok: false, aborted: true };
+      if (result.source?.kind !== 'reanalysis') throw new Error('结果未标注为重新分析，已停止显示。');
+      load(result); currentReanalysisId = runId; currentHistorySid = ''; historySelect.value = ''; currentSnapshot = snapshotOf(result);
+      statusMessage('重新分析：这是获准后新运行的 Jev 结果，原会议历史未改；展开每个问题可看输入、选项和完整概率。');
+      return { ok: true };
+    } catch (error) { if (version === requestVersion) { pendingRequestedRun = runId; clearHistoricalData(error.message); statusMessage(error.message); } return { ok: false, error }; }
+  }
+  async function verifyHistory() {
+    if (!privateHistory || (!currentHistorySid && !currentReanalysisId) || !historyConnected || checkingHistory || document.hidden) return;
+    const sid = currentHistorySid, runId = currentReanalysisId, version = requestVersion; checkingHistory = true;
+    try {
+      const result = await historyRequest(runId ? 'reanalyses/' + encodeURIComponent(runId) : 'meetings/' + encodeURIComponent(sid));
+      if (version !== requestVersion || sid !== currentHistorySid || runId !== currentReanalysisId) return;
+      const snapshot = snapshotOf(result);
+      if (snapshot !== currentSnapshot) {
+        load(result); currentHistorySid = sid; currentReanalysisId = runId; currentSnapshot = snapshot;
+        statusMessage('来源或已存结果已变化；已重新读取，旧依据已替换。');
+      }
+    } catch (error) {
+      if (version === requestVersion && sid === currentHistorySid && runId === currentReanalysisId) { if (runId) pendingRequestedRun = runId; ++requestVersion; clearHistoricalData(error.message); statusMessage(error.message + ' 已清除失效或无法核对的历史。'); }
+    } finally { checkingHistory = false; }
+  }
+  window.addEventListener('focus', verifyHistory);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) verifyHistory(); });
+  setInterval(verifyHistory, 30000);
+  setInterval(refreshDeployedPipeline, 60000);
+  async function refreshDeployedPipeline() {
+    // This endpoint contains configuration metadata only. Public pages never request meetings or send cookies.
+    const endpoint = privateHistory ? './api/pipeline' : 'https://giftedprofessor.xyz/oops-meeting/history/api/pipeline';
+    try {
+      const response = await fetch(endpoint, { credentials: 'omit', cache: 'no-store' });
+      if (!response.ok) throw new Error('deployment metadata unavailable');
+      const result = await response.json();
+      const pipeline = result.pipeline || result;
+      if (pipeline.scope !== 'deployed_source') throw new Error('unverified deployment metadata');
+      deployedPipeline = pipeline;
+      if (data && !['history', 'reanalysis'].includes(data.source?.kind)) {
+        data.pipeline = pipeline; renderPipeline();
+        document.dispatchEvent(new CustomEvent('funnel:pipeline', { detail: pipeline }));
+      }
+    } catch (_) {
+      deployedPipeline = null;
+      if (data && !['history', 'reanalysis'].includes(data.source?.kind)) {
+        data.pipeline = { scope: 'unavailable' };
+        renderPipeline();
+        document.dispatchEvent(new CustomEvent('funnel:pipeline', { detail: data.pipeline }));
+      }
+    }
+  }
+  async function initialise() {
+    try { await loadExample(); }
+    catch (error) { ui.badge.textContent = '载入失败'; ui.note.textContent = '示例数据载入失败：' + error.message; }
+    refreshDeployedPipeline();
+    if (!privateHistory) return;
+    $('history-panel').hidden = false; $('history-entry').hidden = true;
+    const back = document.querySelector('.studio-brand, .back');
+    if (back) back.href = 'https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/showcase.html?view=app#home';
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const invite = fragment.get('invite');
+    // The invitation is exchanged once; never persist it or put it into API URLs.
+    if (invite) {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* optional */ }
+      try {
+        await historyRequest('session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invite }) });
+      } catch (error) { statusMessage(error.message); return; }
+    }
+    await refreshHistory();
+  }
+  historySelect.addEventListener('change', () => loadHistoryMeeting(historySelect.value));
+  reanalysisSelect.addEventListener('change', () => loadReanalysis(reanalysisSelect.value));
+  $('history-refresh').addEventListener('click', refreshHistory);
+  $('history-example').addEventListener('click', () => { pendingRequestedRun = ''; historySelect.value = ''; reanalysisSelect.value = ''; loadExample().catch(error => statusMessage(error.message)); });
+  $('history-disconnect').addEventListener('click', async () => {
+    pendingRequestedRun = ''; ++listVersion; ++requestVersion; historyConnected = false; historySelect.disabled = true; reanalysisSelect.disabled = true;
+    clearHistoricalData('已退出历史库。');
+    historySelect.replaceChildren(el('option', null, '已退出历史库'));
+    reanalysisSelect.replaceChildren(el('option', null, '已退出重新分析'));
+    // Clear the visible private data before waiting for the server to revoke the cookie.
+    await loadExample().catch(error => statusMessage(error.message));
+    try { await historyRequest('session', { method: 'DELETE' }); statusMessage('已退出历史库，页面回到示例。'); }
+    catch (error) { statusMessage('本页已清除历史内容；服务端退出失败：' + error.message); }
+  });
+  initialise();
   requestAnimationFrame((t) => { lastFrame = t; frame(t); });
 })();

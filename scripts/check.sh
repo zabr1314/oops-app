@@ -34,6 +34,10 @@ python3 scripts/test_task_eval.py
 python3 scripts/test_archive_to_eval.py
 python3 scripts/test_filler_report.py
 python3 scripts/test_funnel_replay.py
+PYTHONPATH=scripts python3 -B -m unittest \
+  scripts.test_replay_history scripts.test_reanalysis_history \
+  scripts.test_reanalysis_cleanup scripts.test_jev_reanalysis scripts.test_processing_trace
+python3 -B -m unittest discover -s deploy -p test_trace_history_upgrade.py
 python3 scripts/test_jev_budget.py
 python3 scripts/test_meetings_overview.py
 python3 scripts/test_label_meeting.py
