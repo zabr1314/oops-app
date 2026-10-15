@@ -56,3 +56,4 @@ python3 -B -m unittest discover -s deploy -p test_trace_history_upgrade.py
 - 用户随后要求暂时免邀请：网关支持 `open-access.json` 开关（备份 `/var/backups/oops-history/open-access-20261015T120442Z`），已对 8 场会议开放；公网无 cookie 读取列表 200、重新分析 ready、noindex 生效。删除该文件即恢复仅邀请。
 - 随后按用户确认把开放范围扩大到全部有内容且未过期的会议：11 场、726 句（1 场空会议未列入）；原 8 场范围备份在 `/var/backups/oops-history/open-access-scope-8-*.json`。新会议不会自动开放。
 - 10-05 三场 DJI 讨论录音作为事后分析回放加入历史页（162/74/88 句，纪要 9/2/8 项），文件在 `/var/lib/oops-history/replays/`，不写入后端会议存储；备份 `/var/backups/oops-history/replays-20261015T121745Z`。公网无登录列表 14 项，三场均可读取。
+- 合并回放 `dji-1005-all`：三段按真实开始时间拼接，句子、纪要事项、矛盾引用的 ID 加段前缀；纪要为三段纪要并列。网关改为开放列表 ∪ 个人会话，修复带旧邀请会话的浏览器只看到 8 场的问题（备份 `/var/backups/oops-history/union-20261015T121954Z`）。

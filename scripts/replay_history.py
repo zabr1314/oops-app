@@ -693,14 +693,15 @@ def make_handler(history, access, public_dir, url_prefix='/oops-meeting/history/
             return token
 
         def authenticated(self):
+            # Openly listed meetings plus whatever a personal session adds; never narrower than the open list.
+            shared = (access.open_scope() if hasattr(access, 'open_scope') else None) or []
             try:
-                return access.scope(self.session_token())
+                personal = access.scope(self.session_token())
             except HistoryError as error:
-                # A personal session wins; otherwise an explicitly opened set of meetings, if any.
-                shared = access.open_scope() if error.status == 401 and hasattr(access, 'open_scope') else None
-                if shared:
+                if error.status == 401 and shared:
                     return shared
                 raise
+            return sorted(set(personal) | set(shared))
 
         def do_GET(self):
             try:
