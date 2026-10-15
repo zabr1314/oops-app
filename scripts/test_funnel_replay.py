@@ -81,6 +81,23 @@ class FunnelReplayTest(unittest.TestCase):
                                [tag("u1", "commitment", .98), tag("u2", "chitchat", .9)]), "t", "example")
         self.assertEqual((1, 1, 0), (data["lens"]["rules_decided"], data["lens"]["agree"], data["lens"]["disagree"]))
 
+    def test_post_meeting_items_are_checked_and_queued_by_backend_code(self):
+        minutes = dict(kind="minutes", at_ms=9000, latency_ms=4200, error=None, minutes=dict(
+            overview="定了方案", decisions=[dict(text="先做安卓", ids=["u2"])],
+            actions=[dict(task="周五前把方案发给春源", owner="玉麟", due="周五前", ids=["u1"])],
+            open_questions=[dict(question="预算够吗？", id="u9")]))
+        data = fr.build(replay([utt("u1", "那我周五前把方案发你"), utt("u2", "我们就定了，先做安卓", 3000)],
+                               [tag("u1", "commitment", .98), tag("u2", "decision", .96), minutes]), "t", "example")
+        post = data["post"]
+        self.assertEqual(4200, post["latency_ms"])
+        self.assertEqual(["task", "decision"], [i["kind"] for i in post["items"]])  # u9 is not in the transcript
+        self.assertTrue(all(i["quality"]["label"] in ("通过", "待人核对", "否决") for i in post["items"]))
+        self.assertEqual([("commitment", "u1"), ("decision", "u2")], [(q["kind"], q["id"]) for q in post["queue"]][:2])
+
+    def test_no_minutes_means_no_post_section(self):
+        data = fr.build(replay([utt("u1", "好的")], [tag("u1", "chitchat", .9)]), "t", "example")
+        self.assertIsNone(data["post"])
+
     def test_example_output_is_labelled_and_reproducible(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "s.json")

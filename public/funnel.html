@@ -3,21 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0e1116">
-  <meta name="description" content="一场会议逐句回放：每句话依次经过规则、Jev、DeepSeek 和你四层判断，能早定的早定。">
+  <meta name="theme-color" content="#0a0b0d">
+  <meta name="description" content="一场会议逐句回放：每句话变成几个带类型的问题，由规则、Jev、DeepSeek 或你来定。">
   <title>Oops · 实时漏斗</title>
   <link rel="stylesheet" href="./funnel.css">
   <script src="./funnel.js" defer></script>
+  <script src="./funnel-after.js" defer></script>
 </head>
 <body>
   <div class="app">
-    <header class="bar">
-      <div class="ident">
+    <header class="top">
+      <div class="title">
         <a class="back" href="./showcase.html?view=app#home">← 体验中心</a>
-        <h1>Oops 实时漏斗</h1>
-        <p>会议原话逐句进来，四层依次判断。越往后越贵、越慢，能早定的就在前面定掉。</p>
+        <h1><span>OOPS 漏斗</span> <span class="slash">// 每句话，几个岔口</span></h1>
+        <p class="sub">每句话变成几个带类型的问题 · 规则答能确定的，Jev 答拿得准的，DeepSeek 答难的，你只管要拍板的。</p>
       </div>
-      <div class="controls" aria-label="回放控制">
+      <dl class="counters" aria-label="本场计数">
+        <div><dt>句子</dt><dd id="c-sent">0</dd></div>
+        <div><dt>岔口</dt><dd id="c-fork" class="pink">0</dd></div>
+        <div><dt>规则</dt><dd id="c-code" class="l-code">0</dd></div>
+        <div><dt>Jev</dt><dd id="c-jev" class="l-jev">0</dd></div>
+        <div><dt>DeepSeek</dt><dd id="c-model" class="l-model">0</dd></div>
+        <div><dt>你</dt><dd id="c-you" class="l-you">0</dd></div>
+      </dl>
+    </header>
+
+    <nav class="modes" role="tablist" aria-label="看哪一段">
+      <button id="tab-live" role="tab" type="button" aria-selected="true" aria-controls="mode-live" data-mode="live">会中 · 实时漏斗</button>
+      <button id="tab-after" role="tab" type="button" aria-selected="false" aria-controls="mode-after" data-mode="after" tabindex="-1">会后 · 整理</button>
+    </nav>
+
+    <div id="mode-live" role="tabpanel" aria-labelledby="tab-live">
+    <section class="toolbar" aria-label="回放控制">
+      <span id="source-badge" class="badge">载入中</span>
+      <span id="source-label" class="source-label"></span>
+      <div class="controls">
         <button id="play" type="button" class="btn primary" aria-label="播放">▶ 播放</button>
         <button id="restart" type="button" class="btn">从头</button>
         <label class="speed" for="speed">速度</label>
@@ -27,99 +47,114 @@
         </select>
         <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="回放进度">
         <span id="clock" class="clock">00:00 / 00:00</span>
-        <label class="btn file">打开回放文件<input id="file" type="file" accept=".json,application/json"></label>
+        <label class="btn file">打开回放文件…<input id="file" type="file" accept=".json,application/json"></label>
       </div>
-    </header>
-    <p class="source"><span id="source-badge" class="badge">载入中</span><span id="source-label" class="source-label"></span><span id="source-note" class="source-note"></span></p>
+    </section>
+    <p id="source-note" class="source-note"></p>
 
-    <section class="funnel" aria-label="四层漏斗">
-      <div class="input-col">
-        <div class="head">
-          <span class="step">输入</span>
-          <strong>会议原话</strong>
-          <span class="spec">语音识别定稿 · 逐句进入</span>
-          <div class="nums"><b id="n-heard">0</b><span>/ <i id="n-total">0</i> 句</span></div>
-        </div>
-        <ol id="transcript" class="ticker"></ol>
+    <section id="stage" class="stage">
+      <div class="pane transcript-pane">
+        <div class="pane-head"><span class="dots"><i></i><i></i><i></i></span><span id="pane-title">meeting.live</span><span id="pane-line" class="muted">句 0 / 0</span></div>
+        <ol id="transcript" class="transcript"></ol>
       </div>
+      <div id="fan" class="fan" aria-hidden="true"></div>
+      <div class="routes" aria-label="四层去向">
+        <article class="route r-code" data-layer="code"><header><span>第 1 层 · 能确定</span><span>→ 规则</span></header>
+          <strong id="r-code">0</strong><p>本地代码，不调模型</p><small id="r-code-sub">在这层结束 0 句</small><ul id="r-code-top" class="tops"></ul></article>
+        <article class="route r-jev" data-layer="jev"><header><span>第 2 层 · p ≥ 0.95 当场定</span><span>→ Jev</span></header>
+          <strong id="r-jev">0</strong><p>分类模型，约 0.5 秒</p><small id="r-jev-sub">在这层结束 0 句</small><ul id="r-jev-top" class="tops"></ul></article>
+        <article class="route r-model" data-layer="model"><header><span>第 3 层 · 难的</span><span>→ DeepSeek</span></header>
+          <strong id="r-model">0</strong><p>生成模型，约 1 秒</p><small id="r-model-sub">在这层结束 0 句</small><ul id="r-model-top" class="tops"></ul></article>
+        <article class="route r-you" data-layer="you"><header><span>第 4 层 · 要拍板</span><span>→ 你</span></header>
+          <strong id="r-you">0</strong><p>只问需要你决定的</p><small id="r-you-sub">在这层结束 0 句</small><ul id="r-you-top" class="tops"></ul></article>
+      </div>
+      <canvas id="canvas" aria-hidden="true"></canvas>
+    </section>
 
-      <div id="stages" class="stages">
-        <canvas id="canvas" aria-hidden="true"></canvas>
-        <div class="stage s-code" data-layer="code">
-          <div class="head">
-            <span class="step">第 1 层</span><strong>规则</strong><span class="spec">本地代码 · 不到 1 ms · 不花钱</span>
-            <div class="nums"><b id="reach-code">0</b><span>句经过 · <i id="pct-code">0%</i></span></div>
-            <div class="reach" aria-hidden="true"><i id="bar-code"></i></div>
-            <p class="last" id="last-code">等第一句话</p>
-          </div>
-          <div class="lane"></div>
-          <div class="bins"><h3>在这层结束 <b id="exit-code">0</b></h3><ul id="bins-code"></ul></div>
-        </div>
-        <div class="stage s-jev" data-layer="jev">
-          <div class="head">
-            <span class="step">第 2 层</span><strong>Jev</strong><span class="spec">分类模型 · 约 0.5 s · 每句都问</span>
-            <div class="nums"><b id="reach-jev">0</b><span>句经过 · <i id="pct-jev">0%</i></span></div>
-            <div class="reach" aria-hidden="true"><i id="bar-jev"></i></div>
-            <p class="last" id="last-jev">—</p>
-          </div>
-          <div class="lane"></div>
-          <div class="bins"><h3>在这层结束 <b id="exit-jev">0</b></h3><ul id="bins-jev"></ul></div>
-        </div>
-        <div class="stage s-model" data-layer="model">
-          <div class="head">
-            <span class="step">第 3 层</span><strong>DeepSeek</strong><span class="spec">生成模型 · 约 1 s · 只问难的</span>
-            <div class="nums"><b id="reach-model">0</b><span>句经过 · <i id="pct-model">0%</i></span></div>
-            <div class="reach" aria-hidden="true"><i id="bar-model"></i></div>
-            <p class="last" id="last-model">—</p>
-          </div>
-          <div class="lane"></div>
-          <div class="bins"><h3>在这层结束 <b id="exit-model">0</b></h3><ul id="bins-model"></ul></div>
-        </div>
-        <div class="stage s-you" data-layer="you">
-          <div class="head">
-            <span class="step">第 4 层</span><strong>你</strong><span class="spec">人来拍板 · 只问需要你的</span>
-            <div class="nums"><b id="reach-you">0</b><span>句经过 · <i id="pct-you">0%</i></span></div>
-            <div class="reach" aria-hidden="true"><i id="bar-you"></i></div>
-            <p class="last" id="last-you">—</p>
-          </div>
-          <div class="lane"></div>
-          <div class="bins"><h3>在这层结束 <b id="exit-you">0</b></h3><ul id="bins-you"></ul></div>
+    <section class="row2">
+      <div class="pane stream-pane">
+        <div class="pane-head"><span>▪ 决策流水 <b id="stream-scope" class="scope"></b></span><span class="muted">原话 · 问题 · 答案 · p · 去向</span><button id="follow" type="button" class="link" hidden>看全部</button></div>
+        <ol id="stream" class="stream"></ol>
+      </div>
+      <div class="pane routed-pane">
+        <div class="pane-head"><span>▪ 本场分流</span><span class="muted">岔口</span></div>
+        <div class="routed">
+          <div class="routed-big"><b id="routed-n" class="pink">0</b><span id="routed-sub">个岔口 · 0 句</span></div>
+          <ul id="bars" class="bars"></ul>
         </div>
       </div>
     </section>
 
-    <section class="detail">
-      <div class="panel trace">
-        <div class="panel-head"><h2>单句追踪</h2><span id="trace-meta" class="muted"></span><button id="follow" type="button" class="link" hidden>跟随最新一句</button></div>
-        <div id="trace" class="trace-body"><p class="muted">回放开始后，这里按时间展开最新一句经过的每个问题。点左侧任意一句可单独查看。</p></div>
+    <section class="row3">
+      <div class="pane">
+        <div class="pane-head"><span>▪ Jev 置信度 · 最近 40 次</span><span class="muted">p</span></div>
+        <svg id="spark" class="spark" viewBox="0 0 300 120" preserveAspectRatio="none" role="img" aria-label="最近 40 次 Jev 置信度"></svg>
+        <p class="foot" id="spark-foot">平均 —</p>
       </div>
-      <div class="panel log">
-        <div class="panel-head"><h2>决策日志</h2><span class="muted">最新在上</span></div>
-        <ol id="log" class="log-body"></ol>
+      <div class="pane">
+        <div class="pane-head"><span>▪ 已听句子</span><span class="muted">一点 = 一句，颜色 = 在哪层结束</span></div>
+        <div id="dots" class="dotgrid"></div>
+        <p class="foot" id="dots-foot">0 / 0</p>
       </div>
-    </section>
-
-    <section class="facts">
-      <div class="panel">
-        <div class="panel-head"><h2>每层的开销</h2><span class="muted">本场累计</span></div>
-        <table class="cost">
-          <thead><tr><th scope="col">层</th><th scope="col">问题数</th><th scope="col">累计耗时</th><th scope="col">平均</th></tr></thead>
-          <tbody id="cost"></tbody>
-        </table>
-        <p class="foot" id="cost-foot"></p>
+      <div class="pane">
+        <div class="pane-head"><span>▪ 在哪层结束</span><span class="muted">句子的出口</span></div>
+        <ul id="exits" class="exits"></ul>
       </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Jev 有多确定</h2><span class="muted">本场每个带概率的回答</span></div>
-        <svg id="hist" class="hist" viewBox="0 0 320 150" role="img" aria-label="Jev 置信度分布"></svg>
-        <p class="foot" id="hist-foot"></p>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>能不能让规则先判？</h2><span class="muted">全场 · 只比较，不改线上</span></div>
+      <div class="pane">
+        <div class="pane-head"><span>▪ 谁动了脑子</span><span class="muted">全场 · 旁路比较</span></div>
         <div id="lens" class="lens"></div>
       </div>
     </section>
+
+    </div>
+
+    <section id="mode-after" class="after" role="tabpanel" aria-labelledby="tab-after" hidden>
+      <div class="after-bar">
+        <ol id="pipeline" class="pipeline" aria-label="会后整理的四步">
+          <li data-step="0"><span class="n">1</span><b>写纪要</b><span class="who l-model">DeepSeek</span><span class="what">一次读完全文</span><em id="p0"></em></li>
+          <li data-step="1"><span class="n">2</span><b>对回原话</b><span class="who l-code">规则</span><span class="what">每条结果找到它引用的句子</span><em id="p1"></em></li>
+          <li data-step="2"><span class="n">3</span><b>规则复核</b><span class="who l-code">规则</span><span class="what">依据够不够、有没有多出数字</span><em id="p2"></em></li>
+          <li data-step="3"><span class="n">4</span><b>排核对队列</b><span class="who l-you">你</span><span class="what">待办 → 决定 → 补说话人</span><em id="p3"></em></li>
+        </ol>
+        <div class="controls">
+          <button id="after-play" type="button" class="btn primary">▶ 播放</button>
+          <button id="after-restart" type="button" class="btn">从头</button>
+          <label class="speed" for="after-speed">速度</label>
+          <select id="after-speed" aria-label="会后回放速度"><option value="1">×1</option><option value="2">×2</option><option value="4">×4</option></select>
+        </div>
+      </div>
+      <p id="after-note" class="source-note"></p>
+      <div id="after-stage" class="after-stage">
+        <div class="pane doc-pane">
+          <div class="pane-head"><span class="dots"><i></i><i></i><i></i></span><span id="doc-title">transcript.full</span><span id="doc-meta" class="muted"></span></div>
+          <ol id="doc" class="doc"></ol>
+        </div>
+        <div class="board" aria-label="提取出的事项">
+          <div class="col k-task"><h3>待办 <b id="n-task">0</b></h3><ul id="board-task"></ul></div>
+          <div class="col k-decision"><h3>决定 <b id="n-decision">0</b></h3><ul id="board-decision"></ul></div>
+          <div class="col k-open"><h3>未决问题 <b id="n-open">0</b></h3><ul id="board-open"></ul></div>
+        </div>
+        <canvas id="after-canvas" aria-hidden="true"></canvas>
+      </div>
+      <div class="after-row">
+        <div class="pane">
+          <div class="pane-head"><span>▪ 纪要概览</span><span class="muted">DeepSeek 写的</span></div>
+          <div id="overview" class="overview"></div>
+        </div>
+        <div class="pane">
+          <div class="pane-head"><span>▪ 核对队列</span><span class="muted">会后请你看的顺序 · 点一项定位原话</span></div>
+          <ol id="queue" class="queue"></ol>
+        </div>
+        <div class="pane">
+          <div class="pane-head"><span>▪ 这一段花了什么</span><span class="muted">全场</span></div>
+          <div id="after-cost" class="lens"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="status"><span id="status-left">oops@funnel</span><span id="status-right"></span></footer>
   </div>
   <div id="drop" class="drop" hidden>松开以打开回放文件（只在本机浏览器读取，不上传）</div>
-  <noscript><p class="noscript">请开启 JavaScript 查看漏斗回放。</p></noscript>
+  <noscript><p class="noscript">请开启 JavaScript 查看实时漏斗回放。</p></noscript>
 </body>
 </html>
