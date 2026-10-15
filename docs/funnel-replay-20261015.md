@@ -47,3 +47,9 @@ python3 -B -m unittest discover -s deploy -p test_trace_history_upgrade.py
 ```
 
 原公开站已发布至 v24，私有页同版加载修复已验证，真实会议和主后端业务逻辑保持。部署记录详见 `funnel-history-20261014.md`、`jev-reanalysis-38-20261014.md`；实际新会议的旁录仍须等下一次真实录制核验。生产升级脚本要求明确的旧源码哈希和回滚备份，不将其他安卓、个人 OAuth 或发送改动一起部署。
+
+## 2026-10-15 仪表版部署
+
+- 私有历史页已换成仪表版（`deploy/history-upgrade.py`，备份 `/var/backups/oops-history/20261015T115820Z`）；未授权读取仍为 401，13 个源会议文件未变，无模型调用。
+- 主后端只替换 `processing_trace.py` 与 `local_backend.py` 中分类路径的挂轨迹块（生产文件与 PR 基线仅差一行空行，补丁精确匹配一次）；部署前用生产 Python 跑过 9 项轨迹测试。备份 `/var/backups/oops-meeting/trace-fix-20261015T115931Z`，启动日志正常。首次尝试因健康检查误把需鉴权的 401 当失败而自动回滚，确认原文件恢复后重新部署。
+- 用 10 分钟测试邀请在浏览器核验 38 句重新分析可读、完整选项概率显示，随后注销该会话（之后读取 401）。给用户的 24 小时邀请只存于本机已忽略的 build 文件，不写入文档。
