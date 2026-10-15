@@ -6,7 +6,6 @@ import vm from 'node:vm';
 const fixture = JSON.parse(readFileSync('public/funnel-sample.json', 'utf8'));
 const source = readFileSync('public/funnel.js', 'utf8');
 const afterSource = readFileSync('public/funnel-after.js', 'utf8');
-const afterStudioSource = readFileSync('public/funnel-after-studio.js', 'utf8');
 const html = readFileSync('public/funnel.html', 'utf8');
 
 // Exercise the shipped browser scripts. The DOM shell records output and events;
@@ -47,15 +46,11 @@ class Element extends Target {
 }
 const flush = async () => { for (let i = 0; i < 128; i++) await Promise.resolve(); };
 
-async function browser({ privatePage = false, run = '', hash = '#live', routes = {}, after = true, afterStudio = false, reduceMotion = false } = {}) {
+async function browser({ privatePage = false, run = '', hash = '#live', routes = {}, after = true, reduceMotion = false } = {}) {
   const ids = new Map([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element()]));
   ids.get('mode-after').hidden = true;
   for (const id of ['tab-live', 'tab-after']) ids.get(id).dataset.mode = id.slice(4);
   const tabs = [ids.get('tab-live'), ids.get('tab-after')];
-  const afterStations = ['minutes', 'research', 'review', 'delivery'].map(key => {
-    const button = new Element('button'); button.dataset.afterStation = key;
-    const label = new Element('span'); label.dataset.afterState = key; button.append(label); return button;
-  });
   const board = new Element(); board.className = 'board';
   for (const kind of ['task', 'decision', 'open']) {
     const column = new Element(); board.append(column); column.append(new Element('h3'), ids.get('board-' + kind));
@@ -67,7 +62,7 @@ async function browser({ privatePage = false, run = '', hash = '#live', routes =
   document.createElement = tag => new Element(tag);
   document.createElementNS = (_, tag) => new Element(tag);
   document.querySelector = selector => cards.get(selector) || new Element();
-  document.querySelectorAll = selector => selector === '.modes button' ? tabs : selector === '#pipeline li' ? pipeline : selector === '[data-after-station]' ? afterStations : [];
+  document.querySelectorAll = selector => selector === '.modes button' ? tabs : selector === '#pipeline li' ? pipeline : [];
   let paintCount = 0;
   const canvasContext = new Proxy({ measureText: text => ({ width: String(text).length * 7 }) }, {
     get: (obj, key) => obj[key] || (() => { paintCount++; }), set: (obj, key, value) => { obj[key] = value; return true; },
@@ -107,7 +102,6 @@ async function browser({ privatePage = false, run = '', hash = '#live', routes =
   });
   vm.runInContext(source, context, { filename: 'public/funnel.js' });
   if (after) vm.runInContext(afterSource, context, { filename: 'public/funnel-after.js' });
-  if (afterStudio) vm.runInContext(afterStudioSource, context, { filename: 'public/funnel-after-studio.js' });
   await flush();
   return {
     window, document, ids, requests, events, location, delays,
@@ -283,21 +277,27 @@ test('after clock is explicitly presentation time and stored generation latency 
   assert.doesNotMatch(b.ids.get('after-cost').textContent, /本次已发送/);
 });
 
-test('source invalidation clears the actual after studio items, selected detail and scene animation', async () => {
-  const b = await browser({ afterStudio: true });
-  const engine = b.window.OopsAfterReplay;
-  b.ids.get('tab-after').click();
-  b.ids.get('after-studio-items').children[0].click();
-  assert.ok(b.ids.get('after-inspector-content').textContent.includes(fixture.post.items[0].title));
-  engine.seek(engine.state().ends[0] + 1); engine.play(true);
-  assert.equal(b.ids.get('after-studio-room').classList.contains('is-handoff'), true);
-  b.replaceAfter({ version: 2, source: { kind: 'empty' }, sentences: [], post: null, post_status: { reason: 'source_changed' } });
-  assert.equal(b.ids.get('after-studio-item-count').textContent, '0');
-  assert.ok(!b.ids.get('after-studio-items').textContent.includes(fixture.post.items[0].title));
-  assert.ok(!b.ids.get('after-inspector-content').textContent.includes(fixture.post.items[0].title));
-  assert.ok(!b.ids.get('after-result-copy').textContent.includes(fixture.post.overview));
-  assert.equal(b.ids.get('after-studio-room').classList.contains('is-handoff'), false);
-  assert.equal(engine.state().playing, false);
+test('the restored terminal shows complete recorded probabilities and clears them after permission loss', async () => {
+  const result = structuredClone(fixture);
+  result.source = { kind: 'reanalysis', label: 'Synthetic recorded result' };
+  const fork = result.sentences[0].forks.find(value => value.layer === 'jev');
+  assert.ok(fork);
+  Object.assign(fork, { request: { state: { text: result.sentences[0].text } }, criteria: { decision: '明确决定', other: '其他' }, probabilities: { decision: .83, other: .17 }, choice: 'decision' });
+  const b = await browser({ privatePage: true, run: 'vm-run', routes: { './api/reanalyses/vm-run': { body: result } } });
+  b.window.OopsReplay.select(0);
+  assert.match(b.ids.get('source-badge').textContent, /重新分析/);
+  assert.match(b.ids.get('stream').textContent, /全部选项概率/);
+  assert.match(b.ids.get('stream').textContent, /0\.83/);
+  assert.match(b.ids.get('stream').textContent, /0\.17/);
+  b.window.OopsAfterReplay.seek(b.window.OopsAfterReplay.state().total);
+  assert.ok(b.ids.get('board-task').textContent.includes(fixture.post.items.find(item => item.kind === 'task').title));
+  b.clearRoute('./api/reanalyses/vm-run');
+  b.revoke(); b.window.dispatchEvent({ type: 'focus' }); await flush();
+  assert.equal(b.ids.get('stream').textContent, '还没有判断记录。');
+  assert.equal(b.ids.get('transcript').children.length, 0);
+  assert.equal(b.ids.get('board-task').children.length, 0);
+  assert.equal(b.ids.get('overview').textContent, '');
+  assert.equal(b.window.OopsAfterReplay.state().playing, false);
 });
 
 test('bootstrap preserves 401 and exhausted 503 root causes instead of declaring its requested run missing', async () => {
@@ -428,17 +428,35 @@ test('a loaded run is cleared after failed revalidation and restored only after 
   }
 });
 
-test('after progress captures the chosen target before pausing redraws the slider', async () => {
-  const b = await browser({ afterStudio: true });
+test('the restored after controls replay stored items with explicit play, speed and restart', async () => {
+  const b = await browser();
   const engine = b.window.OopsAfterReplay;
-  b.ids.get('tab-after').click(); engine.play(true);
+  b.ids.get('tab-after').click();
+  assert.equal(engine.state().playing, false);
   const requests = b.requests.length, duration = engine.state().duration;
-  const slider = b.ids.get('after-studio-scrub');
-  slider.value = '1000'; slider.dispatchEvent({ type: 'input' });
+  b.ids.get('after-play').click();
+  assert.equal(engine.state().playing, true);
+  b.ids.get('after-speed').value = '2'; b.ids.get('after-speed').dispatchEvent({ type: 'change' });
+  assert.equal(engine.state().speed, 2);
+  engine.seek(duration);
   assert.equal(engine.state().now, duration);
   assert.equal(engine.state().phase, 'complete');
   assert.equal(engine.state().playing, false);
-  slider.value = '500'; slider.dispatchEvent({ type: 'input' });
-  assert.equal(engine.state().now, duration / 2);
+  b.ids.get('after-restart').click();
+  assert.equal(engine.state().now, 0);
+  assert.equal(engine.state().playing, true);
   assert.equal(b.requests.length, requests);
+});
+
+test('the only readable meeting still opens automatically on the restored history page', async () => {
+  const saved = { ...structuredClone(fixture), source: { kind: 'replay', label: 'Only readable replay' } };
+  const b = await browser({ privatePage: true, routes: {
+    './api/meetings': { body: { meetings: [{ session_id: 'only-replay', title: 'Only readable replay', utterance_count: fixture.sentences.length }] } },
+    './api/meetings/only-replay': { body: saved },
+  } });
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'Only readable replay');
+  assert.equal(b.ids.get('source-badge').textContent, '事后分析 · 只读');
+  assert.equal(b.ids.get('history-meeting').value, 'only-replay');
+  assert.equal(b.window.OopsReplay.state().playing, false);
+  assert.equal(b.requests.filter(request => request.url === './api/meetings/only-replay').length, 1);
 });

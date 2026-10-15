@@ -3,68 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0a0b0f">
-  <meta name="description" content="回放一场会议：Jev 在蛛网上逐句判断，几只 Oops 接力整理，每一步都能看到原话和已存概率。">
-  <title>Oops · 协作回放</title>
+  <meta name="theme-color" content="#0a0b0d">
+  <meta name="description" content="一场会议逐句回放：每句话变成几个带类型的问题，由规则、Jev、DeepSeek 或你来定。">
+  <title>Oops · 实时漏斗</title>
   <link rel="stylesheet" href="./funnel.css">
-  <link rel="stylesheet" href="./funnel-studio.css">
-  <link rel="stylesheet" href="./funnel-after-studio.css">
-  <script src="./funnel-web.js" defer></script>
-  <script src="./funnel-crawler.js" defer></script>
-  <script src="./funnel-dashboard.js" defer></script>
   <script src="./funnel.js" defer></script>
   <script src="./funnel-after.js" defer></script>
-  <script src="./funnel-studio.js" defer></script>
-  <script src="./funnel-after-studio.js" defer></script>
 </head>
-<body class="studio-page">
+<body>
   <div class="app">
-    <header class="studio-top">
-      <a class="studio-brand" href="./showcase.html?view=app#home"><img src="./brand/mascot.png" alt=""><span>Oops <b>×</b> Jev</span></a>
-      <div class="meeting-heading"><h1 id="studio-title">正在载入会议…</h1><div class="source-strip"><span id="source-badge" class="badge">载入中</span><span id="source-label" class="source-label"></span><span class="read-only">只读回放 · 不执行新任务</span></div></div>
-      <div class="header-actions"><button id="meeting-open" class="quiet-button" type="button">切换会议</button><button id="more-open" class="icon-button" type="button" aria-label="更多回放选项">•••</button></div>
+    <header class="top">
+      <div class="title">
+        <a class="back" href="./showcase.html?view=app#home">← 体验中心</a>
+        <h1><span>OOPS 漏斗</span> <span class="slash">// 每句话，几个岔口</span></h1>
+        <p class="sub">沿着原话查看已保存的判断、当前规则比较与会后事项 · 动画只用于回放，不发起模型调用。</p>
+      </div>
+      <dl class="counters" aria-label="本场计数">
+        <div><dt>句子</dt><dd id="c-sent">0</dd></div>
+        <div><dt>岔口</dt><dd id="c-fork" class="pink">0</dd></div>
+        <div><dt>规则</dt><dd id="c-code" class="l-code">0</dd></div>
+        <div><dt>Jev</dt><dd id="c-jev" class="l-jev">0</dd></div>
+        <div><dt>DeepSeek</dt><dd id="c-model" class="l-model">0</dd></div>
+        <div><dt>你</dt><dd id="c-you" class="l-you">0</dd></div>
+      </dl>
     </header>
-    <div class="studio-toolbar">
-      <nav class="modes" role="tablist" aria-label="看哪一段"><button id="tab-live" role="tab" type="button" aria-selected="true" aria-controls="mode-live" data-mode="live">会中 · 逐句判断</button><button id="tab-after" role="tab" type="button" aria-selected="false" aria-controls="mode-after" data-mode="after" tabindex="-1">会后 · 整理事项</button></nav>
-      <div class="replay-controls"><button id="play" type="button" class="btn primary">▶ 播放</button><button id="after-play" type="button" class="btn primary">▶ 播放</button><input id="scrub" type="range" min="0" max="1000" value="0" aria-label="回放进度"><span id="clock" class="clock">00:00 / 00:00</span><span id="studio-speed" class="speed-indicator">×30</span><div class="after-studio-progress"><span id="after-studio-phase">成果回放</span><input id="after-studio-scrub" type="range" min="0" max="1000" value="0" aria-label="会后成果回放进度"><span id="after-studio-clock">00:00 / 00:00</span></div></div>
-    </div>
+
+    <section id="history-panel" class="history-panel" aria-label="后端历史会议" hidden>
+      <div class="history-controls">
+        <label for="history-meeting">后端历史库</label>
+        <select id="history-meeting" aria-label="选择历史会议" disabled><option value="">载入会议…</option></select>
+        <label for="reanalysis-run">重新分析</label>
+        <select id="reanalysis-run" aria-label="选择已完成的重新分析" disabled><option value="">尚未载入</option></select>
+        <button id="history-refresh" type="button" class="btn">刷新列表</button>
+        <button id="history-example" type="button" class="btn">看示例</button>
+        <button id="history-disconnect" type="button" class="btn">退出历史库</button>
+      </div>
+      <p id="history-status" class="source-note" role="status">只读已有数据，不重跑 Jev 或纪要。</p>
+    </section>
+    <p id="history-entry" class="source-note">公开页仅含示例；可打开本机回放文件。<a id="history-private-link" href="https://giftedprofessor.xyz/oops-meeting/history/">查看私有历史库 →</a></p>
+    <p id="pipeline-note" class="source-note"></p>
+
+    <nav class="modes" role="tablist" aria-label="看哪一段">
+      <button id="tab-live" role="tab" type="button" aria-selected="true" aria-controls="mode-live" data-mode="live">逐句 · 判断回放</button>
+      <button id="tab-after" role="tab" type="button" aria-selected="false" aria-controls="mode-after" data-mode="after" tabindex="-1">会后 · 整理</button>
+    </nav>
+
     <div id="mode-live" role="tabpanel" aria-labelledby="tab-live">
-      <section id="studio" class="dash" aria-label="会中逐句判断">
-        <section class="agents" aria-label="各只 Oops 的状态">
-          <article class="agent agent-chief" data-agent="chief"><header><b>主控</b><span class="agent-role">Oops · 只读回放</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-          <article class="agent agent-listen" data-agent="listen"><header><b>聆听</b><span class="agent-role">把声音变成原话</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-          <article class="agent agent-code" data-agent="code"><header><b>规则</b><span class="agent-role">本地代码，不调模型</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-          <article class="agent agent-jev" data-agent="jev"><header><b>判断</b><span class="agent-role">Jev 逐句分类</span><span class="agent-asks">问 JEV</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-          <article class="agent agent-model" data-agent="model"><header><b>生成</b><span class="agent-role">DeepSeek 已存记录</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-          <article class="agent agent-you" data-agent="you"><header><b>你</b><span class="agent-role">只问需要你决定的</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-          <article class="agent agent-minutes" data-agent="minutes"><header><b>纪要</b><span class="agent-role">会后整理事项</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-          <article class="agent agent-delivery" data-agent="delivery"><header><b>飞书</b><span class="agent-role">核对后再送达</span></header><p class="agent-line" data-agent-line>—</p><div class="agent-value"><span data-agent-value>—</span></div><div class="agent-bar"><i data-agent-bar></i></div><footer data-agent-status>等待来源</footer></article>
-        </section>
-        <section id="studio-room" class="room" aria-label="Oops 工作室">
-          <div class="room-strip"><span><i class="room-led"></i>OOPS WORKROOM</span><span id="studio-moment">已保存的处理过程</span><span id="studio-stats" class="web-stats"></span></div>
-          <div class="monitor">
-            <button class="current-paper" type="button" aria-label="查看当前原话的判断"><span class="paper-label"><span id="studio-current-label">当前原话</span><span id="studio-current-time">—</span></span><span id="studio-current-text" class="paper-text">选一句原话，看 Jev 怎么判断。</span></button>
-            <canvas id="studio-web" class="web-canvas" aria-hidden="true"></canvas>
-            <ul class="web-legend" aria-label="线的颜色"><li class="lg-code">规则</li><li class="lg-jev">Jev</li><li class="lg-model">生成</li><li class="lg-you">你</li><li class="lg-note">线越长，已存概率越高 · 虚线为无概率记录</li></ul>
-          </div>
-          <div class="floor">
-            <button class="desk desk-listen" data-desk="listen" data-station="listen" type="button"><img class="desk-art" src="./funnel-desks/desk-1.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>聆听 Oops</b><small data-state="listen">等待来源</small></span></button>
-            <button class="desk desk-code" data-desk="code" type="button"><img class="desk-art" src="./funnel-desks/desk-2.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>规则 Oops</b><small data-desk-state="code">本地规则</small></span></button>
-            <button class="desk desk-judge" data-desk="judge" data-station="judge" type="button"><img class="desk-art" src="./funnel-desks/desk-3.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>判断 Oops</b><small data-state="judge">等待来源</small></span></button>
-            <button class="desk desk-query" data-desk="query" data-station="query" type="button"><img class="desk-art" src="./funnel-desks/desk-4.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>查询 Oops</b><small data-state="query">等待来源</small></span></button>
-            <button class="desk desk-minutes" data-desk="minutes" data-station="minutes" type="button"><img class="desk-art" src="./funnel-desks/desk-5.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>纪要 Oops</b><small data-state="minutes">等待来源</small></span></button>
-            <button class="desk desk-delivery" data-desk="delivery" data-station="delivery" type="button"><img class="desk-art" src="./funnel-desks/desk-6.png" alt="" draggable="false"><span class="desk-oops"><img src="./brand/mascot.png" alt="" draggable="false"></span><span class="desk-bubble" aria-hidden="true"></span><span class="desk-name"><b>飞书 Oops</b><small data-state="delivery">等待来源</small></span></button>
-          </div>
-          <span class="room-note">参考布景 · 角色动作为回放展示，不代表实时运行</span>
-        </section>
-        <section class="trend" aria-label="Jev 已存概率曲线"><div class="panel-head"><b>JEV · 已存概率</b><span id="trend-label">尚未回放到判断</span></div><canvas id="trend-canvas" aria-hidden="true"></canvas></section>
-        <div class="dash-bottom">
-          <section class="sentence-tray panel" aria-label="会议原话"><div class="panel-head"><b>原话 <span id="studio-sentence-count">0</span></b><button id="studio-follow" class="text-button" type="button" hidden>回到播放位置</button><span class="tray-hint">点一句，立即看判断</span></div><ol id="studio-sentences" class="studio-sentences"></ol></section>
-          <aside id="studio-inspector" class="studio-inspector panel" aria-label="当前判断详情"><div class="panel-head inspector-heading"><b id="studio-inspector-kicker">JEV · 分析</b><button id="inspector-close" class="icon-button" type="button" aria-label="收起判断详情">×</button></div><div id="studio-inspector-content" class="inspector-content"><h2>每一步，都有来处</h2><p class="empty-detail">选一句原话，或点一只 Oops 看它的分工。</p></div></aside>
-          <section class="rules panel" aria-label="规则检查"><div class="panel-head"><b>rules · 规则检查</b><span>本地代码 · 不花钱</span></div><ol id="rules-checks" class="rules-checks"></ol><div id="rules-thresholds" class="rules-thresholds"></div><div class="panel-head sub"><b>顺序就是一切</b></div><ol id="rules-path" class="rules-path"></ol></section>
-        </div>
-      </section>
-      <div class="legacy-engine" hidden>
+    <section class="toolbar" aria-label="回放控制">
+      <span id="source-badge" class="badge">载入中</span>
+      <span id="source-label" class="source-label"></span>
+      <div class="controls">
+        <button id="play" type="button" class="btn primary" aria-label="播放">▶ 播放</button>
+        <button id="restart" type="button" class="btn">从头</button>
+        <label class="speed" for="speed">速度</label>
+        <select id="speed" aria-label="回放速度">
+          <option value="1">×1 实时</option><option value="2">×2</option><option value="5">×5</option>
+          <option value="10">×10</option><option value="30">×30</option><option value="60">×60</option>
+        </select>
+        <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="回放进度">
+        <span id="clock" class="clock">00:00 / 00:00</span>
+        <label class="btn file">打开回放文件…<input id="file" type="file" accept=".json,application/json"></label>
+      </div>
+    </section>
+    <p id="source-note" class="source-note"></p>
+
     <section id="stage" class="stage">
       <div class="pane transcript-pane">
         <div class="pane-head"><span class="dots"><i></i><i></i><i></i></span><span id="pane-title">meeting.live</span><span id="pane-line" class="muted">句 0 / 0</span></div>
@@ -118,27 +120,10 @@
         <div id="lens" class="lens"></div>
       </div>
     </section>
-      </div>
+
     </div>
+
     <section id="mode-after" class="after" role="tabpanel" aria-labelledby="tab-after" hidden>
-      <section id="after-studio" class="after-studio" aria-label="会后整理事项">
-        <section class="after-items-tray" aria-label="纪要事项"><div class="tray-heading"><span>事项 <b id="after-studio-item-count">0</b></span><span id="after-studio-origin" class="tray-hint">已有成果回放</span></div><div id="after-studio-items" class="after-studio-items"></div></section>
-        <div id="after-studio-room" class="web-stage after-web">
-          <div class="web-head"><span id="after-studio-moment">读取已有成果</span><span id="after-result-label" class="web-stats">会议原文 → 会后成果</span></div>
-          <div class="current-paper is-static"><span class="paper-label"><span id="after-result-title">整理已有纪要与原话依据</span></span><span id="after-result-copy" class="paper-text">读取已有结果，不生成新纪要、不查询资料、不发送飞书。</span></div>
-          <canvas id="after-web" class="web-canvas" aria-label="纪要事项蛛网，点节点查看事项"></canvas>
-          <ul class="web-legend"><li class="lg-dot-evidence">原话依据</li><li class="lg-code">规则通过</li><li class="lg-model">需复核</li><li class="lg-note">序号为待核对顺序 · 展示节奏不是实际耗时</li></ul>
-          <div class="relay is-after" aria-label="会后 Oops 接力">
-            <button type="button" class="workstation" data-after-station="minutes"><img src="./brand/mascot.png" alt="" draggable="false"><b>纪要</b><small data-after-state="minutes">等待来源</small></button>
-            <button type="button" class="workstation" data-after-station="research"><img src="./brand/mascot.png" alt="" draggable="false"><b>资料</b><small data-after-state="research">等待来源</small></button>
-            <button type="button" class="workstation" data-after-station="review"><img src="./brand/mascot.png" alt="" draggable="false"><b>核对</b><small data-after-state="review">等待来源</small></button>
-            <button type="button" class="workstation" data-after-station="delivery"><img src="./brand/mascot.png" alt="" draggable="false"><b>飞书</b><small data-after-state="delivery">等待来源</small></button>
-          </div>
-          <p class="after-room-footnote" id="after-room-footnote">纪要、原话与回执分别读取；没有记录的步骤保留断点。</p>
-        </div>
-        <aside id="after-studio-inspector" class="studio-inspector after-studio-inspector" aria-label="会后成果详情"><div class="inspector-heading"><span id="after-inspector-kicker" class="eyebrow">已有成果</span><button id="after-inspector-close" class="icon-button" type="button" aria-label="收起会后成果详情">×</button></div><div id="after-inspector-content" class="inspector-content"></div></aside>
-      </section>
-      <div class="legacy-after" hidden>
       <p id="asr-review-note" class="source-note"></p>
       <div class="after-bar">
         <ol id="pipeline" class="pipeline" aria-label="会后整理的四步">
@@ -148,10 +133,10 @@
           <li data-step="3"><span class="n">4</span><b>排核对队列</b><span class="who l-you">你</span><span class="what">待办 → 决定 → 未决事项</span><em id="p3"></em></li>
         </ol>
         <div class="controls">
-
-
-
-
+          <button id="after-play" type="button" class="btn primary">▶ 播放</button>
+          <button id="after-restart" type="button" class="btn">从头</button>
+          <label class="speed" for="after-speed">速度</label>
+          <select id="after-speed" aria-label="会后回放速度"><option value="1">×1</option><option value="2">×2</option><option value="4">×4</option></select>
         </div>
       </div>
       <p id="after-note" class="source-note"></p>
@@ -181,14 +166,11 @@
           <div id="after-cost" class="lens"></div>
         </div>
       </div>
-      </div>
     </section>
 
     <footer class="status"><span id="status-left">oops@funnel</span><span id="status-right"></span></footer>
   </div>
-  <dialog id="meeting-dialog" class="studio-dialog"><div class="dialog-heading"><div><span class="eyebrow">MEETINGS</span><h2>切换会议</h2></div><button class="icon-button" data-close="meeting-dialog" type="button" aria-label="关闭会议选择">×</button></div><section id="history-panel" class="history-panel" aria-label="后端历史会议" hidden><div class="history-controls"><label for="history-meeting">历史会议</label><select id="history-meeting" aria-label="选择历史会议" disabled><option value="">载入会议…</option></select><label for="reanalysis-run">查看哪个版本</label><select id="reanalysis-run" aria-label="选择已完成的重新分析" disabled><option value="">尚未载入</option></select><div class="dialog-actions"><button id="history-refresh" type="button" class="btn">刷新列表</button><button id="history-example" type="button" class="btn">看示例</button><button id="history-disconnect" type="button" class="btn">退出历史库</button></div></div><p id="history-status" class="source-note" role="status">只读已有数据，不重跑 Jev 或纪要。</p></section><p id="history-entry" class="source-note">公开页仅含示例；可打开本机回放文件。<a id="history-private-link" href="https://giftedprofessor.xyz/oops-meeting/history/">查看私有历史库 →</a></p><p class="dialog-footnote">切换后点击右上角关闭，返回回放。已有分析结果只读取，不会重新收费。</p></dialog>
-  <dialog id="more-dialog" class="studio-dialog"><div class="dialog-heading"><div><span class="eyebrow">REPLAY OPTIONS</span><h2>更多</h2></div><button class="icon-button" data-close="more-dialog" type="button" aria-label="关闭更多选项">×</button></div><div class="more-controls"><div class="live-options"><button id="restart" type="button" class="btn">从头播放</button><label for="speed">回放速度</label><select id="speed" aria-label="回放速度"><option value="1">×1 实时</option><option value="2">×2</option><option value="5">×5</option><option value="10">×10</option><option value="30">×30</option><option value="60">×60</option></select></div><div class="after-options"><button id="after-restart" type="button" class="btn">从头播放</button><label for="after-speed">整理回放速度</label><select id="after-speed" aria-label="会后回放速度"><option value="1">×1</option><option value="2">×2</option><option value="4">×4</option></select></div><label class="btn file">打开回放文件…<input id="file" type="file" accept=".json,application/json"></label></div><details class="more-section"><summary>来源与技术信息</summary><p id="source-note" class="source-note"></p><p id="pipeline-note" class="source-note"></p></details><details class="more-section"><summary>本场统计</summary><dl class="counters" aria-label="本场计数"><div><dt>句子</dt><dd id="c-sent">0</dd></div><div><dt>判断</dt><dd id="c-fork">0</dd></div><div><dt>规则</dt><dd id="c-code">0</dd></div><div><dt>Jev</dt><dd id="c-jev">0</dd></div><div><dt>生成记录</dt><dd id="c-model">0</dd></div><div><dt>你</dt><dd id="c-you">0</dd></div></dl></details></dialog>
   <div id="drop" class="drop" hidden>松开以打开回放文件（只在本机浏览器读取，不上传）</div>
-  <noscript><p class="noscript">请开启 JavaScript 查看会议回放。</p></noscript>
+  <noscript><p class="noscript">请开启 JavaScript 查看实时漏斗回放。</p></noscript>
 </body>
 </html>
