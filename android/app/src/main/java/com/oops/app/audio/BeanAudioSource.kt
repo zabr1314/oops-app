@@ -19,12 +19,16 @@ class BeanAudioSource(
     private sealed interface Event {
         class Packet(val opus: ByteArray, val sequence: Int, val isMark: Boolean) : Event
         class Connected(val connected: Boolean) : Event
+        class Control(val state: String) : Event
     }
 
     private val queue = LinkedBlockingQueue<Event>(QUEUE_PACKETS)
     @Volatile private var running = false
     @Volatile private var generation = 0L
     private var worker: Thread? = null
+    override val supportsPause: Boolean get() = link.supportsPause
+    override fun pause() { check(running); link.pause() }
+    override fun resume() { check(running); link.resume() }
 
     override fun start(listener: AudioSource.Listener) {
         check(!running) { "录音豆音源已经运行" }
@@ -48,6 +52,14 @@ class BeanAudioSource(
 
             override fun onStatus(detail: String?) {
                 if (running && generation == epoch) listener.onStatus(detail)
+            }
+            override fun onControlState(state: String) {
+                if (running && generation == epoch && !queue.offer(Event.Control(state))) {
+                    fail(listener, IllegalStateException("音频处理队列已满，无法确认暂停边界"), epoch)
+                }
+            }
+            override fun onControlError(message: String) {
+                if (running && generation == epoch) listener.onControlError(message)
             }
 
             override fun onError(error: Throwable) {
@@ -85,9 +97,23 @@ class BeanAudioSource(
         val marks = MarkEdge()
         val frames = FrameBatcher(Pcm.FRAME_BYTES)
         var ready = false
+        var control = "waiting"
         try {
             while (running && generation == epoch) {
                 when (val event = queue.poll(200, TimeUnit.MILLISECONDS) ?: continue) {
+                    is Event.Control -> {
+                        control = event.state
+                        if (control in listOf("paused", "stopped")) {
+                            val tail = frames.drain()
+                            if (tail.isNotEmpty()) listener.onAudio(tail)
+                        }
+                        if (control in listOf("draining", "paused", "stopped", "resuming", "disconnected")) {
+                            ready = false
+                            sequence.reset()
+                            listener.onReady(false)
+                        }
+                        listener.onControlState(control)
+                    }
                     is Event.Connected -> {
                         if (!event.connected) {
                             ready = false
@@ -97,20 +123,28 @@ class BeanAudioSource(
                         }
                     }
                     is Event.Packet -> {
+                        if (control in listOf("paused", "stopped", "disconnected")) continue
                         val missing = sequence.missingBefore(event.sequence)
                         if (missing > 0) {
                             frames.clear()
                             listener.onGap(missing.toLong() * BeanFrames.PACKET_MS)
                         }
-                        if (!ready) {
-                            ready = true
-                            listener.onStatus(null)
-                            listener.onReady(true)
-                        }
                         if (marks.press(event.isMark, nowMs())) listener.onMark(AudioSource.Mark.DOUBLE_TAP)
                         val pcm = decoder.decode(event.opus)
                         if (!running || generation != epoch) continue
-                        if (pcm.isNotEmpty()) frames.add(BeanFrames.toBytes(pcm)).forEach(listener::onAudio)
+                        if (pcm.isNotEmpty()) frames.add(BeanFrames.toBytes(pcm)).forEach { frame ->
+                            if (!ready && control != "draining") {
+                                link.confirmAudioReady()
+                                ready = true
+                                listener.onStatus(null)
+                                if (control != "pausing") {
+                                    control = "recording"
+                                    listener.onControlState(control)
+                                }
+                                listener.onReady(true)
+                            }
+                            listener.onAudio(frame)
+                        }
                     }
                 }
             }

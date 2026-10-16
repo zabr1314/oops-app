@@ -12,6 +12,9 @@ interface AudioSource {
     fun start(listener: Listener)
 
     fun stop()
+    val supportsPause: Boolean get() = false
+    fun pause() { error("当前音源不支持暂停") }
+    fun resume() { error("当前音源不支持继续") }
 
     interface Listener {
         fun onAudio(pcm: ByteArray)
@@ -30,6 +33,8 @@ interface AudioSource {
 
         /** True while the OS silences this input because another app uses the microphone. */
         fun onSilenced(silenced: Boolean) {}
+        fun onControlState(state: String) {}
+        fun onControlError(message: String) {}
 
         fun onError(error: Throwable)
     }

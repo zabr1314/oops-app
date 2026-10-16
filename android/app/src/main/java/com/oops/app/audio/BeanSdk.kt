@@ -6,6 +6,7 @@ import com.oops.app.store.BeanCaptureContract
 import com.oops.app.store.BeanScratchStore
 import com.oops.app.store.RecordingPolicy
 import java.io.File
+import org.json.JSONObject
 
 /**
  * What the Soundcore SDK needs to authenticate. The token and licence come from Anker's cloud
@@ -23,6 +24,16 @@ data class BeanAuth(
     val macAddress: String = "",
 ) {
     val complete get() = listOf(userId, deviceId, token, licenseJson, licenseSignature).all { it.isNotBlank() }
+    val licenseExpiresAt: Long get() = runCatching { JSONObject(licenseJson).getLong("license_expire_time") }.getOrDefault(0L)
+
+    fun requireUsable() {
+        check(complete) { "缺少录音豆鉴权信息，请先更新设备授权" }
+        val license = runCatching { JSONObject(licenseJson) }.getOrNull()
+        check(license != null && license.optString("user_id") == userId && license.optString("device_id") == deviceId) {
+            "录音豆授权与当前设备身份不一致，请更新授权"
+        }
+        check(licenseExpiresAt > System.currentTimeMillis() / 1_000 + 60) { "录音豆授权已到期，请更新设备授权" }
+    }
 
     companion object {
         fun fromBuildConfig() = BeanAuth(
@@ -55,7 +66,7 @@ object BeanSdk {
         requireCaptureAllowed(policy)
         val contract = BeanCaptureContract(policy, sessionId, archiveStartedAt)
         check(included) { "这个安装包没有包含录音豆 SDK" }
-        check(auth.complete) { "缺少录音豆鉴权信息（token / license），请先向安克获取" }
+        auth.requireUsable()
         cleanupScratch(context)
         return Class.forName(LINK_CLASS).getConstructor(Context::class.java, BeanAuth::class.java, BeanCaptureContract::class.java)
             .newInstance(context, auth, contract) as BeanLink

@@ -29,14 +29,18 @@ import java.util.TimerTask
  * The real 录音豆 (Soundcore D3200) through the Anker SDK. Built only when the SDK sits in
  * `android/app/libs/soundcore/` (see app/build.gradle.kts); [BeanSdk] finds it by name.
  *
- * Flow per the SDK document: init + auth → scan → connect → device info → wait until the device itself
- * is recording (the SDK cannot start it) → acquireRealtimeAudioData → onReceiveAudioFragment packets.
- * Untested against hardware: no device was available when this was written (2026-10-12).
+ * User-confirmed capture: init + auth → scan → connect → device info → if idle, try the public
+ * resumeRecord once → wait for RECORDING → acquireRealtimeAudioData → real audio packets.
+ * Hardware validation status is recorded in docs/bean-device-check-20261016.md.
  */
 class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth, private val contract: BeanCaptureContract) : BeanLink {
     override val label = "录音豆"
 
     private val sdk = SoundcoreSDK.Companion.proxy
+    private val preferences = context.getSharedPreferences("oops_settings", Context.MODE_PRIVATE)
+    // Android's BLE alias can change after disconnect. Once selected, match the
+    // permanent address from the SDK advertisement instead of a bootstrap alias.
+    private val preferredAddress = preferences.getString("bean_device_mac", "").orEmpty().ifBlank { auth.macAddress }
     @Volatile private var sink: BeanLink.Sink? = null
     @Volatile private var device: BlueDeviceModel? = null
     @Volatile private var streaming = false
@@ -44,6 +48,27 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
     private var used = false
     private var stoppingCommands = false
     private var disconnectAcknowledged = false
+    private var receivedPacket = false
+    private var authenticated = false
+    private var audioRequested = false
+    private var initialDeviceInfoHandled = false
+    private var startCommandIssued = false
+    private var connectionEpoch = 0L
+    private var connectionStartedAt = 0L
+    private var connectionEstablished = false
+    private var connectionRecoveries = 0
+    private var reconnectTask: TimerTask? = null
+    private var recoveryTarget: String? = null
+    private var startupDeadlineAt = 0L
+    private var startupOverallDeadlineAt = 0L
+    private var startupTimeoutMessage: String? = null
+    override val supportsPause = true
+    private var controlState = "waiting"
+    private var hardwarePaused = false
+    private var transferActive = false
+    private var controlDeadline: TimerTask? = null
+    private var lastPacketAt = 0L
+    private val seenCandidates = mutableSetOf<String>()
     private val lifecycle = Any()
     @Volatile private var lease: BeanScratchStore.Lease? = null
     private var expiryTimer: Timer? = null
@@ -57,6 +82,7 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
             this.sink = sink
             streaming = false
             started = true
+            startupOverallDeadlineAt = System.nanoTime() / 1_000_000 + 60_000L
         }
         sink.onConnected(false)
         sink.onStatus("录音豆鉴权中")
@@ -68,21 +94,41 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
         try {
             synchronized(lifecycle) {
                 if (!started) return
-                sdk.initSDK(SdkLog, config, object : OnAuthResultListener {
-                    override fun onAuthResult(result: AuthResult) {
-                        if (!accepting()) return
-                        if (result.success) scan()
-                        else failLink(IllegalStateException("录音豆鉴权失败：${result.error?.message ?: "未知原因"}（${result.error?.code}）"))
-                    }
-                })
-                if (accepting()) sdk.registerBusinessCallback(callback)
-                if (started) expiryTimer = Timer("oops-bean-retention", true).apply {
+                expiryTimer = Timer("oops-bean-retention", true).apply {
                     scheduleAtFixedRate(object : TimerTask() {
-                        override fun run() {
-                            if (lease?.expired() == true) failLink(IllegalStateException("本场录音保留期已到，录音豆传输已停止"))
+                        override fun run() = synchronized(lifecycle) {
+                            if (!accepting()) return@synchronized
+                            val now = System.nanoTime() / 1_000_000
+                            val timeout = startupTimeoutMessage
+                            if (timeout != null && now >= startupOverallDeadlineAt) {
+                                failLink(IllegalStateException("录音豆连接与启动超过60秒，已停止本次尝试，请确认设备状态后重试"))
+                            } else if (timeout != null && now >= startupDeadlineAt) {
+                                failLink(IllegalStateException(timeout))
+                            } else if (controlState == "draining" && now - lastPacketAt >= 1_500L) {
+                                pausedAfterTail(quiet = true)
+                            }
                         }
                     }, 500L, 500L)
                 }
+                startupDeadline("录音豆鉴权超时，请检查网络或更新设备授权", 20_000L)
+                sdk.initSDK(SdkLog, config, object : OnAuthResultListener {
+                    override fun onAuthResult(result: AuthResult) {
+                        synchronized(lifecycle) {
+                            if (!accepting()) return
+                            if (result.success) {
+                                // The SDK can report cached-license success and then online success.
+                                // Both belong to this initialization; scanning must start only once.
+                                if (authenticated) return
+                                authenticated = true
+                                Log.i(TAG, "SDK authenticated")
+                                sdk.registerBusinessCallback(callback)
+                                scan()
+                            } else {
+                                failLink(IllegalStateException("录音豆鉴权失败（${result.error?.code ?: "未知"}），请检查网络或更新设备授权"))
+                            }
+                        }
+                    }
+                })
             }
         } catch (error: Throwable) {
             runCatching { stop() }.onFailure { error.addSuppressed(it) }
@@ -102,7 +148,10 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
             lease?.markStopping()
             expiryTimer?.cancel(); expiryTimer = null
             d = device
-            wasStreaming = streaming
+            wasStreaming = startCommandIssued || streaming || controlState in listOf("recording", "resuming", "pausing")
+            startupTimeoutMessage = null
+            reconnectTask?.cancel(); reconnectTask = null
+            controlDeadline?.cancel(); controlDeadline = null
             streaming = false
         }
         try {
@@ -128,6 +177,78 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
         }
     }
 
+    override fun pause() = command(paused = true)
+    override fun resume() = command(paused = false)
+    override fun confirmAudioReady() = synchronized(lifecycle) {
+        if (accepting()) startupTimeoutMessage = null
+    }
+
+    private fun startupDeadline(message: String, timeoutMs: Long) {
+        startupTimeoutMessage = message
+        startupDeadlineAt = System.nanoTime() / 1_000_000 + timeoutMs
+    }
+
+    private fun startFromApp(d: BlueDeviceModel) {
+        // This link exists only after the user starts a cloud-confirmed meeting.
+        // One attempt per link; duplicate info/auth callbacks never repeat the command.
+        startCommandIssued = true
+        control("resuming")
+        sink?.onStatus("正在启动录音豆，等待设备确认和音频")
+        startupDeadline("录音豆未确认启动或未传回音频，已结束本次连接；可按硬件录音键后重新开始", 15_000L)
+        try {
+            sdk.resumeRecord(d.macAddress!!, d.uuid!!)
+            Log.i(TAG, "SDK initial resume requested")
+        } catch (error: Throwable) {
+            failLink(IllegalStateException("录音豆启动指令失败，请重新开始或使用硬件录音键", error))
+        }
+    }
+
+    private fun command(paused: Boolean) = synchronized(lifecycle) {
+        check(accepting()) { "录音豆连接已关闭" }
+        val d = checkNotNull(device) { "录音豆尚未连接" }
+        check(controlState !in listOf("pausing", "draining", "resuming")) { "正在等待设备确认，请稍候" }
+        check(controlState in listOf("recording", "paused", "unknown")) { "设备尚未开始录音，暂不能暂停或继续" }
+        if (paused && controlState == "paused" || !paused && controlState == "recording") return@synchronized
+        val pending = if (paused) "pausing" else "resuming"
+        control(pending)
+        sink?.onStatus(if (paused) "正在暂停录音豆，等待尾音传完" else "正在恢复录音豆")
+        controlDeadline?.cancel()
+        controlDeadline = object : TimerTask() {
+            override fun run() = synchronized(lifecycle) {
+                if (accepting() && controlState == pending) {
+                    control("unknown")
+                    sink?.onControlError(if (paused) "暂停未得到设备确认，可重试或结束记录" else "继续未得到设备确认，可重试或结束记录")
+                }
+            }
+        }.also { requireNotNull(expiryTimer).schedule(it, 12_000L) }
+        try {
+            if (paused) sdk.pauseRecord(d.macAddress!!, d.uuid!!) else sdk.resumeRecord(d.macAddress!!, d.uuid!!)
+            Log.i(TAG, "SDK ${if (paused) "pause" else "resume"} requested")
+        } catch (error: Throwable) {
+            controlDeadline?.cancel(); controlDeadline = null
+            control("unknown")
+            sink?.onControlError("录音控制失败，请重试：${error.message}")
+        }
+    }
+
+    private fun control(state: String) {
+        if (controlState == state) return
+        controlState = state
+        if (state == "paused") { controlDeadline?.cancel(); controlDeadline = null }
+        Log.i(TAG, "SDK control=$state")
+        sink?.onControlState(state)
+    }
+
+    private fun pausedAfterTail(quiet: Boolean = false) {
+        // Firmware reports PAUSE_RECORD but does not consistently emit transfer IDLE.
+        // Keep the writer/connection lease; a quiet tail only closes the ASR segment.
+        if (hardwarePaused && controlState in listOf("pausing", "draining", "paused") && (!transferActive || quiet)) {
+            streaming = false
+            sink?.onStatus("录音豆已暂停，蓝牙保持连接")
+            control("paused")
+        }
+    }
+
     private fun accepting(mac: String? = null, uuid: String? = null): Boolean {
         if (!started || lease?.accepting != true) return false
         if (lease?.expired() == true) {
@@ -150,17 +271,62 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
         target.onError(error)
     }
 
+    private fun recoverConnection(d: BlueDeviceModel, exception: SdkException): Boolean {
+        // V1.3.02's 15 s connect timeout closes/nulls the GATT before reporting -102 without
+        // a system code. Never retry an established link, an unknown command, or audio startup.
+        if (exception.code != -102 || exception.systemCode != null || connectionEstablished ||
+            audioRequested || startCommandIssued || connectionRecoveries != 0 ||
+            System.nanoTime() / 1_000_000 - connectionStartedAt < 14_500L) return false
+        connectionRecoveries++
+        connectionEpoch++ // fence both onError/onDisconnected from the old connection
+        recoveryTarget = d.macAddress
+        device = null
+        disconnectAcknowledged = true // the SDK's known pre-link timeout has closed its GATT
+        sink?.onStatus("录音豆首次连接超时，正在重新寻找并连接（1/1）")
+        Log.i(TAG, "SDK pre-link timeout; one fresh-scan recovery scheduled")
+        startupDeadline("录音豆重新连接准备超时，请确认设备已开机后重试", 5_000L)
+        reconnectTask = object : TimerTask() {
+            override fun run() = synchronized(lifecycle) {
+                reconnectTask = null
+                if (!accepting()) return@synchronized
+                try {
+                    // Leave the SDK timeout callback stack first: it clears currentDevice after
+                    // notifying us. No reentrant connect may be overwritten by that old cleanup.
+                    sdk.stopScan()
+                    // Keep the same SDK device/dispatcher. close() only deletes the registry;
+                    // recreating it here does not reset the underlying transport's listeners.
+                    sdk.registerBusinessCallback(callback)
+                    scan()
+                } catch (error: Throwable) { failLink(error) }
+            }
+        }.also { requireNotNull(expiryTimer).schedule(it, 800L) }
+        return true
+    }
+
     private fun scan() {
         synchronized(lifecycle) {
             if (!accepting()) return
-            sink?.onStatus("正在寻找录音豆，请打开录音豆并靠近手机")
-            sdk.startScan(true, true, ArrayList(), object : OnReceiveScanResult {
+            sink?.onStatus(if (connectionRecoveries == 0) "正在寻找录音豆，请打开录音豆并靠近手机"
+                else "正在重新寻找录音豆（1/1）")
+            startupDeadline("未找到已选录音豆，请确认设备已开机并靠近手机，断开其他应用的设备连接后重试",
+                if (connectionRecoveries == 0) 32_000L else 12_000L)
+            // Realtime capture connects over BLE. Classic discovery adds a second radio search
+            // and can delay BLE discovery/connection; SPP is only needed for offline file transfer.
+            Log.i(TAG, "SDK scan mode=BLE_ONLY")
+            sdk.startScan(true, false, ArrayList(), object : OnReceiveScanResult {
                 override fun onScanSuccess(device: BlueDeviceModel) {
                     synchronized(lifecycle) {
                         if (!accepting()) return
                         if (this@SoundcoreBeanLink.device != null || device.macAddress == null || device.uuid == null) return
-                        if (auth.macAddress.isNotEmpty() && !device.macAddress.equals(auth.macAddress, ignoreCase = true)) return
+                        val selected = if (recoveryTarget != null) device.macAddress.equals(recoveryTarget, ignoreCase = true) else preferredAddress.isEmpty() ||
+                            device.macAddress.equals(preferredAddress, ignoreCase = true) ||
+                            device.sppMacAddress.equals(preferredAddress, ignoreCase = true)
+                        if (seenCandidates.add("${device.macAddress}:${device.sppMacAddress}")) {
+                            Log.i(TAG, "SDK candidate selected=$selected signal=${device.rssi} device=${device.macAddress?.takeLast(5)} alias=${device.sppMacAddress?.takeLast(5)}")
+                        }
+                        if (!selected) return
                         this@SoundcoreBeanLink.device = device
+                        Log.i(TAG, "SDK discovered recording bean")
                         try {
                             sdk.stopScan()
                             connect(device)
@@ -170,6 +336,12 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
 
                 override fun onScanError(result: Int) {
                     if (!accepting()) return
+                    if (result == 2 && (this@SoundcoreBeanLink.device != null || reconnectTask != null)) return // our stop
+                    Log.i(TAG, "SDK scan result=$result")
+                    if (result == 1) {
+                        failLink(IllegalStateException("未找到已选录音豆，请确认设备已开机并靠近手机，断开其他应用的设备连接后重试"))
+                        return
+                    }
                     sink?.onStatus(when (result) {
                         1 -> "没有找到录音豆，请确认已开机并靠近手机"
                         3 -> "正在扫描中"
@@ -182,30 +354,45 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
 
     private fun connect(d: BlueDeviceModel) {
         if (!accepting(d.macAddress, d.uuid)) return
-        sink?.onStatus("正在连接 ${d.deviceName ?: "录音豆"}")
+        val epoch = ++connectionEpoch
+        connectionStartedAt = System.nanoTime() / 1_000_000
+        connectionEstablished = false
+        disconnectAcknowledged = false
+        sink?.onStatus("正在连接 ${d.deviceName ?: "录音豆"}${if (connectionRecoveries > 0) "（重连1/1）" else ""}")
+        startupDeadline("录音豆连接超时，请确认设备已开机、未被其他应用占用后重试", 35_000L)
         sdk.connect(d.macAddress!!, d.uuid!!, object : SoundcoreConnectionCallback {
             override fun onConnected(macAddress: String?, deviceName: String?) {
                 synchronized(lifecycle) {
+                    if (epoch != connectionEpoch) return
                     if (!accepting(d.macAddress, d.uuid)) {
                         // Once our disconnect was acknowledged a new capture may own this singleton SDK.
                         // A late callback from this old link must not disconnect that newer capture.
                         if (lease != null) runCatching { stop() }.onFailure { BeanSdk.reportScratchFailure(it) }
                         return
                     }
+                    Log.i(TAG, "SDK device connected")
+                    connectionEstablished = true
+                    // Persist the selected device's permanent address, rather than an Android BLE alias.
+                    preferences.edit().putString("bean_device_mac", d.macAddress).apply()
+                    sink?.onStatus("录音豆已连接，正在读取设备状态")
+                    startupDeadline("读取录音豆状态超时，请重新连接", 12_000L)
+                    sdk.syncTime(d.macAddress!!, d.uuid!!, (System.currentTimeMillis() / 1_000).toUInt())
                     sdk.getDeviceInfo(d.macAddress!!, d.uuid!!)
                 }
             }
 
             override fun onDisconnected(macAddress: String?, systemCode: Int?, systemMsg: String?) {
-                if (macAddress != null && macAddress != d.macAddress) return
-                val target = sink
-                synchronized(lifecycle) {
+                val target = synchronized(lifecycle) {
+                    if (epoch != connectionEpoch || macAddress != null && macAddress != d.macAddress) return
+                    val target = sink
                     started = false
                     streaming = false
                     lease?.markStopping()
                     expiryTimer?.cancel(); expiryTimer = null
                     sink = null
                     disconnectAcknowledged = true
+                    connectionEpoch++
+                    target
                 }
                 val cleanup = runCatching { synchronized(lifecycle) { if (!stoppingCommands) finishStopped() } }
                 cleanup.onFailure {
@@ -216,10 +403,19 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
                 target?.onConnected(false)
                 target?.onStatus(if (cleanup.isSuccess) "录音豆已断开${systemMsg?.let { "（$it）" } ?: ""}"
                     else "录音豆临时副本清理失败，后续接入已阻止")
+                if (cleanup.isSuccess) target?.onError(IllegalStateException("录音豆连接已断开，请重新连接"))
             }
 
             override fun onError(macAddress: String?, exception: SdkException) {
-                if (accepting()) failLink(IllegalStateException("录音豆连接失败：${exception.message}（${exception.code}）"))
+                synchronized(lifecycle) {
+                    if (epoch != connectionEpoch || !accepting()) return
+                    Log.i(TAG, "SDK connection error code=${exception.code} system=${exception.systemCode} established=$connectionEstablished recovery=$connectionRecoveries")
+                    if (recoverConnection(d, exception)) return
+                    // A failed connection before requesting audio has no SDK file writer.
+                    // The SDK closes that failed GATT link without an onDisconnected callback.
+                    if (!audioRequested) disconnectAcknowledged = true
+                    failLink(IllegalStateException("录音豆连接失败（${exception.code}），请确认设备已开机、未被其他应用占用后重试"))
+                }
             }
         })
     }
@@ -229,8 +425,10 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
             synchronized(lifecycle) {
                 if (streaming || !accepting(d.macAddress, d.uuid)) return
                 streaming = true
+                audioRequested = true
                 // The only SDK output directory is this capture's managed, non-archive scratch lease.
                 sdk.acquireRealtimeAudioData(d.macAddress!!, d.uuid!!, requireNotNull(lease).folder.absolutePath)
+                Log.i(TAG, "SDK realtime audio requested")
             }
             sink?.onStatus(null)
         } catch (error: Throwable) { failLink(error) }
@@ -238,20 +436,47 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
 
     private val callback = object : SoundcoreBusinessCallback {
         override fun onGetDeviceInfo(macAddress: String, uuid: String, info: DeviceInfo) {
-            if (!accepting(macAddress, uuid)) return
-            val d = device ?: return
-            if (info.recording == 1) startStreaming(d) else sink?.onStatus("请按录音豆上的录音键开始录音")
+            synchronized(lifecycle) {
+                if (!accepting(macAddress, uuid) || initialDeviceInfoHandled) return
+                val d = device ?: return
+                initialDeviceInfoHandled = true
+                Log.i(TAG, "SDK device recording=${info.recording}")
+                when (info.recording) {
+                    1 -> {
+                        startupDeadline("录音豆正在录音但没有传回音频，请重新连接", 15_000L)
+                        startStreaming(d)
+                    }
+                    0 -> startFromApp(d)
+                    else -> failLink(IllegalStateException("无法确认录音豆当前录音状态，请重新连接"))
+                }
+            }
         }
 
         override fun onAudioRecordStatusChanged(macAddress: String, uuid: String, status: Int, recordingDuration: Int, fileID: Int) {
-            if (!accepting(macAddress, uuid)) return
-            val d = device ?: return
-            when (status) {
-                SoundcoreBusinessCallback.RECORDING -> startStreaming(d)
-                else -> {
-                    streaming = false
-                    sink?.onConnected(false)
-                    sink?.onStatus(if (status == SoundcoreBusinessCallback.PAUSE_RECORD) "录音豆已暂停录音" else "录音豆已停止录音")
+            synchronized(lifecycle) {
+                if (!accepting(macAddress, uuid)) return
+                val d = device ?: return
+                Log.i(TAG, "SDK recording status=$status")
+                when (status) {
+                    SoundcoreBusinessCallback.RECORDING -> {
+                        hardwarePaused = false
+                        if (controlState !in listOf("pausing", "recording")) control("resuming")
+                        startStreaming(d)
+                    }
+                    SoundcoreBusinessCallback.PAUSE_RECORD -> {
+                        hardwarePaused = true
+                        controlDeadline?.cancel(); controlDeadline = null
+                        lastPacketAt = System.nanoTime() / 1_000_000
+                        control("draining")
+                        sink?.onStatus("录音豆已暂停，正在接收剩余音频")
+                        pausedAfterTail()
+                    }
+                    else -> {
+                        controlDeadline?.cancel(); controlDeadline = null
+                        streaming = false
+                        control("stopped")
+                        sink?.onStatus("录音豆已停止，请按硬件录音键开始新录音")
+                    }
                 }
             }
         }
@@ -259,16 +484,35 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
         override fun onReceiveAudioFragment(macAddress: String, uuid: String, fileID: Int, audioData: ByteArray,
                                             isAppendPreAudio: Boolean, sequenceNumber: Int, isMark: Boolean) {
             if (!accepting(macAddress, uuid)) return
+            if (!receivedPacket) {
+                receivedPacket = true
+                Log.i(TAG, "SDK first audio packet bytes=${audioData.size} sequence=$sequenceNumber")
+            }
+            synchronized(lifecycle) {
+                lastPacketAt = System.nanoTime() / 1_000_000
+                if (hardwarePaused && controlState == "paused") control("draining")
+                if (controlState in listOf("resuming", "waiting", "unknown")) {
+                    controlDeadline?.cancel(); controlDeadline = null
+                    Log.i(TAG, "SDK resumed audio packet sequence=$sequenceNumber")
+                    // Remain 'resuming' in UI until the decoder delivers real PCM.
+                    controlState = "recording"
+                }
+            }
             sink?.onPacket(audioData, sequenceNumber, isMark)
         }
 
         override fun onGetDeviceInfoError(macAddress: String, uuid: String, errorCode: Int) {
             if (!accepting(macAddress, uuid)) return
-            sink?.onStatus("读取录音豆状态失败（$errorCode），请重新连接")
+            failLink(IllegalStateException("读取录音豆状态失败（$errorCode），请重新连接"))
         }
 
         override fun onDeviceTransferStateChanged(macAddress: String, uuid: String, state: DeviceTransferState) {
-            Log.i(TAG, "transfer state $state")
+            synchronized(lifecycle) {
+                if (!accepting(macAddress, uuid)) return
+                Log.i(TAG, "transfer state $state")
+                transferActive = state == DeviceTransferState.REALTIME_TRANSFERRING
+                if (state == DeviceTransferState.IDLE) pausedAfterTail()
+            }
         }
 
         override fun onBatteryInfoChanged(macAddress: String, uuid: String, deviceBattery: Int, chargingBoxBattery: Int) {
@@ -312,11 +556,13 @@ class SoundcoreBeanLink(private val context: Context, private val auth: BeanAuth
     }
 
     private object SdkLog : LogInterface {
-        override fun v(tag: String?, message: String?) { Log.v(tag ?: TAG, message.orEmpty()) }
-        override fun d(tag: String?, message: String?) { Log.d(tag ?: TAG, message.orEmpty()) }
-        override fun i(tag: String?, message: String?) { Log.i(tag ?: TAG, message.orEmpty()) }
-        override fun w(tag: String?, message: String?) { Log.w(tag ?: TAG, message.orEmpty()) }
-        override fun e(tag: String?, message: String?) { Log.e(tag ?: TAG, message.orEmpty()) }
+        // SDK debug output includes auth request bodies. Status/errors are reported through
+        // typed callbacks above; never forward vendor log bodies to device-wide logcat.
+        override fun v(tag: String?, message: String?) {}
+        override fun d(tag: String?, message: String?) {}
+        override fun i(tag: String?, message: String?) {}
+        override fun w(tag: String?, message: String?) {}
+        override fun e(tag: String?, message: String?) { Log.e(TAG, "SDK error; see connection status") }
     }
 
     private companion object {

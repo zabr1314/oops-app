@@ -1,5 +1,29 @@
 # Mobile Prototype Agent Guide
 
+## 录音豆默认音源（2026-10-16）
+
+用户要求补齐真实 SDK 接入并默认使用录音豆，明确指定主版 Oops（com.oops.app），不继续使用独立测试版。真机更新沿用原证书覆盖安装、保留既有功能与业务数据；本轮已明确授权结束当前日常聆听并进行原音/全文各7天的正式会议云保存测试。包含 Soundcore SDK 的 Android 安装包首次升级默认切到 bean，之后保留用户明确选择的音源；无 SDK 的构建保留手机麦克风。默认音源不等于自动开录或云保存授权。录音豆暂只支持用户逐次明确确认云保存的正式会议，日常五分钟限制保留；不得静默改用手机麦克风或把模拟器当真机。鉴权配置由可信开发端换取，app_key 不进入 APK、公开网页或 Git；token、license、身份与期限核对失败须给出原因，不能闪退。构建和真机验证的实际完成状态见 docs/bean-device-check-20261016.md。
+
+录音豆结束后会暂停硬件并断开。当前SDK实测不能保证仅从App重新开始就恢复硬件，开始页须提示先按硬件录音键；扫描超时明确失败，不能永久“等待收音”，未有音频不能标成“正在收音”。设备选择优先保存的真实地址，不能被旧BLE别名覆盖。2026-10-16续测时临时位置权限对照未解决连接问题，已撤回并恢复正常包；当前收音成功不等于自动重连通过。
+
+SDK录音控制复核（2026-10-16）：公开接口确有pauseRecord/resumeRecord，文档支持已启动录音后的暂停与恢复；不能将此前“暂停后断开、再扫描失败”当作resumeRecord不可用的证明。当前主版尚无独立暂停/继续桥接。后续优先在同一会议内保留蓝牙连接、按设备回执恢复；首次冷启动开录与断开后恢复分别验证，不能承诺已支持或为恢复而默默继续硬件录音。本轮仅静态核对，保留当前收音，详见docs/bean-record-control-sdk-20261016.md。
+
+## App 开始直接启动录音豆（2026-10-16）
+
+用户明确要求 App 点开始后自动让录音豆开录，并授权真机尝试 SDK 的 resumeRecord，避免每次按硬件录音键。本节取代上文“开始前必须先按硬件录音键”的当前产品要求；它不等于设备一开电源或一连接就可以绕过 App 开始与本场保存确认。
+
+主版 com.oops.app 已沿用原证书覆盖安装。用户明确开始并确认正式会议云保存后，连接读取 recording：1 直接接收，0 每条连接仅尝试一次公开 resumeRecord；重复鉴权/设备信息不重复启动。等设备录音回执与解码后的真实 PCM 再显示收音，鉴权/扫描/连接/状态读取/出音均有截止时间，失败关闭本次连接并显示原因；发过启动指令的失败/结束路径须先尝试暂停硬件再断开，不静默换麦克风，不放宽录音豆日常保存限制。
+
+本轮第一条尝试未找到设备，未发出 resumeRecord。用户随后确认设备已开机靠近手机、未按录音键；16:46:03 真实设备返回 recording=0，App 发送 initial resume，16:46:04 返回 RECORDING=1，16:46:07 收到首个 Opus 包并产出真实 PCM，实时转写已有最终结果。当前这场保留原音/全文各30天设置并保持运行。只证明本次“开机未录音 → App 开始 → 出音”通过，不把 recording=0 当作已证明设备刚断电冷启；完全断电冷启动、长时间待机及反复断开重连稳定性尚未验收。仅运行相关6项音频单元测试、APK构建、必要静态与28项运行时完整性检查，未扩大验证。详见 docs/bean-app-autostart-20261016.md。
+
+录音豆完全关机重启续验（2026-10-16）：用户明确要求再试完整关机重启，已通过正常结束流程收尾上一场；用户随后确认完全关机再开机、未按录音键。仅在App发起一次开始，16:50:28连接时设备已返回recording=1，16:50:29收到真实音频与PCM，App开始至首包约37.4秒，实时识别已到达，当前新场继续录音，原音/全文各30天。此轮没有调用initial resume，不能把它写成“冷机未录音由resumeRecord启动成功”；只证明用户确认的这次关机开机后，不额外按录音键、只走App开始的收音流程通过。首次recording=0的resume成功与本次设备连接时已录音分别记录；长待机和反复重连稳定性仍未验证。未重装、构建或运行测试套件，详见docs/bean-app-autostart-20261016.md续验段。
+
+录音豆连接提速（2026-10-16）：用户要求减少37秒等待。实时收音扫描改用公开SDK的BLE-only（startScan(true, false, ...)），去掉同时启动的经典蓝牙发现，保留设备白名单、授权、超时及真实PCM确认，不用旧BLE别名硬连或提前开录。主版已原签名覆盖安装。用户选择先测当前状态，不再完全关机；本次手机端开始至首个真实音频包约8.5秒，扫描约1.2秒、SDK连接约6秒，PCM与ASR中间结果正常，当前新场继续录音，原音/全文各30天。它与此前37.4秒冷启条件不同，不能当作固定性能承诺；优化后冷启动未重测。本轮未重跑测试套件，APK构建与必要静态/运行时完整性检查通过，详见docs/bean-connection-speed-20261016.md。
+
+录音豆BLE提速后的完整重启计时（2026-10-16）：用户进一步授权完整关机再开机测一次，已正常结束上一场并取得ASR收尾确认；用户确认完全关机再开机、未按录音键。App一次开始后扫描约4秒找到同一目标，但随后SDK连接等约15秒返回-102，总约19.5秒失败退出，未收到音频、未发initial resume，当前App已停止。本轮没有成功收音耗时，不能把19.5秒当成优化成功或将先前8.5秒推广为冷启性能。完整关机重启的连接稳定性仍有问题；未自动重试、改代码或重装，详见docs/bean-connection-speed-20261016.md续验段。
+
+录音豆超时恢复阶段收尾（2026-10-16）：最终保留开录前明确-102超时的同设备一次重新扫描/重连、800ms延后以等SDK旧回调清理、连接代次隔离与60秒启动上限；不重发录音指令。试验中的SDK close()清注册表导致系统GATT已连但业务握手未完成，已撤回该方式。最终包已覆盖安装；用户随后报告“已经可以了”，要求告一段落直接提交PR，故停止真机操作。最终版尚无代理完成的再次冷启动验收，用户反馈不能冒充实测或普遍修复证明。独立PR保留录音豆相关代码与既有声纹修复，其余工作区改动不纳入；详见docs/bean-reconnect-handoff-20261016.md。
+
 ## Prototype Instructions
 
 In ChatGPT Work Mode, run `sites-preview start "$PWD"`, open `http://terminal.local:4173/` in the cloud browser, and verify the rendered app and its primary interactions. Keep that preview open and tell the user to inspect it in the cloud browser; do not present the local URL as a user-facing chat link. In Codex Desktop, run the local server yourself, open the preview in the in-app browser, and provide the clickable local URL. Do not deploy to Sites unless the user explicitly asks to share, publish, or deploy. Do not give the user server-start instructions when you can run it.

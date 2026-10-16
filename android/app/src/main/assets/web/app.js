@@ -280,13 +280,14 @@
     // A new capture session starts an empty timeline; old lines and cards no longer apply.
     if (s.sessionId && s.sessionId !== S.state.sessionId) resetTranscript();
     const before = { capturing: S.state.capturing, sessionId: S.state.sessionId, selfName: S.state.selfName, recordingMode: S.state.recordingMode, transcriptExpired: S.state.transcriptExpired, voiceprint: voiceprintViewKey(S.state.voiceprint),
-      preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady, boardSourceRevision: S.state.boardSourceRevision,
+      control: S.state.captureControl, preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady, boardSourceRevision: S.state.boardSourceRevision,
       recordingArchiveMessage: S.state.recordingArchiveMessage, recordingsBlocked: S.state.recordingsBlocked };
     const serverChanged = ('backend' in s && S.state.backend !== undefined && s.backend !== S.state.backend)
       || ('backendUrl' in s && S.state.backendUrl !== undefined && s.backendUrl !== S.state.backendUrl);
     if (serverChanged) { clearRemoteState(); S.remoteEpoch = null; }
     if ('selfName' in s && s.selfName !== S.state.selfName) clearTaskIdentity();
     S.state = { ...S.state, ...s };
+    if (!before.capturing && S.state.capturing) S.captureError = null;
     if (S.state.transcriptExpired) S.expiredBoardSession = S.state.sessionId;
     S.board = acceptedTaskBoard(S.board);
     if (deviceState && S.state.capturing) deviceState = deviceDemo.reduce(deviceState, { type: 'occupied' },
@@ -301,7 +302,7 @@
     if (S.sheet?.kind === 'voiceprint' && before.voiceprint !== voiceprintViewKey(S.state.voiceprint)) renderSheet();
     if (S.route.name === 'memory' && S.memoryTab === 'people' && before.voiceprint !== voiceprintViewKey(S.state.voiceprint)) render();
     // Starting or stopping changes which controls a page shows; level and time only update text in place.
-    if (serverChanged || before.recordingMode !== S.state.recordingMode || before.transcriptExpired !== S.state.transcriptExpired || before.capturing !== S.state.capturing || before.sessionId !== S.state.sessionId || before.ready !== S.state.sourceReady || before.selfName !== S.state.selfName || before.boardSourceRevision !== S.state.boardSourceRevision || S.route.name === 'settings' && (before.recordingArchiveMessage !== S.state.recordingArchiveMessage || before.recordingsBlocked !== S.state.recordingsBlocked)) {
+    if (before.control !== S.state.captureControl || serverChanged || before.recordingMode !== S.state.recordingMode || before.transcriptExpired !== S.state.transcriptExpired || before.capturing !== S.state.capturing || before.sessionId !== S.state.sessionId || before.ready !== S.state.sourceReady || before.selfName !== S.state.selfName || before.boardSourceRevision !== S.state.boardSourceRevision || S.route.name === 'settings' && (before.recordingArchiveMessage !== S.state.recordingArchiveMessage || before.recordingsBlocked !== S.state.recordingsBlocked)) {
       // Starting voice enrollment must not navigate away and cancel its sheet.
       if (S.state.capturing && !before.capturing && S.route.name !== 'live' && S.sheet?.kind !== 'voiceprint') go('live');
       else render();
@@ -338,7 +339,7 @@
     const [text] = liveStatus();
     set('live-rec-title', text);
     set('live-rec-sub', liveDetail());
-    set('rc-status', s.capturing ? (s.sourceReady ? '收音中' : '等待收音') : '已停止');
+    set('rc-status', s.capturing ? captureSourceLabel() : '已停止');
     set('rc-saved', `已保存 ${s.savedCount ?? 0}`);
     set('home-record-time', mmss(s.sessionMs));
     set('home-record-status', s.sourceReady ? '正在记录' : '等待收音');
@@ -358,11 +359,27 @@
       : S.records.size ? `已收到${S.records.size}段对话 · 说话人待识别` : '等待第一段对话';
   }
 
+  function captureSourceLabel() {
+    const s = S.state;
+    if (s.captureControl === 'pausing') return '正在暂停';
+    if (s.captureControl === 'draining') return '已暂停·收尾中';
+    if (s.captureControl === 'paused') return '已暂停';
+    if (s.captureControl === 'resuming') return s.sourceDetail?.includes('启动') ? '启动录音豆' : '正在继续';
+    if (s.captureControl === 'unknown') return '状态待确认';
+    if (s.sourceReady) return '收音中';
+    if (s.source !== 'bean') return '等待收音';
+    if (s.sourceDetail?.includes('按录音豆')) return '请按录音键';
+    if (s.sourceDetail?.includes('寻找')) return '寻找录音豆';
+    if (s.sourceDetail?.includes('暂停')) return '录音豆已暂停';
+    if (s.sourceDetail?.includes('停止')) return '录音豆已停止';
+    return '连接录音豆';
+  }
   function liveStatus() {
     const s = S.state;
     if (!s.capturing) return s.asr === 'finishing' ? ASR_TEXT.finishing
       : s.asr === 'error' ? ['已停止收音 · 转写结束未确认', 'bad'] : ['已停止收音', ''];
-    const [text, cls] = !s.sourceReady && !['error', 'unconfigured'].includes(s.asr) ? ['等待音源', ''] : (ASR_TEXT[s.asr] || [s.asr, '']);
+    if (!s.sourceReady && !['error', 'unconfigured'].includes(s.asr)) return [captureSourceLabel(), 'warn'];
+    const [text, cls] = ASR_TEXT[s.asr] || [s.asr, ''];
     return [`正在收音 · ${text}`, cls];
   }
   function liveDetail() {
@@ -372,6 +389,8 @@
   }
   function warnings() {
     const s = S.state, w = [];
+    if (S.captureError) w.push(S.captureError);
+    if (s.captureControlError) w.push(s.captureControlError);
     const gaps = s.asrGaps || [];
     if (s.asr === 'unconfigured' || s.asr === 'error') w.push(s.asrDetail || (ASR_TEXT[s.asr] || [s.asr])[0]);
     else if (gaps.length) { const g = gaps[gaps.length - 1]; w.push(`识别中断过 ${gaps.length} 次，最近一次 ${clock(g.fromMs)}–${clock(g.toMs)} 没有转写`); }
@@ -580,17 +599,25 @@
     $('nav').innerHTML = NAV.map(([k, label, ic]) => `<button aria-label="${label}" class="${k === current ? 'selected' : ''}" ${k === current ? 'aria-current="page"' : ''} data-act="go" data-route="${k}">${icon(ic, 25)}<span>${label}</span>${k === 'tasks' && S.openTaskCount ? `<b>${S.openTaskCount}</b>` : ''}</button>`).join('');
   }
 
+  function capturePauseButton(compact = false) {
+    if (S.state.source !== 'bean') return '';
+    const c = S.state.captureControl, resume = ['paused','unknown'].includes(c);
+    const busy = ['pausing','draining','resuming'].includes(c) || resume && S.state.asr === 'finishing';
+    const disabled = busy || !['recording','paused','unknown'].includes(c);
+    const label = c === 'pausing' ? '暂停中' : c === 'resuming' ? '继续中' : c === 'draining' || resume && S.state.asr === 'finishing' ? '收尾中' : resume ? '继续' : '暂停';
+    return `<button id="rc-pause" data-act="capture-${resume?'resume':'pause'}" aria-label="${label}" ${disabled?'disabled':''}>${compact ? icon(resume?'play':'pause',19) : `<span class="rc-action-icon">${icon(resume?'play':'pause',20)}</span><span>${label}</span>`}</button>`;
+  }
   function renderRecordingControls() {
     const rc = $('rc');
     rc.hidden = !S.state.capturing;
     if (!S.state.capturing) { rc.innerHTML = ''; return; }
     rc.innerHTML = `<div class="rc-heading"><span class="rc-dot ${S.state.sourceReady ? '' : 'paused'}"></span>
-        <div class="rc-session"><strong>${esc(liveTitle())}</strong><span><span id="rc-status">${S.state.sourceReady ? '收音中' : '等待收音'}</span> · <time id="rc-time">${mmss(S.state.sessionMs)}</time></span></div>
+        <div class="rc-session"><strong>${esc(liveTitle())}</strong><span><span id="rc-status">${esc(captureSourceLabel())}</span> · <time id="rc-time">${mmss(S.state.sessionMs)}</time></span></div>
         ${S.route.name === 'live' && S.liveTab === 'live' ? '' : `<button class="rc-scene" data-act="go" data-route="live">现场${icon('caret-right', 13)}</button>`}</div>
       <div class="rc-actions">
         <button id="rc-recall" data-act="recall">${icon('clock-counter-clockwise', 19)}<span>找回刚才</span></button>
         <button data-act="saved-list">${icon('bookmark-simple', 19)}<span id="rc-saved">已保存 ${S.state.savedCount ?? 0}</span></button>
-        <button class="rc-end" data-act="capture-stop">${icon('stop', 19)}<span>结束</span></button></div>`;
+        ${capturePauseButton()}<button class="rc-end" data-act="capture-stop">${icon('stop', 19)}<span>结束</span></button></div>`;
   }
 
   const recordingModeLabel = () => S.state.recordingMode === 'meeting' ? '正式会议' : '日常临时聆听';
@@ -1309,8 +1336,9 @@
           <option value="mic" ${s.source === 'mic' ? 'selected' : ''}>手机麦克风</option>
           <option value="wav" ${s.source === 'wav' ? 'selected' : ''}>测试 WAV（预录音频）</option>
           <option value="remote" ${s.source === 'remote' ? 'selected' : ''}>Mac 收音（经 USB 接收电脑上的麦克风）</option>
-          ${s.beanSdk ? `<option value="bean" ${s.source === 'bean' ? 'selected' : ''}>录音豆（先按录音豆的录音键）</option>` : ''}
+          ${s.beanSdk ? `<option value="bean" ${s.source === 'bean' ? 'selected' : ''}>录音豆（App 开始后自动尝试开录）</option>` : ''}
           <option value="bean_sim" ${s.source === 'bean_sim' ? 'selected' : ''}>录音豆模拟（内置对话，测试解码链路）</option></select></label>
+        ${s.beanSdk ? `<p class="meta">${s.beanAuthorized ? `录音豆授权有效至 ${formatDate(new Date(s.beanLicenseExpiresAt * 1000).toISOString())}` : '录音豆需要更新设备授权'}；开始后自动尝试启动设备，失败会显示原因。</p>` : ''}
         <label class="form-field"><span>Mac 收音地址</span><input id="set-remote" inputmode="url" placeholder="127.0.0.1:7790" value="${esc(s.remoteAddress || '127.0.0.1:7790')}"><small>配合 adb reverse 用 127.0.0.1</small></label>
         <p class="meta">测试音频：${esc(s.testWavName || '内置合成对话')} · 需要 PCM 16kHz / 单声道 / 16bit WAV</p>
         <div class="inline-actions"><button class="chip" data-act="pick-audio">选择测试 WAV</button><button class="chip" data-act="reset-audio">恢复内置音频</button></div>
@@ -1461,9 +1489,10 @@
   }
 
   function captureModeHtml() {
-    const switching = S.sheet.switching, meeting = switching || S.sheet.mode === 'meeting';
+    const switching = S.sheet.switching, bean = S.state.source === 'bean', meeting = switching || bean || S.sheet.mode === 'meeting';
     const days = (id,title) => `<label class="form-field"><span>${title}</span><select id="${id}">${[7,30,90].map(n=>`<option value="${n}" ${n===30?'selected':''}>${n}天</option>`).join('')}</select></label>`;
-    return frame(switching ? '从现在开始正式会议' : '选择记录方式', `<div class="action-grid">${switching?'':`<button class="chip" data-act="capture-mode" data-mode="daily" aria-pressed="${!meeting}">日常临时聆听</button><button class="chip" data-act="capture-mode" data-mode="meeting" aria-pressed="${meeting}">正式会议</button>`}</div>
+    return frame(switching ? '从现在开始正式会议' : '选择记录方式', `<div class="action-grid">${switching?'':`<button class="chip" data-act="capture-mode" data-mode="daily" aria-pressed="${!meeting}" ${bean?'disabled':''}>日常临时聆听</button><button class="chip" data-act="capture-mode" data-mode="meeting" aria-pressed="${meeting}">正式会议</button>`}</div>
+      ${bean ? '<p><strong>确认开始后，Oops 会连接录音豆并尝试启动录音。</strong>设备需先开机，并断开其他应用的连接；未确认启动或未收到音频会明确提示失败。录音中可在 Oops 暂停和继续；暂停保留蓝牙与本场记录，结束会关闭连接。</p><p>当前音源为录音豆，使用正式会议模式；请确认本次云端保存。日常五分钟临时聆听请在设置中选择手机麦克风。</p>' : ''}
       ${meeting ? `${days('capture-audio-days','原始录音保留')}${days('capture-transcript-days','完整文字保留')}<label class="toggle-row"><span>我选择将本次正式会议原音和完整文字保存到云端</span><input id="capture-cloud" type="checkbox"></label><p class="meta">到期分别清理本机与服务端副本；摘要、任务和另行确认的短依据单独保留。</p>${switching?'<p>从切换时刻重新开始；此前缓冲不会自动归档。需要留下刚才片段时，请先选择并单独保存。</p><button class="button quiet" data-act="capture-before-recall">先选择刚才的片段</button>':''}` : '<p>最近5分钟原音和临时全文滚动覆盖，停止即清除；不归档整场，不同步团队。可整理私有候选，确认后才成为长期记忆。</p>'}
       <p class="meta">实时识别可能由云端ASR处理；不归档不代表音频完全不上云。</p><button class="button primary" data-act="capture-confirm">${switching?'确认并从现在开始':'开始本次记录'}</button><button class="button quiet" data-act="close">取消</button>`);
   }
@@ -2261,6 +2290,7 @@
   // ---- errors -------------------------------------------------------------------------------
 
   function onError(p) {
+    if (p.scope === 'capture') { S.captureError = p.message; render(); }
     if (p.scope === 'tasks' && !currentTaskReply(p)) return;
     if (p.scope === 'history' && p.requestId) {
       const expected = { 'history.list': S.historyRequestId, 'history.open': S.meetingRequest?.requestId, 'history.search': S.searchRequestId, 'history.delete': S.pendingDelete?.requestId }[p.operation];
@@ -2434,11 +2464,13 @@
     'device-resume': () => applyDeviceEvent({type:'resume'}),
     'device-reset': () => applyDeviceEvent({type:'reset'}),
     'capture-start': () => openSheet({kind:'captureMode',mode:'daily'}),
+    'capture-pause': () => send('capture.pause'),
+    'capture-resume': () => send('capture.resume'),
     'capture-meeting': () => openSheet({kind:'captureMode',mode:'meeting',switching:true}),
     'capture-mode': el => { S.sheet.mode = el.dataset.mode; renderSheet(); },
     'capture-before-recall': () => { closeSheet(); send('recall.trigger'); },
     'capture-confirm': () => {
-      const meeting = S.sheet.switching || S.sheet.mode === 'meeting';
+      const meeting = S.sheet.switching || S.state.source === 'bean' || S.sheet.mode === 'meeting';
       if (meeting && !$('capture-cloud').checked) return toast('请明确选择本次云端保存',true);
       const payload = {recordingMode:meeting?'meeting':'daily',cloudSaveConfirmed:meeting,
         audioRetentionDays:meeting?Number($('capture-audio-days').value):30,
