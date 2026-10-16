@@ -149,6 +149,8 @@ object OopsEngine {
     private var voiceprintSampleId = ""
     private var voiceprintRevision = ""
     private var asr: VolcAsrClient? = null
+    private var pausedAsrClosure: VolcAsrClient.Closure? = null
+    private var pauseAsrHadFailure = false
     private var asrGeneration = 0
     private var asrDownSinceMs: Long? = null
     private var reconnectAttempt = 0
@@ -421,10 +423,22 @@ object OopsEngine {
 
     suspend fun requireRecordingPolicySupport() { (api as? HttpOopsApi)?.requireArchivePolicy() }
 
+    fun captureStartRejected(message: String) {
+        fail("capture", message)
+    }
+
     fun startCapture(kind: String, policy: com.oops.app.store.RecordingPolicy = com.oops.app.store.RecordingPolicy()) {
         synchronized(pipeline) {
             if (source != null) return
-            if (kind == Settings.SOURCE_BEAN) requireBeanSource(policy)
+            try {
+                requireCaptureSource(kind, policy)
+            } catch (error: Exception) {
+                // Service starts are asynchronous: throwing here bypasses MainActivity's
+                // bridge handler and crashes the process instead of reporting the refusal.
+                fail("capture", "无法开始收音：${error.message}")
+                CaptureService.stop(app)
+                return
+            }
             if (captureStopping || asr?.isFinishing == true) {
                 emit(OopsEvent.Toast("正在接收上一场的最后转写，请稍候"))
                 return
@@ -464,6 +478,8 @@ object OopsEngine {
             optionalRequests = com.oops.app.backend.OptionalRequests()
             reconnectAttempt = 0
             asrDownSinceMs = null
+            pausedAsrClosure = null
+            pauseAsrHadFailure = false
             var src: AudioSource? = null
             _state.update {
                 it.copy(
@@ -472,7 +488,8 @@ object OopsEngine {
                     audioRetentionDays = policy.audioDays, transcriptRetentionDays = policy.transcriptDays,
                     audioExpired = false, transcriptExpired = false,
                     boardSourceRevision = boardSourceRevision,
-                    asr = "connecting", asrDetail = null, asrGaps = emptyList(), sourceDetail = null, sourceReady = false,
+                    asr = if (kind == "bean") "off" else "connecting", asrDetail = null, asrGaps = emptyList(), sourceDetail = null, sourceReady = false,
+                    captureControl = "waiting", captureControlError = null,
                     digestCounts = emptyMap(), notices = emptyList(), commitmentCount = 0, analysisPending = 0, analysisFailed = 0, tagsSupported = null, sessionTruncated = false,
                 )
             }
@@ -480,7 +497,9 @@ object OopsEngine {
                 val created = createAudioSource(kind)
                 src = created
                 source = created
-                openAsrLocked()
+                // Hardware discovery may take longer than the ASR server's no-audio timeout.
+                // Start its ASR only when the first hardware packet arrives.
+                if (kind != "bean") openAsrLocked()
                 created.start(audioListenerFor(created))
             } catch (e: Throwable) {
                 Log.e(TAG, "capture failed to start", e)
@@ -512,6 +531,31 @@ object OopsEngine {
 
     fun isCaptureStopping(): Boolean = synchronized(pipeline) { captureStopping }
 
+    fun setCapturePaused(paused: Boolean) {
+        val target = synchronized(pipeline) {
+            val current = source
+            if (current == null || !current.supportsPause || captureStopping) {
+                fail("capture.control", "当前音源尚不能暂停或继续")
+                return
+            }
+            if (voiceprintCapture != null) {
+                fail("capture.control", "请先完成或取消声音采集，再控制录音")
+                return
+            }
+            if (!paused && asr?.isFinishing == true) {
+                emit(OopsEvent.Toast("正在接收暂停前的最后转写，请稍候"))
+                return
+            }
+            _state.update { it.copy(captureControlError = null) }
+            current
+        }
+        // Do not hold the pipeline lock while entering the SDK callback lock.
+        runCatching { if (paused) target.pause() else target.resume() }.onFailure {
+            _state.update { s -> s.copy(captureControlError = it.message) }
+            fail("capture.control", it.message ?: "录音控制失败，请重试")
+        }
+    }
+
     fun stopCapture() {
         val src: AudioSource
         val client: VolcAsrClient?
@@ -520,12 +564,16 @@ object OopsEngine {
         val stoppedTracker: com.oops.app.notice.NoticeTracker
         val stoppedSync: SyncContext?
         val stoppedRecorder: com.oops.app.store.SessionRecorder?
+        val stoppedPauseClosure: VolcAsrClient.Closure?
+        val stoppedPauseFailure: Boolean
         synchronized(pipeline) {
             src = source ?: return
             captureStopping = true
             source = null
             if (voiceprintCapture != null) cancelVoiceprintRecording()
             client = asr
+            stoppedPauseClosure = pausedAsrClosure
+            stoppedPauseFailure = pauseAsrHadFailure
             archives = recordingPolicy.archives
             stoppedSession = sessionId
             stoppedTracker = tracker
@@ -574,15 +622,16 @@ object OopsEngine {
                     it.copy(asr = "error", asrDetail = "ASR结束未确认，已收到的转写已保留")
                 }
             }
-            val outcome = client?.closure
+            val outcome = client?.closure ?: stoppedPauseClosure
             val closure = when {
                 !terminated -> "incomplete"
+                stoppedPauseFailure -> "incomplete"
                 outcome?.acknowledged == true -> "acknowledged"
                 outcome?.errorCode == "cancelled" -> "cancelled"
                 else -> "incomplete"
             }
-            val errorCode = if (!terminated) "finish_timeout" else outcome?.errorCode ?: if (client == null) "asr_unavailable" else null
-            val error = if (!terminated) "ASR结束未确认，已收到的转写已保留" else outcome?.error ?: if (client == null) "ASR未连接，完整性未确认" else null
+            val errorCode = if (!terminated) "finish_timeout" else if (stoppedPauseFailure) "pause_asr_incomplete" else outcome?.errorCode ?: if (outcome == null) "asr_unavailable" else null
+            val error = if (!terminated) "ASR结束未确认，已收到的转写已保留" else if (stoppedPauseFailure) "暂停前有转写结束未确认，已收到的原话仍保留" else outcome?.error ?: if (outcome == null) "ASR未连接，完整性未确认" else null
             withContext(Dispatchers.IO) {
                 stoppedRecorder?.flush()
                 runCatching { stoppedRecorder?.recordAsrClosure(closure, errorCode, error) }
@@ -617,10 +666,11 @@ object OopsEngine {
         startCapture(kind, policy)
     }
 
-    private fun requireBeanSource(policy: com.oops.app.store.RecordingPolicy) {
+    fun requireCaptureSource(kind: String, policy: com.oops.app.store.RecordingPolicy) {
+        if (kind != Settings.SOURCE_BEAN) return
         BeanSdk.requireCaptureAllowed(policy)
         check(BeanSdk.included) { "这个安装包没有包含录音豆 SDK，请选择手机麦克风" }
-        check(BeanAuth.fromBuildConfig().complete) { "缺少录音豆鉴权信息，请先完成设备授权" }
+        BeanAuth.fromBuildConfig().requireUsable()
     }
 
     private fun createAudioSource(kind: String): AudioSource = when (kind) {
@@ -642,7 +692,7 @@ object OopsEngine {
 
     /** Replace only the input; the timeline, transcript, retained clips and pending work survive. */
     private fun switchCaptureSource(kind: String) {
-        if (kind == Settings.SOURCE_BEAN) requireBeanSource(recordingPolicy)
+        requireCaptureSource(kind, recordingPolicy)
         val next = createAudioSource(kind) // construction failures must not stop the current working source
         val previous = synchronized(pipeline) {
             val active = source ?: return
@@ -673,10 +723,33 @@ object OopsEngine {
     }
 
     private fun audioListenerFor(owner: AudioSource) = object : AudioSource.Listener {
+        override fun onControlState(state: String) {
+            synchronized(pipeline) {
+                if (source !== owner) return
+                _state.update { it.copy(captureControl = state) }
+                if (state in listOf("paused", "stopped")) {
+                    level = 0f
+                    reconnectJob?.cancel()
+                    asrDownSinceMs = null
+                    _state.update { it.copy(sourceReady = false, level = 0f,
+                        asr = if (asr != null) "finishing" else "off",
+                        asrDetail = if (asr != null) "正在接收暂停前的最后转写" else null) }
+                    // The audio worker sends this only after all queued tail packets and partial PCM.
+                    asr?.finish()
+                }
+            }
+        }
+
+        override fun onControlError(message: String) {
+            if (source !== owner) return
+            _state.update { it.copy(captureControlError = message) }
+            fail("capture.control", message)
+        }
         override fun onAudio(pcm: ByteArray) {
             synchronized(pipeline) {
                 if (source !== owner) return
-                _state.update { if (it.sourceReady) it else it.copy(sourceReady = true) }
+                val pausedTail = _state.value.captureControl in listOf("draining", "paused")
+                _state.update { if (it.sourceReady || pausedTail) it else it.copy(sourceReady = true) }
                 voiceprintCapture?.let { recording ->
                     val complete = recording.append(pcm)
                     _state.update { it.copy(voiceprint = it.voiceprint.copy(phase = "recording", elapsedMs = recording.elapsedMs)) }
@@ -688,8 +761,15 @@ object OopsEngine {
                     if (r.capped && !_state.value.recordingCapped) _state.update { it.copy(recordingCapped = true) }
                 }
                 // 回听时给 ASR 送静音：外放的原声不会被再转写一遍，连接和时间轴也不断。
-                asr?.sendAudio(if (player.isPlaying) ByteArray(pcm.size) else pcm)
-                level = maxOf((Pcm.rms(pcm) * 5).toFloat().coerceAtMost(1f), level * 0.7f)
+                if (pausedTail && (asr == null || asr?.isFinishing == true)) {
+                    if (!pauseAsrHadFailure) {
+                        val message = "暂停后有迟到尾音，原音已保留，文字完整性需核对"
+                        _state.update { it.copy(captureControlError = message) }
+                        fail("capture.control", message)
+                    }
+                    pauseAsrHadFailure = true
+                } else asr?.sendAudio(if (player.isPlaying) ByteArray(pcm.size) else pcm)
+                level = if (pausedTail) 0f else maxOf((Pcm.rms(pcm) * 5).toFloat().coerceAtMost(1f), level * 0.7f)
             }
         }
 
@@ -725,6 +805,7 @@ object OopsEngine {
             synchronized(pipeline) {
                 if (source !== owner) return
                 _state.update { it.copy(sourceReady = ready) }
+                if (ready && owner.kind == "bean" && asr == null && _state.value.asr == "off") openAsrLocked()
                 if (!ready) _state.update { it.copy(liveSpeakers = emptyList(), liveOverlap = false, liveSpeakerStatus = "waiting") }
             }
         }
@@ -844,6 +925,8 @@ object OopsEngine {
     // ---- streaming ASR ---------------------------------------------------------------------
 
     private fun openAsrLocked() {
+        if (source?.kind == "bean" && !_state.value.sourceReady) return
+        pausedAsrClosure = null
         val credentials = settings.volc
         if (!credentials.isConfigured) {
             _state.update { it.copy(asr = "unconfigured", asrDetail = "android/local.properties 里还没配置火山 ASR 密钥") }
@@ -1333,7 +1416,7 @@ object OopsEngine {
     private fun reconnectAsrNow() {
         synchronized(pipeline) {
             // A live or connecting client exists while `asr` is set; it is null only during the backoff wait.
-            if (source == null || asr != null || _state.value.asr == "error") return
+            if (source == null || asr != null || _state.value.asr == "error" || source?.kind == "bean" && !_state.value.sourceReady) return
             reconnectJob?.cancel()
             reconnectAttempt = 0
             Log.i(TAG, "network available, reconnecting ASR now")
@@ -1344,9 +1427,17 @@ object OopsEngine {
     private fun onAsrClosed(generation: Int, error: String?, fatal: Boolean) {
         synchronized(pipeline) {
             if (generation != asrGeneration) return
+            val closedClient = asr
             asr = null
             if (source == null) {
                 _state.update { it.copy(asr = if (error == null) "off" else "error", asrDetail = error) }
+                return
+            }
+            if (_state.value.captureControl in listOf("paused", "stopped")) {
+                pausedAsrClosure = closedClient?.closure
+                if (pausedAsrClosure?.acknowledged != true) pauseAsrHadFailure = true
+                _state.update { it.copy(asr = "off", asrDetail = error) }
+                if (error != null) fail("capture.control", "暂停前的转写结束未确认，已收到的原话仍保留：$error")
                 return
             }
             if (asrDownSinceMs == null) asrDownSinceMs = nowMs
@@ -1795,7 +1886,7 @@ object OopsEngine {
             require(mode in setOf("enroll", "test")) { "录音模式无效" }
             require(mode == "test" || name in Settings.TEAM) { "请先选择本人姓名" }
             require(_state.value.voiceprint.phase !in setOf("saving", "testing", "checking", "loading", "recording")) { "请等待当前操作结束" }
-            val kind = source?.kind ?: Settings.SOURCE_MIC
+            val kind = source?.kind ?: settings.source
             require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN)) { "请先切换到手机、Mac 麦克风或录音豆，不能用测试音频注册" }
             val client = api as? HttpOopsApi ?: error("请先连接真实服务器")
             val catalog = _state.value.voiceprint.catalog ?: error("请先刷新声纹列表")

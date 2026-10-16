@@ -50,6 +50,9 @@ data class EngineState(
     val sourceDetail: String? = null,
     /** Input has delivered PCM and has not subsequently disconnected. */
     val sourceReady: Boolean = false,
+    /** waiting | recording | pausing | paused | resuming | stopped | unknown */
+    val captureControl: String = "waiting",
+    val captureControlError: String? = null,
     val remoteAddress: String = "127.0.0.1:7790",
     /** Session spans that were recorded but not transcribed (ASR down). */
     val asrGaps: List<AsrGap> = emptyList(),
