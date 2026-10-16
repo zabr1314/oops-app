@@ -33,6 +33,10 @@ class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_REFRESH_NOTIFICATION) {
+            if (OopsEngine.state.value.capturing) startInForeground()
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_STOP) {
             OopsEngine.stopCapture()
             // Keep the process protected while the bounded ASR tail is being
@@ -94,8 +98,8 @@ class CaptureService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_oops)
             .setColor(getColor(R.color.oops_brand))
-            .setContentTitle(getString(R.string.notif_capture_title))
-            .setContentText(getString(R.string.notif_capture_text))
+            .setContentTitle(if (OopsEngine.state.value.capturePaused) "Oops 记录已暂停" else getString(R.string.notif_capture_title))
+            .setContentText(if (OopsEngine.state.value.capturePaused) OopsEngine.state.value.sourceDetail ?: "手机麦克风已关闭，回到 App 可恢复或结束" else if (OopsEngine.state.value.recordingMode == "meeting") "正式会议记录中，按本次确认的方式保存" else getString(R.string.notif_capture_text))
             .setOngoing(true)
             .setContentIntent(open)
             .addAction(0, getString(R.string.notif_action_recall), recall)
@@ -121,6 +125,7 @@ class CaptureService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_START = "com.oops.app.capture.START"
         private const val ACTION_STOP = "com.oops.app.capture.STOP"
+        private const val ACTION_REFRESH_NOTIFICATION = "com.oops.app.capture.REFRESH_NOTIFICATION"
         private const val EXTRA_SOURCE = "source"
 
         /** Must be called while the app is in the foreground (microphone FGS rule). */
@@ -138,6 +143,10 @@ class CaptureService : Service() {
                 Log.w("Oops", "stop service failed, stopping engine directly", it)
                 OopsEngine.stopCapture()
             }
+        }
+
+        fun refreshNotification(context: Context) {
+            runCatching { context.startService(Intent(context, CaptureService::class.java).setAction(ACTION_REFRESH_NOTIFICATION)) }
         }
     }
 }

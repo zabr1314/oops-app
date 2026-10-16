@@ -14,6 +14,37 @@ fun configValue(name: String, default: String = ""): String =
     (localProps.getProperty(name) ?: System.getenv(name) ?: default)
         .replace("\\", "\\\\").replace("\"", "\\\"")
 
+// Opt-in packaging overrides keep the existing app and CI defaults intact. The unified preview
+// uses a separate package so installing it cannot replace an existing Oops installation.
+val oopsAppIdSuffix = providers.gradleProperty("oopsAppIdSuffix").orNull?.also {
+    require(it.matches(Regex("(\\.[a-z][a-z0-9_]*)+"))) { "Invalid oopsAppIdSuffix" }
+}
+val oopsVersionCode = providers.gradleProperty("oopsVersionCode").orNull?.let {
+    requireNotNull(it.toIntOrNull()?.takeIf { code -> code in 1..2100000000 }) {
+        "oopsVersionCode must be a positive Android version code"
+    }
+}
+val oopsVersionName = providers.gradleProperty("oopsVersionName").orNull?.also {
+    require(it.isNotBlank() && it.length <= 80) { "Invalid oopsVersionName" }
+}
+val oopsUnifiedWeb = providers.gradleProperty("oopsUnifiedWeb").orNull?.let {
+    requireNotNull(it.toBooleanStrictOrNull()) { "oopsUnifiedWeb must be true or false" }
+} ?: false
+val unifiedAssetsRoot = layout.buildDirectory.dir("generated/unifiedWebAssets")
+
+if (oopsUnifiedWeb) {
+    val buildNativeWeb = tasks.register<Exec>("buildNativeWeb") {
+        description = "Builds the shared React interface and native tool assets for the Android WebView"
+        group = "build"
+        workingDir(rootProject.projectDir.parentFile)
+        commandLine("node", "scripts/build-native.mjs")
+        // The script owns this complete root, including preserved native-only tools and fixtures.
+        outputs.dir(unifiedAssetsRoot)
+        outputs.upToDateWhen { false }
+    }
+    tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(buildNativeWeb) }
+}
+
 android {
     namespace = "com.oops.app"
     // Current androidx.core / OkHttp require compiling against 37; runtime behaviour stays at targetSdk 36.
@@ -25,12 +56,14 @@ android {
 
     defaultConfig {
         applicationId = "com.oops.app"
+        applicationIdSuffix = oopsAppIdSuffix
         minSdk = 26
         // Deliberate Android 16 device baseline from the implementation plan.
         //noinspection OldTargetApi
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = oopsVersionCode ?: 1
+        versionName = oopsVersionName ?: "0.1.0"
+        manifestPlaceholders["oopsAppLabel"] = if (oopsAppIdSuffix == ".unified") "Oops 新版" else "Oops"
         testInstrumentationRunner = "com.oops.app.RemoteBackendSmoke"
 
         buildConfigField("String", "VOLC_API_KEY", "\"${configValue("VOLC_API_KEY")}\"")
@@ -59,6 +92,14 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+    }
+
+    if (oopsUnifiedWeb) {
+        // Avoid merging two web/index.html files from the old and shared interfaces.
+        sourceSets.getByName("main").assets.directories.apply {
+            clear()
+            add(unifiedAssetsRoot.get().asFile.absolutePath)
+        }
     }
 }
 

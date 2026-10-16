@@ -1,0 +1,21 @@
+:root { color-scheme: light; background: #f2efff; }
+html, body, #root { width: 100%; height: 100%; min-width: 0; margin: 0; overflow: hidden; overscroll-behavior: none; }
+body { -webkit-text-size-adjust: 100%; }
+.native-device-screen { position: fixed; left: 0; width: 100%; overflow: hidden; background: #f2efff; --keyboard-height: 0px; }
+.native-app-viewport { position: absolute; inset: 0 0 var(--native-bottom-inset) 0; overflow: hidden; }
+.native-device-screen .mobile-page { --mobile-safe-area-height: 0px; --keyboard-height: 0px; }
+.native-device-screen[data-keyboard-visible="true"] .recording-controls { display: none; }
+.native-device-screen .mobile-scroll { bottom: 0; touch-action: pan-y; user-select: auto; transition: none; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+.native-device-screen .mobile-scroll-content { transform: none; will-change: auto; }
+.native-device-screen .mobile-carousel { touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+.native-device-screen .mobile-carousel-content { transform: none; will-change: auto; }
+.native-device-screen img { -webkit-user-drag: none; user-select: none; }
+.native-device-screen input, .native-device-screen textarea { font-size: 16px; user-select: text; }
+.native-device-screen .bottom-sheet { min-height: 0; padding: 0 18px; overscroll-behavior: contain; touch-action: auto; }
+.native-device-screen .bottom-sheet > .sheet-content { min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.native-device-screen .sheet-content { touch-action: pan-y; }
+.native-sheet-close { position: absolute; right: 10px; top: 8px; width: 38px; height: 38px; display: grid; place-items: center; border: 0; background: transparent; color: #81789f; font-size: 28px; z-index: 2; }
+.native-device-screen :focus-visible { outline: 2px solid #795cf4; outline-offset: 2px; }
+@media (max-width: 360px) { .native-device-screen .screen-content { padding-left: 16px; padding-right: 16px; } .native-device-screen .home-hero h1 { font-size: 25px; } }
+
+.native-source-focus .card { border-color: #9d83e5; box-shadow: 0 0 0 2px #bba5f544; }

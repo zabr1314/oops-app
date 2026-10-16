@@ -156,3 +156,13 @@ settings.set 增加 `speakerPreview`，默认 false；state 增加 `speakerPrevi
 - `meeting.retained` 回传 `sessionId/requestId/retained_evidence/retained_summaries`；只有匹配回执才显示已保留。普通错误在 `error.scope=retention` 保留选择并重试同一请求；409来源变化要求重新读取核对，不能重复提交旧确认。
 
 公开安卓浏览器预览继续隔离示例，原生保存与服务端清理需新版后端和实际 APK 部署验证。代码测试、模拟回执不证明真机已经执行。
+
+## 2026-10-16：共享 React 主界面与真实麦克风暂停
+
+新版 Android 的 React 主界面通过 `src/nativeBridge.ts` 接收同一原生协议。实际 Android 入口即使桥尚未连接也使用空数据，不读取网站示例档案或网站本地缓存。真实历史会议及正式任务投影为只读，分别保留 `native-session:<id>` / `native-task:<id>` 来源标记；核对、账号记忆与外部交付沿用顶层原生工具页，不向 iframe 转交完整桥权限。
+
+`state` / `snapshot.state` 新增 `serviceEpoch`、`capturePauseSupported`、`capturePaused`、`capturePauseDraining`。前者只含非凭据代次；服务/身份变化撤回旧读取与来源投影。刷新会议、纪要或任务时旧缓存先停止作为当前来源，只有本次匹配回包恢复；会议删除会取消该会议在途请求，迟到正文不能恢复已删对象。本机新建内容按服务与已核验本人账号隔离保存，不将远端正文、任务回执或其派生副本存为可离线复活的投影。
+
+新增 `capture.pause {}` / `capture.resume {}`，目前仅手机麦克风宣告 `capturePauseSupported:true`。暂停真正停止并释放 `AudioRecord`，保持 `capturing:true,capturePaused:true`，同一 session、PCM 样本时轴、缓冲、保存合同和同步队列不变，不写会议结束标记。当前 ASR 尾句排空期间 `capturePauseDraining:true`，不能恢复；随后明确恢复才重新打开同一会话的麦克风与 ASR。暂停期间可以直接 `capture.stop`，日常清理及正式会议收尾规则不变。收音、暂停或 ASR 收尾期间，服务地址/访问凭据/Mock 变化在整次设置保存前拒绝，原设置、会话和缓冲保留；必须先明确结束并完成收尾。暂停期间也不能暗中切换音源。文件/回放音源、远端麦克风与录音豆未验证等价暂停合同，不能把停止或从头重放显示为暂停恢复。
+
+实时 ASR 当前仍由原生 `Settings.volc` 读取构建时配置并直连现有服务。服务访问凭据与 ASR 配置互不替代；没有配置 ASR 的安装包显示 `asr:unconfigured`，不能宣称已经完成真实转写或真机验证。

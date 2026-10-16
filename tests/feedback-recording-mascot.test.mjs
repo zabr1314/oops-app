@@ -60,6 +60,15 @@ test('mascot listening reflects visible active capture and stops when paused or 
   assert.equal(homeMascotPresentation(data).state, 'thinking');
 });
 
+test('native active capture never inherits the website sample-recording label', () => {
+  const data = empty(), session = data.sessions[0];
+  session.status = '进行中'; data.activeSessionId = session.id;
+  assert.equal(homeMascotPresentation(data, 0, true).label, '正在记录');
+  assert.equal(homeMascotPresentation(data).label, '示例记录中');
+  session.status = '暂停';
+  assert.equal(homeMascotPresentation(data, 0, true).label, '记录已暂停');
+});
+
 test('mascot does not expose a hidden recording, archived recording or another persons work', () => {
   const data = empty(), session = data.sessions[0];
   session.status = '进行中'; data.activeSessionId = session.id;

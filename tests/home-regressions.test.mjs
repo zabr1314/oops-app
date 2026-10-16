@@ -12,6 +12,12 @@ const imports=`import { buildPersonalContext } from '${url('../src/personalAssis
 const model=await load(imports+home.slice(home.indexOf('export function homeTitle'),home.indexOf('export function Home()'))+home.slice(home.indexOf('type LocalAnswer'),home.indexOf('function referenceRoute'))+home.slice(home.indexOf('export function notificationVisible'),home.indexOf('export function Notifications')));
 const {provenanceAvailable:awaitableProvenance}=await import('../src/sourceAccess.ts');
 const {migrateStoredData}=await import('../src/stateMigrations.ts');
+test('native home names only the connected real source and marks test services explicitly',()=>{
+ assert.match(model.nativeHomeDeviceSummary({source:'mic',capturing:true,sourceReady:true},true),/手机麦克风.*正在收音/);
+ assert.match(model.nativeHomeDeviceSummary({source:'bean',capturing:true,sourceReady:false},true),/录音豆.*等待音源/);
+ assert.match(model.nativeHomeDeviceSummary({source:'wav',backend:'mock'},true),/测试音频.*测试服务/);
+ assert.doesNotMatch(model.nativeHomeDeviceSummary({source:'bean'},false),/已连接|正在收音|示例/);
+});
 function stock(){const d=initialData(),t=d.tasks.find(t=>t.id==='TASK-032');t.needsReview=false;t.sourceNeedsReview=false;t.results=['旧库存999件'];t.artifacts=[{id:'old',kind:'资料',title:'旧库存',version:1,created:'昨天',body:['旧库存999件'],reviewedAt:'昨天',needsReview:false,sourceNeedsReview:true},{id:'new',kind:'资料',title:'已核对库存',version:2,created:'今天',body:['新库存18件'],reviewedAt:'今天',needsReview:false}];return d;}
 test('revalidated task cannot reuse invalid retained artifact or legacy result',()=>{const d=stock();d.tasks.find(t=>t.id==='TASK-032').artifacts=d.tasks.find(t=>t.id==='TASK-032').artifacts.slice(0,1);assert.doesNotMatch(model.buildLocalAnswer('椅子库存',d,true).text,/999/);assert.equal(model.buildLocalAnswer('椅子库存',d,true).sources.length,0);});
 test('inventory answer uses only a reviewed current-source artifact',()=>{const d=stock(),a=model.buildLocalAnswer('椅子库存',d,true);assert.match(a.text,/18件/);assert.doesNotMatch(a.text,/999/);d.tasks.find(t=>t.id==='TASK-032').artifacts[1].needsReview=true;assert.doesNotMatch(model.buildLocalAnswer('椅子库存',d,true).text,/18件/);});

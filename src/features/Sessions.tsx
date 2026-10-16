@@ -86,12 +86,12 @@ const DAILY_DEMO = [['我', '下午要问同事素材准备到哪一步。'], ['
 const IDEA_DEMO = [['我', '桌面伙伴用一个抬头或轻轻闪烁，反馈它正在听。'], ['我', '关键是日常陪伴，不需要不停说话。'], ['我', '先整理一分钟口播提纲，再找朋友验证是否理解。']];
 
 /** Mount once in the shared shell, so changing bottom tabs does not stop sample input. */
-export function useSessionRecorder() {
+export function useSessionRecorder(enabled = true) {
   const { data, update } = useOops();
   const active = data.sessions.find(s => s.id === data.activeSessionId);
   const recallStarted = data.settings.retention['recall-window-start'];
   useEffect(() => {
-    if ((!active || active.status !== '进行中') && !recallStarted) return;
+    if (!enabled || (!active || active.status !== '进行中') && !recallStarted) return;
     const interval = window.setInterval(() => update(current => {
       const start = Number(current.settings.retention['recall-window-start']);
       if (start && Date.now() - start >= 300000 && !current.recallCleared) {
@@ -121,7 +121,7 @@ export function useSessionRecorder() {
       return next.settings.toggles.proactive !== false && (transcript !== s.transcript || elapsed % 30 === 0) ? refreshSessionIntelligence(withSuggestions, s.id, transcript !== s.transcript ? undefined : 'notices') : withSuggestions;
     }), 1000);
     return () => window.clearInterval(interval);
-  }, [active?.id, active?.status, recallStarted, update]);
+  }, [enabled, active?.id, active?.status, recallStarted, update]);
 }
 
 export function sessionTitle(route: Route): string {

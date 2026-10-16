@@ -14,6 +14,8 @@ import { ListeningScreen } from './features/Listening';
 import { archiveSafeData, applyStorageDeadlines, isTemporaryDaily, pinExplicitDerivations, reconcileSavedEvidence } from './storagePolicy';
 import { setVolatileObjects, clearObjectViewState } from './viewState';
 import { collectPersonalHabitCandidates, reconcilePersonalAssistantState } from './personalAssistant';
+import { nativeBridge, createNativeData } from './nativeBridge';
+import { NativeRecordingControls, NativeRouteOutlet } from './native/NativeScreens';
 import { reconcileDeviceStartupHolds } from './deviceStartupLogic';
 
 
@@ -25,10 +27,18 @@ const previewScene=new URLSearchParams(window.location.search).get('board-previe
 function readData(){if(previewScene!==null)return boardPreviewData(previewScene||'default');try{const d=JSON.parse(localStorage.getItem('oops-front-v2')||'null');if(d?.sessions&&d?.settings&&d?.tasks)return archiveSafeData(migrateStoredData(d as AppData))}catch{}return initialData()}
 type EndRequest = { id: string; resume: boolean };
 
-export default function Prototype() {
+type NativeScopeState = { scope?: string; version?: number; established: boolean };
+export function nativeScopeTransition(previous: NativeScopeState, scope: string | undefined, version: number) {
+  const changed = scope !== previous.scope || previous.version !== undefined && version !== previous.version;
+  const restore = scope !== undefined && changed;
+  const invalidated = previous.established && changed;
+  return { restore, clear: restore || invalidated, resetRoute: invalidated, next: { scope, version, established: previous.established || scope !== undefined } };
+}
+
+export default function Prototype({ nativeHost = false }: { nativeHost?: boolean } = {}) {
   const keyboard = useKeyboard();
   const { screenRef } = useScreenPortal();
-  const [data, setData] = useState<AppData>(readData);
+  const [data, setData] = useState<AppData>(() => nativeHost ? createNativeData() : readData());
   const [route, setRoute] = useState<Route>(initialRoute);
   const [endRequest, setEndRequest] = useState<EndRequest | null>(null);
   const history = useRef<Route[]>([]);
@@ -72,6 +82,7 @@ export default function Prototype() {
   };
   const requestEnd = (id: string) => {
     keyboard.hide();
+    if (nativeHost) { window.dispatchEvent(new CustomEvent('oops:native-request-end', { detail: { id } })); return; }
     if (endRequest) return;
     const session = data.sessions.find(s => s.id === id && !s.archived);
     if (!session || data.activeSessionId !== id || !['进行中', '暂停'].includes(session.status) || !sessionVisible(data, id)) {
@@ -85,7 +96,7 @@ export default function Prototype() {
   const reset = () => {
     keyboard.hide();
     setEndRequest(null);
-    setData(previewScene===null?initialData():boardPreviewData(previewScene||'default'));
+    setData(nativeHost ? nativeBridge.project(createNativeData()) : previewScene===null?initialData():boardPreviewData(previewScene||'default'));
     setRoute({ view: 'home' });
     history.current = [];
     scrollPositions.current.clear();
@@ -93,6 +104,39 @@ export default function Prototype() {
     clearViewState();
     window.history.replaceState(null, '', '#home');
   };
+  useEffect(() => {
+    if (!nativeHost) return;
+    let previousScope: NativeScopeState = { established: false };
+    const synchronize = () => {
+      const snapshot = nativeBridge.snapshot(), scope = nativeBridge.localScope();
+      const transition = nativeScopeTransition(previousScope, scope, snapshot.scopeVersion);
+      previousScope = transition.next;
+      const restored = transition.restore ? nativeBridge.loadLocal() : null;
+      if (transition.clear) {
+        clearViewState(); history.current = []; scrollPositions.current.clear();
+        clearedSourceDrafts.current.clear(); temporaryTurnIds.current.clear();
+        setEndRequest(null);
+        if (transition.resetRoute) { setRoute({ view: 'home' }); window.history.replaceState(null, '', '#home'); }
+      }
+      setData(current => reconcilePersonalAssistantState(nativeBridge.project(restored || current)));
+    };
+    const unsubscribe = nativeBridge.subscribe(synchronize);
+    const stop = nativeBridge.start();
+    synchronize();
+    return () => { unsubscribe(); stop(); };
+  }, [nativeHost]);
+  useEffect(() => {
+    if (!nativeHost) return;
+    const host = window as Window & { OopsBack?: () => boolean; OopsResume?: () => void };
+    host.OopsBack = () => {
+      const event = new Event('oops:native-back', { cancelable: true }); window.dispatchEvent(event);
+      if (event.defaultPrevented) return true;
+      if (route.view !== 'home') { back(); return true; }
+      return false;
+    };
+    host.OopsResume = () => nativeBridge.send('hello');
+    return () => { delete host.OopsBack; delete host.OopsResume; };
+  }, [nativeHost, route.view, route.id, route.mode]);
   useEffect(() => {
     setVolatileObjects(data.sessions.filter(isTemporaryDaily).map(s => s.id));
     for (const session of data.sessions.filter(isTemporaryDaily)) {
@@ -104,7 +148,8 @@ export default function Prototype() {
     for (const session of data.sessions) if (session.storage && (session.storage.transcriptState === 'expired' || session.storage.mode === 'daily' && session.status === '已结束') && !clearedSourceDrafts.current.has(session.id)) {
       clearedSourceDrafts.current.add(session.id); clearObjectViewState(session.id);
     }
-    try { if(previewScene===null)localStorage.setItem('oops-front-v2', JSON.stringify(archiveSafeData(data))); }
+    try { if (!nativeHost && previewScene===null) localStorage.setItem('oops-front-v2', JSON.stringify(archiveSafeData(data)));
+      if (nativeHost) nativeBridge.saveLocal(data); }
     catch { /* Keep the session usable when the visitor's browser blocks storage. */ }
   }, [data]);
   useEffect(() => {
@@ -127,7 +172,7 @@ export default function Prototype() {
     return () => { window.removeEventListener('hashchange', onHash); if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, []);
   return <OopsContext.Provider value={{ data, update, route, navigate, back, toast, reset, requestEnd }}>
-    <AppShell message={message} endRequest={endRequest} onCloseEnd={() => setEndRequest(null)} />
+    <AppShell nativeHost={nativeHost} message={message} endRequest={endRequest} onCloseEnd={() => setEndRequest(null)} />
   </OopsContext.Provider>;
 }
 
@@ -187,24 +232,24 @@ function useAppFocusGuard(route: Route) {
   }, [screenRef, route.view, route.id, route.mode, keyboard.visible]);
 }
 
-function AppShell({ message, endRequest, onCloseEnd }: { message: string; endRequest: EndRequest | null; onCloseEnd: () => void }) {
+function AppShell({ message, endRequest, onCloseEnd, nativeHost = false }: { message: string; endRequest: EndRequest | null; onCloseEnd: () => void; nativeHost?: boolean }) {
   const { data, route, navigate, back, update } = useOops();
   const { bottomInset, isKeyboardVisible } = useKeyboardInsets();
   const { device } = useMobileDevice();
   const [attentionTime,setAttentionTime]=useState(Date.now);
   useEffect(()=>{const refresh=()=>setAttentionTime(Date.now());const timer=setInterval(refresh,30000);window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh)}},[]);
   useAppFocusGuard(route);
-  useSessionRecorder();
+  useSessionRecorder(!nativeHost);
   const active = route.view.startsWith('task') ? 'tasks' : route.view.startsWith('session') ? 'sessions' : route.view.startsWith('memory') ? 'memory' : route.view.startsWith('settings') ? 'settings' : 'home';
   const isRoot = roots.includes(route.view);
   const isHome = route.view === 'home';
   const title = route.view === 'settings-listening' ? '聆听设置' : active === 'tasks' ? taskTitle(route) : active === 'sessions' ? sessionTitle(route) : active === 'memory' ? memoryTitle(route) : active === 'settings' ? settingsTitle(route) : homeTitle(route);
   const session = data.sessions.find(s => s.id === data.activeSessionId && !s.archived && sessionVisible(data, s.id) && ['进行中', '暂停'].includes(s.status));
   const hasRecordingControls = !!session && !isKeyboardVisible;
-  const hasPrepareFooter = route.view === 'session-create' && !session;
+  const hasPrepareFooter = !nativeHost && route.view === 'session-create' && !session;
   const hasSessionTabs = ['session-detail', 'session-transcript'].includes(route.view) && !!route.id && sessionVisible(data, route.id);
   const visibleTask = data.tasks.find(t => t.id === route.id && taskVisible(data, t));
-  const hasTaskTabs = route.view === 'task-detail' && !!visibleTask;
+  const hasTaskTabs = route.view === 'task-detail' && !!visibleTask && !(nativeHost && !!data.settings.retention['native-task:' + visibleTask.id]);
   const hasTaskPrimary = hasTaskTabs && !isKeyboardVisible;
   const pendingTasks = homeTaskAttentionQueue(data,attentionTime).length;
   const content = route.view === 'settings-listening' ? <ListeningScreen /> : active === 'tasks' ? <Tasks /> : active === 'sessions' ? <Sessions /> : active === 'memory' ? <MemoryScreens /> : active === 'settings' ? <SettingsScreens /> : route.view === 'assistant' ? <Assistant /> : route.view === 'voice' ? <Voice /> : route.view === 'search' ? <SearchScreen /> : route.view === 'notifications' ? <Notifications /> : route.view === 'welcome' ? <Welcome /> : <Home />;
@@ -214,12 +259,11 @@ function AppShell({ message, endRequest, onCloseEnd }: { message: string; endReq
     </header>
     {hasSessionTabs && <div className="session-fixed-tabs"><SessionTabBar /></div>}
     {hasTaskTabs && <div className="task-fixed-tabs"><TaskTabBar /></div>}
-    <MobileScroll key={`${data.settings.space}:${route.view}:${route.id || ''}`} className="oops-scroll"><main className={`screen-content ${isHome ? 'home-main' : ''}`} aria-label={title}>{content}</main></MobileScroll>
+    <MobileScroll key={`${data.settings.space}:${route.view}:${route.id || ''}`} className="oops-scroll"><main className={`screen-content ${isHome ? 'home-main' : ''}`} aria-label={title}>{nativeHost ? <NativeRouteOutlet fallback={content}/> : content}</main></MobileScroll>
     {!isKeyboardVisible && <nav className="app-nav" aria-label="主导航">{tabs.map(t => <button key={t.view} aria-label={t.title} aria-current={active === t.view ? 'page' : undefined} className={active === t.view ? 'selected' : ''} onClick={() => navigate({ view: t.view })}><Icon name={t.icon} size={25} /><span>{t.title}</span>{t.view === 'tasks' && pendingTasks > 0 && <b>{pendingTasks}</b>}</button>)}</nav>}
     {hasPrepareFooter && <div className="session-prepare-footer" style={{ bottom: bottomInset + (isKeyboardVisible ? 12 : 78) }}><button className="button primary" type="submit" form="oops-session-prepare-form"><Icon name="play" size={20} /><span>{data.sessions.find(s => s.id === route.id)?.status === '已结束' ? '开始后续示例记录' : '开始示例记录'}</span></button></div>}
     {hasTaskTabs && <aside className={`task-fixed-actions ${isKeyboardVisible ? 'keyboard-open' : ''}`} aria-label="任务下一步" style={{ bottom: bottomInset + (hasRecordingControls ? 244 : 78) }}><TaskPrimaryFooter /></aside>}
-    <RecordingControls />
-    <EndRecordingSheet request={endRequest} onClose={onCloseEnd} />
+    {nativeHost ? <NativeRecordingControls/> : <><RecordingControls /><EndRecordingSheet request={endRequest} onClose={onCloseEnd} /></>}
     {message && <div className="app-toast" style={{ bottom: bottomInset + (isKeyboardVisible ? 20 : hasRecordingControls ? hasTaskPrimary ? 338 : 248 : hasTaskPrimary ? 176 : hasPrepareFooter ? 146 : 88) }} role="status">{message}</div>}
   </div>;
 }
