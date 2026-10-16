@@ -2551,5 +2551,51 @@
         "exact": true
       }
     ]
+  },
+  {
+    "key": "pa04-person-memory",
+    "title": "人物记忆 · 正在使用",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory"
+  },
+  {
+    "key": "pa05-person-memory-review",
+    "title": "人物记忆 · 新信息核对",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "tab",
+        "name": "待确认",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "pa06-person-memory-context",
+    "title": "问答 · 指定人物与记忆选择",
+    "group": "首页",
+    "route": {
+      "view": "assistant",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "本次使用的背景 6 项",
+        "exact": true
+      }
+    ]
   }
 ]

@@ -1,6 +1,7 @@
 import type { AppData, Memory, SourceReference, Transcript } from './store';
 import { understandingEvidence } from './memoryPeoplePresentation';
 import { makeSourceReference, PERSONAL_SPACE, provenanceAvailable, sourceAvailable, sourceTurn } from './sourceAccess';
+import { buildPersonContext, reconcilePersonMemories } from './personMemory';
 
 export const PERSONAL_ASSISTANT_STATE_KEY = 'personal-assistant-v1';
 export const PERSONAL_SCENARIOS = ['通用', '会议', '汇报', '写作', '研究'] as const;
@@ -17,8 +18,9 @@ export type PersonalAssistantState = {
   candidates: PersonalHabitCandidate[]; rejectedKeys: string[];
 };
 export type PersonalContextEntry = {
-  id: string; kind: 'identity' | 'preference' | 'background' | 'goal' | 'habit'; text: string;
+  id: string; kind: 'identity' | 'preference' | 'background' | 'goal' | 'habit' | 'person_fact' | 'person_preference' | 'person_background' | 'person_commitment'; text: string;
   sources: SourceReference[]; fingerprint: string;
+  origin?: 'manual' | 'quote';
 };
 export type PersonalContextSnapshot = {
   version: 1; audience: 'personal'; enabled: boolean; scenario: PersonalScenario;
@@ -27,8 +29,9 @@ export type PersonalContextSnapshot = {
   sources: SourceReference[]; fingerprint: string; charCount: number;
   identity?: { name: string; role: string; context: string };
   preferences?: { tone: string; answerLength: string; focus: string; avoid: string; context: string };
+  personId?: string; personLabel?: string;
 };
-type ContextOptions = { scenario?: PersonalScenario; query?: string; space?: string; maxChars?: number; excludeIds?: string[] };
+type ContextOptions = { scenario?: PersonalScenario; query?: string; space?: string; maxChars?: number; excludeIds?: string[]; personId?: string };
 type ReviewOptions = {
   action: 'confirm' | 'correct' | 'reject' | 'disable'; text?: string; scenario?: PersonalScenario;
   expectedFingerprint?: string; now?: Date;
@@ -131,6 +134,7 @@ export function readPersonalAssistantState(data: AppData): PersonalAssistantStat
 
 /** Sanitize persisted private state even while a team scope is being viewed; never erase valid private candidates. */
 export function reconcilePersonalAssistantState(data: AppData): AppData {
+  data = reconcilePersonMemories(data);
   if (!data.settings.retention[PERSONAL_ASSISTANT_STATE_KEY]) return data;
   const privateView = { ...data, settings: { ...data.settings, space: PERSONAL_SPACE,
     toggles: { ...data.settings.toggles, loggedOut: false } } };
@@ -283,10 +287,16 @@ export function buildPersonalContext(data: AppData, options: ContextOptions = {}
     entries: [], sources: [], fingerprint: '', charCount: 0, excludedIds };
   const finish = () => {
     result.sources = uniqueRefs(result.entries.flatMap(entry => entry.sources));
-    result.fingerprint = fingerprint([enabled, scenario, query, maxChars, space, excludedIds, result.entries, result.identity, result.preferences]);
+    const content: unknown[] = [enabled, scenario, query, maxChars, space, excludedIds, result.entries, result.identity, result.preferences];
+    if (result.personId) content.push(result.personId, result.personLabel);
+    result.fingerprint = fingerprint(content);
     return result;
   };
   if (!enabled) return finish();
+  if (options.personId && options.personId.length <= 120) {
+    const person = buildPersonContext(data, options.personId, scenario, excludedIds);
+    result.personId = options.personId; result.personLabel = person.personLabel;
+  }
   const preferenceRef = makeSourceReference(data, { kind: 'profile', id: 'my-profile', profileScope: 'preferences' });
   const append = (id: string, kind: PersonalContextEntry['kind'], text: string, refs: SourceReference[], atomic = false) => {
     if (excludedIds.includes(id) || atomic && (text.length > MAX_ENTRY || text.length > maxChars - result.charCount)) return false;
@@ -306,6 +316,9 @@ export function buildPersonalContext(data: AppData, options: ContextOptions = {}
   if (scopeMatches(data, 'preferences', scenario, preferences.context, query)) {
     const text = [preferences.tone && `回答方式：${preferences.tone}`, preferences.answerLength && `回答长度：${preferences.answerLength}`, preferences.focus && `关注：${preferences.focus}`, preferences.avoid && `避免：${preferences.avoid}`, preferences.context && `适用场景：${preferences.context}`].filter(Boolean).join('；');
     if (append('my-profile:preferences', 'preference', text, [preferenceRef], true)) result.preferences = preferences;
+  }
+  if (result.personId) for (const entry of buildPersonContext(data, result.personId, scenario, excludedIds).entries) {
+    if (append(entry.id, entry.kind, entry.text, entry.sources)) result.entries[result.entries.length - 1].origin = entry.origin;
   }
   const evidence = understandingEvidence(data);
   for (const [kind, memories] of [['background', evidence.backgrounds], ['goal', evidence.goals]] as const) {
@@ -331,5 +344,5 @@ export function personalContextSources(context: PersonalContextSnapshot): Source
 
 export function personalContextCurrent(data: AppData, context: PersonalContextSnapshot): boolean {
   if (context.version !== 1 || context.audience !== 'personal' || context.enabled && !context.sources.every(ref => refValid(data, ref))) return false;
-  return buildPersonalContext(data, { scenario: context.scenario, query: context.query, maxChars: context.maxChars, space: context.space, excludeIds: context.excludedIds }).fingerprint === context.fingerprint;
+  return buildPersonalContext(data, { scenario: context.scenario, query: context.query, maxChars: context.maxChars, space: context.space, excludeIds: context.excludedIds, personId: context.personId }).fingerprint === context.fingerprint;
 }

@@ -1,5 +1,5 @@
 {
-  "revision": "personal-assistant-20261016",
+  "revision": "personal-people-memory-20261016",
   "reviewedAt": "2026-10-16",
   "scope": "个性化助理：确认的场景背景、可拒绝习惯候选、本次背景选择及个人账号同步接口；React保持本地示例",
   "browserVerified": true,
@@ -8,7 +8,8 @@
     "assistant",
     "task-plan",
     "memory",
-    "settings"
+    "settings",
+    "memory-person"
   ],
   "screenshotRefreshPending": false,
   "fixedIssueGroups": 10,

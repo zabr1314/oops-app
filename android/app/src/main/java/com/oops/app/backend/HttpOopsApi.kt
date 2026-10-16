@@ -75,7 +75,7 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
         val followup = request.optString("followupId", "manual")
         if (action.startsWith("calendar.")) require(followup.matches(Regex("[A-Za-z0-9_-]{1,100}")))
         val body = if (action.startsWith("personal.context.")) JSONObject().apply {
-            val fields = if (action == "personal.context.snapshot") setOf("memory_ids", "scenario")
+            val fields = if (action == "personal.context.snapshot") setOf("memory_ids", "scenario", "person_id")
                 else if (action == "personal.context.delete") setOf("op_id", "expected_revision", "memory_id")
                 else setOf("op_id", "expected_revision", "confirmed", "value", "memory_id", "source")
             for (key in fields) if (request.has(key)) put(key, request.get(key))
@@ -345,6 +345,15 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
                     require(row.optString("status") in setOf("current", "deleted", "needs_review", "source_unavailable")) { "个人上下文状态无效" }
                     if (row.optString("status") == "current") {
                         require(row.optBoolean("confirmed") && row.opt("value") is JSONObject) { "个人上下文尚未确认" }
+                        if (kind == "memory") {
+                            val value = row.getJSONObject("value")
+                            if (value.optString("category") == "person") {
+                                require(value.optString("person_id").matches(Regex("[A-Za-z0-9_-]{1,100}")) &&
+                                    value.opt("person_name") is String && value.getString("person_name").length <= 80 &&
+                                    value.optString("person_kind") in setOf("fact", "preference", "background", "commitment") &&
+                                    row.optJSONObject("source")?.optString("kind") == "manual") { "人物记忆缺少明确档案或本人记录来源" }
+                            } else require(listOf("person_id", "person_name", "person_kind").none { value.has(it) }) { "普通记忆不得混入人物关联" }
+                        }
                     } else require(row.isNull("value")) { "失效个人上下文不得返回旧正文" }
                 }
                 if (action == "personal.context.read") {
@@ -357,7 +366,11 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
                         require(row.optString("id").matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "个人记忆编号无效" }
                         item(row, "memory", row.getString("id"))
                     }
-                } else if (action != "personal.context.snapshot") {
+                } else if (action == "personal.context.snapshot") {
+                    field(result, "scenario", request.optString("scenario", "通用"), true)
+                    if (request.has("person_id")) field(result, "person_id", request.getString("person_id"), true)
+                    else require(result.isNull("person_id")) { "未选择人物时不得使用人物记忆" }
+                } else {
                     val kind = when (action) { "personal.context.profile" -> "profile"; "personal.context.preferences" -> "preferences"; else -> "memory" }
                     val row = result.optJSONObject("item") ?: throw IllegalArgumentException("个人修改未返回当前版本")
                     item(row, kind, if (kind == "memory") request.getString("memory_id") else "current")

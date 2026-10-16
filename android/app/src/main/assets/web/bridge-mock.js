@@ -22,6 +22,18 @@
     const failure = (code,message,status=409) => emit('error',{scope:'personalContext',operation:type,requestId:p.requestId,code,message,httpStatus:status});
     if (feishuStatus !== 'connected') { failure('FEISHU_NOT_CONNECTED','先连接本人的示例账号',403);return true; }
     if (type === 'personal.context.read') { reply(personalContext);return true; }
+    if (type === 'personal.context.snapshot') {
+      const scenario=p.scenario || '通用',selected=personalContext.memories.filter(item=>item.status==='current'&&(!p.memory_ids||p.memory_ids.includes(item.id))),excluded=[];
+      const memories=[];
+      for(const item of selected){const value=item.value;
+        if(value.category==='person'&&!p.person_id){excluded.push({id:item.id,status:'person_selection_required'});continue;}
+        if(value.category==='person'&&value.person_id!==p.person_id){if(p.memory_ids){failure('PERSONAL_CONTEXT_PERSON_MISMATCH','所选记忆属于另一个人');return true;}continue;}
+        if(value.scenarios&&!value.scenarios.includes('通用')&&!value.scenarios.includes(scenario)){excluded.push({id:item.id,status:'scenario'});continue;}
+        memories.push(item);
+      }
+      const enabled=personalContext.preferences?.value.enabled===true;
+      reply({version:1,enabled,context_revision:personalContext.context_revision,person_id:p.person_id || null,scenario,entry_refs:[],excluded,context:{profile:enabled?personalContext.profile?.value || null:null,preferences:enabled?personalContext.preferences?.value || null:null,memories:enabled?memories.map(item=>({id:item.id,...item.value})):[]},snapshot_id:'isolated-mock-snapshot'});return true;
+    }
     const action=type.split('.').at(-1),kind=['memory','delete'].includes(action)?'memory':action,id=kind==='memory'?p.memory_id:'current';
     if (!['profile','preferences','memory'].includes(kind)) {failure('PERSONAL_CONTEXT_INVALID','不支持的示例操作',400);return true;}
     const row=kind==='memory'?personalContext.memories.find(x=>x.id===id):personalContext[kind];
@@ -30,6 +42,11 @@
     if (!op) {
       if (p.expected_revision!==(row?.revision || 0)) {failure('PERSONAL_CONTEXT_REVISION_CONFLICT','其他设备已更新，请刷新后核对');return true;}
       if (action!=='delete' && p.confirmed!==true) {failure('PERSONAL_CONTEXT_CONFIRMATION_REQUIRED','请明确确认本人内容',400);return true;}
+      if(kind==='memory'&&action!=='delete'){
+        const value=p.value || {},person=value.category==='person';
+        if(person&&(!/^[A-Za-z0-9_-]{1,100}$/.test(value.person_id || '')||!['fact','preference','background','commitment'].includes(value.person_kind)||p.source?.kind!=='manual')){failure('PERSONAL_CONTEXT_INVALID','请明确人物档案与本人记录来源',400);return true;}
+        if(!person&&['person_id','person_name','person_kind'].some(key=>Object.hasOwn(value,key))){failure('PERSONAL_CONTEXT_INVALID','普通记忆不带人物信息',400);return true;}
+      }
       const item={kind,id,revision:p.expected_revision+1,updated_at:new Date().toISOString(),status:action==='delete'?'deleted':'current',confirmed:action!=='delete',value:action==='delete'?null:p.value,source:action==='delete'?null:{kind:'manual'}};
       if (kind==='memory') personalContext.memories=[...personalContext.memories.filter(x=>x.id!==id),item];else personalContext[kind]=item;
       personalContext.context_revision++;personalOps.set(p.op_id,{frozen,revision:item.revision});
@@ -461,6 +478,8 @@
         if (r) emit('action.result', r);else emit('action.result', { draftId: p.draftId, opId: draftOps.get(p.draftId), status: 'pending', polling: false, mock: true, message: '模拟操作仍在处理，请继续查询' });break;
       }
       case 'voiceprint.list':
+        state.voiceprint = {phase:'idle',message:'隔离示例人物目录，不代表已录声纹或确认真实身份',catalog:{revision:'mock-person-catalog-v1',people:[{id:'demo-person-001',name:'小林（示例）',registered:false},{id:'demo-person-002',name:'小林（同名示例）',registered:false}]}};
+        emit('state',{...state});break;
       case 'voiceprint.record':
       case 'voiceprint.save':
       case 'voiceprint.delete':

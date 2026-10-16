@@ -48,3 +48,23 @@ test('preference scenarios and changed boundaries are part of answer provenance'
  assert.equal(model.buildLocalAnswer('项目预算是多少？',data,true,{scenario:'汇报'}).sources.some(ref=>ref.kind==='profile'),true);
  assert.equal((awaitableProvenance(data,answer.sources)),false);
 });
+
+
+test('explicit person selection uses only their confirmed memories and keeps namesakes separate', async()=>{
+ const {savePersonMemory,reviewPersonMemory,deletePersonMemory}=await import('../src/personMemory.ts');
+ let data=initialData();
+ data.people.push({id:'same-name',name:'王宁',role:'另一组织',company:'另一组织',note:'',voice:false,shared:false});
+ const save=(personId,text)=>{const saved=savePersonMemory(data,{personId,kind:'commitment',text});assert.equal(saved.error,undefined);data=reviewPersonMemory(saved.data,saved.id,'confirm').data;return saved.id;};
+ const ownId=save('p1','我答应周四发送预算明细。');save('same-name','另一位人物的秘密暗号。');
+ const answer=model.buildLocalAnswer('帮我准备沟通',data,true,{personId:'p1'});
+ const taskAnswer=model.buildLocalAnswer('今天需要跟进哪些待办？',data,true,{personId:'p1'});
+ assert.ok(taskAnswer.sources.some(ref=>ref.kind==='task'));
+ assert.match(answer.text,/周四发送预算/);assert.doesNotMatch(answer.text,/秘密暗号/);
+ assert.doesNotMatch(model.buildLocalAnswer('帮我准备沟通',data,true).text,/周四发送预算/);
+ assert.doesNotMatch(model.buildLocalAnswer('帮我准备沟通',data,true,{personId:'p1',excludeIds:[ownId]}).text,/周四发送预算/);
+ assert.equal(awaitableProvenance(data,answer.sources),true);
+ const removed=deletePersonMemory(data,ownId).data;
+ assert.equal(awaitableProvenance(removed,answer.sources),false);
+ data.settings.space='Oops 产品团队';
+ assert.doesNotMatch(model.buildLocalAnswer('帮我准备沟通',data,true,{personId:'p1'}).text,/周四发送预算/);
+});

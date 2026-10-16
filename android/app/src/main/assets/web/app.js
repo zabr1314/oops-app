@@ -1309,7 +1309,7 @@
 
   function memoryHtml() {
     const tab = S.memoryTab;
-    const seg = `<button class="button secondary" data-act="personal-open">我的个人记忆与助理</button><div class="segmented" role="tablist">${[['people', '人物'], ['projects', '项目']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
+    const seg = `<button class="button secondary" data-act="personal-open" data-tab="memory">个人助理与记忆</button><div class="segmented" role="tablist">${[['people', '人物'], ['projects', '项目']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
     if (tab === 'people') {
       const v = S.state.voiceprint || {};
       const people = v.catalog?.people || [];
@@ -1317,8 +1317,9 @@
         <button class="card clickable ms-pending" data-act="vp-open"><span class="badge purple">声音身份</span><h3>声纹录入与匹配测试</h3><p class="meta">由本人朗读 30 秒；会议里据此判断谁在说话。</p></button>
         ${sectionTitle('团队成员')}
         ${people.length ? people.map((p) => `<section class="card"><div class="ms-person-head"><span class="avatar">${esc(initial(p.name))}</span><div><h3>${esc(p.name)}</h3>
-          <p class="meta">${p.registered ? `已录入声纹 · ${esc(SOURCE_TEXT[p.source] || p.source || '')} · ${p.seconds} 秒` : '还没有录入声纹'}</p></div></div></section>`).join('')
-          : `<p class="meta">${v.phase === 'loading' ? '正在读取…' : '还没有读到成员名单。打开声纹录入可以刷新。'}</p>`}
+          <p class="meta">${p.registered ? `已录入声纹 · ${esc(SOURCE_TEXT[p.source] || p.source || '')} · ${p.seconds} 秒` : '还没有录入声纹'}</p></div></div><button class="button secondary" data-act="person-memory-open" data-person-id="${/^[A-Za-z0-9_-]{1,100}$/.test(p.id || '')?esc(p.id):''}" data-person-label="${esc(p.name)}">关于此人的私人记忆</button></section>`).join('')
+          : `<p class="meta">${v.phase === 'loading' ? '正在读取…' : '还没有读到成员名单。仍可新建手工人物档案并记录私人记忆。'}</p>`}
+        <button class="button secondary" data-act="person-memory-open">手工人物档案与私人记忆</button>
       </div>`;
     }
     const items = S.projects.items;
@@ -2748,7 +2749,13 @@
     'project-retry': () => { loadProject(); render(); },
     'meeting-retry': () => openMeeting(S.sheet.sessionId),
     'feishu-open': openFeishu,
-    'personal-open': () => { openSheet({kind:'personalAssistant'});personalAssistant?.open();feishuRequest('feishu.status'); },
+    'personal-open': el => { openSheet({kind:'personalAssistant'});personalAssistant?.open({memory:el?.dataset.tab==='memory'});feishuRequest('feishu.status'); },
+    'person-memory-open': el => {
+      const people=S.state.voiceprint?.catalog?.people || [];
+      const person=el.dataset.personId?people.find(person=>person.id===el.dataset.personId):el.dataset.personLabel?{name:el.dataset.personLabel}:undefined;
+      if(el.dataset.personId&&!person)return toast('人物目录已变化，请刷新后再选择',true);
+      openSheet({kind:'personalAssistant'});personalAssistant?.open({memory:true,person,people});feishuRequest('feishu.status');
+    },
     'personal-context': el => personalAssistant?.action(el.dataset.paAction,el.dataset.id),
     'feishu-connect': () => { if (!S.feishu.busy) { feishuRequest('feishu.connect'); S.feishu.status = 'authorizing'; renderSheet(); } },
     'feishu-refresh': () => { feishuRequest('feishu.status'); renderSheet(); },

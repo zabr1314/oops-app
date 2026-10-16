@@ -2836,5 +2836,63 @@
     "scene": "personal-assistant",
     "shot": "f26-personal-context",
     "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。"
+  },
+  {
+    "key": "pa04-person-memory",
+    "title": "人物记忆 · 正在使用",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory",
+    "id": "PA04",
+    "module": "记忆",
+    "shot": "pa04-person-memory",
+    "note": "私人确认的人物信息；按稳定人物档案选择，网页隔离示例，安卓手工记忆同步需更新服务与安装包。"
+  },
+  {
+    "key": "pa05-person-memory-review",
+    "title": "人物记忆 · 新信息核对",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "tab",
+        "name": "待确认",
+        "exact": true
+      }
+    ],
+    "id": "PA05",
+    "module": "记忆",
+    "shot": "pa05-person-memory-review",
+    "note": "私人确认的人物信息；按稳定人物档案选择，网页隔离示例，安卓手工记忆同步需更新服务与安装包。"
+  },
+  {
+    "key": "pa06-person-memory-context",
+    "title": "问答 · 指定人物与记忆选择",
+    "group": "首页",
+    "route": {
+      "view": "assistant",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "本次使用的背景 6 项",
+        "exact": true
+      }
+    ],
+    "id": "PA06",
+    "module": "首页",
+    "shot": "pa06-person-memory-context",
+    "note": "私人确认的人物信息；按稳定人物档案选择，网页隔离示例，安卓手工记忆同步需更新服务与安装包。"
   }
 ]

@@ -24,7 +24,7 @@ assert.ok(declarations.every(Boolean), 'use the real status and activity helpers
 const factorySource = stripTypeScriptTypes(`function factory(beginGeneration) {
 ${declarations.join('\n')}
 return function configure(current, view, startNow = true, token = 'ui-personal-request') {
-  const { task: t, mode, limit, includeSource, ids, personalExcluded } = view;
+  const { task: t, mode, limit, includeSource, ids, personalExcluded, personId } = view;
   const refs = t.materialRefs || [], selected = refs.filter(material => ids.includes(material.id));
   ${source.slice(configuredStart, configuredEnd)}
   return configured(current, startNow, token);
@@ -44,7 +44,7 @@ function fixture(space = '我的空间') {
       retention: { answerLength: '简短', focus: '首版验证' } },
   };
 }
-const view = data => ({ task: data.tasks[0], mode: '文档', limit: '40', includeSource: false, ids: [], personalExcluded: [] });
+const view = data => ({ task: data.tasks[0], mode: '文档', limit: '40', includeSource: false, ids: [], personalExcluded: [], personId: '' });
 
 test('the actual setup submission preserves a team binding stored only in scope.space and never adds private context', () => {
   const data = fixture('Oops 产品团队'), original = structuredClone(data);

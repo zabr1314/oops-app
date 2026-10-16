@@ -463,3 +463,35 @@ Android：H5 发 `items.review`（`sessionId,itemId,fingerprint,action,…`）�
 ## 个性化个人上下文（2026-10-16）
 
 本人档案、偏好、已确认记忆、场景和可信快照使用 `/v1/personal/context` 系列接口，要求已有个人绑定。完整字段、版本冲突、幂等与发布依赖见 [个性化助理实现记录](personal-assistant-20261016.md)。
+
+### 关于他人的私人记忆
+
+沿用 `POST /v1/personal/context/memories`，所有者仍为当前已验证的本人账号；这些记录不会写入对方账号，也不授予声音识别、共享或发送权限。请求继续要求 `op_id`、`expected_revision`、`confirmed:true`、`memory_id`、`value` 和 `source`。人物示例：
+
+```json
+{
+  "op_id": "save-person-memory-uuid",
+  "expected_revision": 0,
+  "confirmed": true,
+  "memory_id": "memory-uuid",
+  "value": {
+    "category": "person",
+    "person_id": "person-stable-uuid",
+    "person_name": "同事甲",
+    "person_kind": "preference",
+    "title": "讨论前先看摘要",
+    "body": "我手工记下：下次讨论前先给他一页摘要。",
+    "scenarios": ["会议"]
+  },
+  "source": {"kind": "manual"}
+}
+```
+
+- `category:"person"` 必须提供稳定、明确的 `person_id`，格式为 `[A-Za-z0-9_-]{1,100}`。不要从姓名生成编号；不同编号即使同名也不会合并。`person_name` 仅为显示标签（可空，最长80字），不是身份凭据。`person_kind` 必填，只接受 `fact`、`preference`、`background`、`commitment`。
+- 其他记忆类别、档案和偏好不接受 `person_id/person_name/person_kind`，返回400 `PERSONAL_CONTEXT_INVALID`。改名、改文、换人物仍须按原记忆版本核对保存；旧快照不再有效。
+- 本轮人物记录仅接受 `source.kind:"manual"`，表示本人手工核对的记录，不能宣称是对方原话。现有后端会议仅保存说话人姓名与人工姓名核对，没有可证明所选稳定人物编号的服务端关系；人物记忆若提交会议来源，返回409 `PERSON_IDENTITY_UNVERIFIED`，不退回姓名匹配、不伪造引用。普通会议来源记忆沿用既有来源保护。
+- GET返回的字段、本人账号隔离、同账号双设备读取、版本冲突、幂等重放与删除标记保持不变。删除用既有 `/memories/delete`；重放旧保存操作只返回当前删除状态，不恢复正文。
+
+`POST /v1/personal/context/snapshot` 新增可选 `person_id`，例如 `{"scenario":"会议","person_id":"person-stable-uuid","memory_ids":["memory-uuid"]}`。未明确选择人物时排除全部人物记忆，**即使 `memory_ids` 指定了它**，`excluded` 标记 `person_selection_required`。选择人物后仅可纳入该编号的人物记忆；默认筛选其他人物时标记 `person_mismatch`，显式 `memory_ids` 包含另一人则返回409 `PERSONAL_CONTEXT_PERSON_MISMATCH`。本人档案和本人偏好继续按其适用场景处理。
+
+快照回传所选 `person_id`（未选为 `null`），该字段和服务端原字段一同进入 `snapshot_id`。`validate_snapshot` 逐项复验人物编号、场景、版本与来源，并从服务端重建正文/显示名；改客户端正文无效，重算一致哈希也不能绕过跨人物限制。此前不含人物选择的旧准备快照须重新构建和核对。这仍是有界上下文接口，不代表真实 Agent 新任务提交已上线。

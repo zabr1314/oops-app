@@ -297,6 +297,7 @@ export function intelligenceSourceRoute(data: AppData, sessionId: string, value:
   if (ref.kind === 'memory') return { view: 'memory-detail', id: ref.id };
   if (ref.kind === 'project') return { view: 'memory-project', id: ref.id };
   if (ref.kind === 'task') return { view: 'task-detail', id: ref.id };
+  if (ref.kind === 'person_memory') return { view: 'memory-person', id: ref.personId };
   return { view: 'settings-preferences' };
 }
 

@@ -1,5 +1,6 @@
 import type { AppData, AssistantMessage, Memory, SourcePointer, SourceReference, Task, TaskArtifact, TaskMaterial, Transcript } from './store';
 import { taskAttentionReason } from './taskAttention';
+import { readPersonMemories, personMemoryCurrent } from './personMemory';
 
 export const PERSONAL_SPACE = '我的空间';
 const TEAM_SPACE = 'Oops 产品团队';
@@ -69,7 +70,9 @@ export function selectedTaskMaterials(task: Task): TaskMaterial[] {
 export function generationConfigurationFingerprint(task: Task): string {
   const scope = task.scope;
   const mode = task.outputMode === '完整框架与PPT' ? '文档与PPT' : task.outputMode === '仅提纲' ? '文档' : task.outputMode;
-  return fingerprint([task.title, task.description, task.owner, task.ownerPersonId, task.requester, task.requesterPersonId, task.due, task.version, task.workKind, task.criteria, mode, task.sourceSession, task.sourceId, task.sourceTime, scope ? [scope.sources, scope.destination, scope.space, scope.materialIds === undefined ? null : [...scope.materialIds].sort(), scope.includeSource !== false, [...(scope.personalContextExcludedIds || [])].sort()] : null]);
+  const content: unknown[] = [task.title, task.description, task.owner, task.ownerPersonId, task.requester, task.requesterPersonId, task.due, task.version, task.workKind, task.criteria, mode, task.sourceSession, task.sourceId, task.sourceTime, scope ? [scope.sources, scope.destination, scope.space, scope.materialIds === undefined ? null : [...scope.materialIds].sort(), scope.includeSource !== false, [...(scope.personalContextExcludedIds || [])].sort()] : null];
+  if (scope?.personId) content.push(['personId', scope.personId]);
+  return fingerprint(content);
 }
 
 export function generationMaterialFingerprint(materials: TaskMaterial[]): string {
@@ -77,6 +80,10 @@ export function generationMaterialFingerprint(materials: TaskMaterial[]): string
 }
 
 function referenceFingerprint(data: AppData, ref: SourceReference): string | undefined {
+  if (ref.kind === 'person_memory') {
+    const item = readPersonMemories(data).find(value => value.id === ref.id && value.personId === ref.personId);
+    return item ? fingerprint([item.fingerprint, item.personId, data.people.find(person => person.id === item.personId)?.name]) : undefined;
+  }
   if (ref.kind === 'profile') {
     if (ref.id !== 'my-profile') return undefined;
     const retention = data.settings.retention;
@@ -106,6 +113,10 @@ export function makeSourceReference(data: AppData, ref: SourceReference): Source
 function referenceAvailable(data: AppData, ref: SourceReference, seen: Set<string>): boolean {
   const personal = data.settings.space === PERSONAL_SPACE;
   if (ref.fingerprint !== undefined && ref.fingerprint !== referenceFingerprint(data, ref)) return false;
+  if (ref.kind === 'person_memory') {
+    const item = personal ? readPersonMemories(data).find(value => value.id === ref.id && value.personId === ref.personId) : undefined;
+    return !!item && item.status === 'confirmed' && personMemoryCurrent(data, item);
+  }
   if (ref.kind === 'profile') return ref.id === 'my-profile' && (personal || ref.profileScope !== 'preferences' && data.settings.toggles.publicIdentity === true);
   if (ref.kind === 'session') return sourceAvailable(data, { sourceSession: ref.id, ...(ref.sourceId !== undefined ? { sourceId: ref.sourceId } : {}), sourceTime: ref.sourceTime }, { publicOnly: !personal, requireShared: !personal });
   if (ref.kind === 'task') {

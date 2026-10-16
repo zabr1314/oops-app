@@ -271,12 +271,86 @@ class PersonalContextTest(unittest.TestCase):
         forged = copy.deepcopy(report)
         forged.update(scenario='会议', context=dict(profile=None, preferences=None, memories=[]))
         forged['snapshot_id'] = _hash(dict(subject=self.store._subject(self.identity('phone-a')),
-            identity_revision=forged['identity_revision'], enabled=True, scenario='会议',
+            identity_revision=forged['identity_revision'], enabled=True, scenario='会议', person_id=None,
             entry_refs=forged['entry_refs'], context=forged['context']))
         self.assert_code('PERSONAL_CONTEXT_SNAPSHOT_CHANGED', lambda: self.store.validate_snapshot('phone-a', forged))
         self.assert_code('PERSONAL_CONTEXT_SCENARIO_MISMATCH', lambda: self.store.snapshot('phone-a', ['report-memory'], scenario='写作'))
         self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.enable(1, op='bad-scope', scenarios=['任意']))
         self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.store.snapshot('phone-a', scenario='未知'))
+
+    def person_memory(self, identifier='person-memory-a', person_id='person-a', name='同名', kind='preference', revision=0, operation='person-save-a'):
+        return self.store.save_memory('phone-a', self.body(dict(title='沟通偏好', body='讨论前先看一页摘要', category='person',
+            person_id=person_id, person_name=name, person_kind=kind), revision, operation,
+            memory_id=identifier, source={'kind': 'manual'}))
+
+    def test_person_memory_requires_stable_identity_and_rejects_metadata_on_other_categories(self):
+        base = dict(title='关于他人的记忆', body='本人手工核对', category='person', person_id='person-a', person_kind='fact')
+        for missing in ('person_id', 'person_kind'):
+            value = dict(base); value.pop(missing)
+            self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.store.save_memory('phone-a', self.body(value,
+                memory_id='invalid-person', source={'kind': 'manual'})))
+        for category in ('background', 'goal', 'fact', 'preference'):
+            self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.store.save_memory('phone-a', self.body(dict(base, category=category),
+                memory_id='invalid-person', source={'kind': 'manual'})))
+        self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.person_memory(person_id='姓名/不是稳定ID'))
+        self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.person_memory(kind='personality'))
+        self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.store.save_profile('phone-a', self.body(dict(name='我', person_id='person-a'))))
+
+    def test_person_names_are_labels_and_same_name_never_merges_stable_ids(self):
+        first = self.person_memory()
+        second = self.person_memory('person-memory-b', 'person-b', operation='person-save-b')
+        self.assertEqual('manual', first['item']['source']['kind'])
+        self.assertEqual(first['item']['value']['person_name'], second['item']['value']['person_name'])
+        values = self.store.read('phone-a2')['memories']
+        self.assertEqual(['person-a', 'person-b'], [item['value']['person_id'] for item in values])
+        self.assertEqual([], self.store.read('phone-b')['memories'])
+
+    def test_person_memory_rejects_meeting_proof_without_trusted_stable_speaker_identity(self):
+        value = dict(title='引用', body='不能冒充本人原话', category='person', person_id='person-a', person_name='甲', person_kind='commitment')
+        self.assert_code('PERSON_IDENTITY_UNVERIFIED', lambda: self.store.save_memory('phone-a', self.body(value,
+            memory_id='person-meeting', source=dict(kind='meeting', session_id='meeting-1', utterance_ids=['u1']))))
+        self.assertEqual([], self.store.read('phone-a')['memories'])
+
+    def test_person_selection_is_explicit_even_when_memory_ids_are_selected(self):
+        self.enable()
+        self.person_memory()
+        self.person_memory('person-memory-b', 'person-b', operation='person-save-b')
+        self.assertEqual([], self.store.snapshot('phone-a')['context']['memories'])
+        absent = self.store.snapshot('phone-a', ['person-memory-a'])
+        self.assertIsNone(absent['person_id'])
+        self.assertEqual([], absent['context']['memories'])
+        self.assertEqual('person_selection_required', absent['excluded'][0]['status'])
+        chosen = self.store.snapshot('phone-a', person_id='person-a')
+        self.assertEqual(['person-a'], [value['person_id'] for value in chosen['context']['memories']])
+        self.assertEqual('person-a', chosen['person_id'])
+        self.assert_code('PERSONAL_CONTEXT_PERSON_MISMATCH', lambda: self.store.snapshot('phone-a', ['person-memory-a'], person_id='person-b'))
+        self.assert_code('PERSONAL_CONTEXT_INVALID', lambda: self.store.snapshot('phone-a', person_id=''))
+
+    def test_person_snapshot_uses_server_values_and_rejects_coherently_forged_other_person_selection(self):
+        self.enable()
+        self.person_memory()
+        snapshot = self.store.snapshot('phone-a', person_id='person-a')
+        fake_text = copy.deepcopy(snapshot)
+        fake_text['context']['memories'][0].update(body='伪造他人承诺', person_name='另一个名字')
+        checked = self.store.validate_snapshot('phone-a', fake_text)
+        self.assertEqual('讨论前先看一页摘要', checked['context']['memories'][0]['body'])
+        self.assertEqual('同名', checked['context']['memories'][0]['person_name'])
+        forged = copy.deepcopy(snapshot)
+        forged.update(person_id='person-b', context=dict(snapshot['context'], memories=[]))
+        forged['snapshot_id'] = _hash(dict(subject=self.store._subject(self.identity('phone-a')),
+            identity_revision=forged['identity_revision'], enabled=True, scenario=forged['scenario'], person_id='person-b',
+            entry_refs=forged['entry_refs'], context=forged['context']))
+        self.assert_code('PERSONAL_CONTEXT_SNAPSHOT_CHANGED', lambda: self.store.validate_snapshot('phone-a', forged))
+        self.person_memory(revision=1, operation='person-label-correction', name='已纠正名称')
+        self.assert_code('PERSONAL_CONTEXT_SNAPSHOT_CHANGED', lambda: self.store.validate_snapshot('phone-a', snapshot))
+
+    def test_person_memory_deletion_preserves_revision_and_old_save_cannot_restore_it(self):
+        self.person_memory()
+        self.store.delete_memory('phone-a2', dict(op_id='person-delete', expected_revision=1, memory_id='person-memory-a'))
+        replay = self.person_memory()
+        self.assertEqual('deleted', replay['item']['status'])
+        self.assertIsNone(replay['item']['value'])
+        self.assertEqual(2, replay['item']['revision'])
 
 
 if __name__ == '__main__':

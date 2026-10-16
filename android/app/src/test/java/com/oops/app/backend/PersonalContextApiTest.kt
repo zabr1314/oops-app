@@ -68,4 +68,33 @@ class PersonalContextApiTest {
         invalid.remove("identity_revision")
         assertTrue(runCatching { HttpOopsApi.validatePersonalReply("personal.context.read", JSONObject(), invalid) }.isFailure)
     }
+
+    @Test fun personMemoryRequiresAStableIdentifierAndManualSourceInsteadOfANameOnlyOrUnverifiedQuote() {
+        val value = JSONObject().put("title", "沟通偏好").put("body", "本人记录：提前发议程")
+            .put("category", "person").put("person_id", "person-a").put("person_name", "同名")
+            .put("person_kind", "preference").put("scenarios", JSONArray().put("会议"))
+        val memory = JSONObject().put("kind", "memory").put("id", "memory-a").put("revision", 1)
+            .put("status", "current").put("confirmed", true).put("value", value)
+            .put("source", JSONObject().put("kind", "manual"))
+        val reply = JSONObject().put("context_revision", 1).put("identity_revision", 2)
+            .put("profile", JSONObject.NULL).put("preferences", JSONObject.NULL).put("memories", JSONArray().put(memory))
+        assertEquals("person-a", HttpOopsApi.validatePersonalReply("personal.context.read", JSONObject(), reply)
+            .getJSONArray("memories").getJSONObject(0).getJSONObject("value").getString("person_id"))
+        memory.getJSONObject("source").put("kind", "meeting")
+        assertTrue(runCatching { HttpOopsApi.validatePersonalReply("personal.context.read", JSONObject(), reply) }.isFailure)
+        memory.getJSONObject("source").put("kind", "manual");value.remove("person_id")
+        assertTrue(runCatching { HttpOopsApi.validatePersonalReply("personal.context.read", JSONObject(), reply) }.isFailure)
+        value.put("person_id", "person-a").put("category", "fact")
+        assertTrue(runCatching { HttpOopsApi.validatePersonalReply("personal.context.read", JSONObject(), reply) }.isFailure)
+    }
+
+    @Test fun aSnapshotCannotRelabelAnotherPersonsContextAsTheExplicitlySelectedPerson() {
+        val request = JSONObject().put("person_id", "person-a").put("scenario", "会议")
+        val reply = JSONObject().put("context_revision", 1).put("identity_revision", 2)
+            .put("person_id", "person-b").put("scenario", "会议")
+        assertTrue(runCatching { HttpOopsApi.validatePersonalReply("personal.context.snapshot", request, reply) }.isFailure)
+        reply.put("person_id", "person-a")
+        assertEquals("person-a", HttpOopsApi.validatePersonalReply("personal.context.snapshot", request, reply).getString("person_id"))
+        assertTrue(runCatching { HttpOopsApi.validatePersonalReply("personal.context.snapshot", JSONObject().put("scenario", "会议"), reply) }.isFailure)
+    }
 }

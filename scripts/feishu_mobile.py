@@ -291,9 +291,9 @@ class MobileFeishu:
                               '/memories/delete': self.personal_context.delete_memory}[route]
                     result = action(principal, body)
                 elif route == '/snapshot' and method == 'POST':
-                    if set(body) - {'memory_ids', 'scenario'}:
+                    if set(body) - {'memory_ids', 'scenario', 'person_id'}:
                         raise MobileError(400, 'BAD_REQUEST', '上下文快照只接受所选私人记忆编号')
-                    result = self.personal_context.snapshot(principal, body.get('memory_ids'), body.get('scenario', '通用'))
+                    result = self.personal_context.snapshot(principal, body.get('memory_ids'), body.get('scenario', '通用'), body.get('person_id'))
                 else:
                     raise MobileError(405, 'METHOD_NOT_ALLOWED', '个人上下文请求方式或路径无效')
                 if self.context_identity(principal) != identity or self.accounts.principal_readonly_snapshot(token) != principal:

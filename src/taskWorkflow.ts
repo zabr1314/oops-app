@@ -47,6 +47,7 @@ export function taskPersonalContext(data: AppData, task: Task, scenario?: Person
     scenario: scenario || (mode === '回复草稿' ? '写作' : mode === '资料整理' ? '研究' : mode === '文档' || mode === '文档与PPT' ? '汇报' : '通用'),
     query: [task.title, task.description].filter(Boolean).join('\n'),
     excludeIds: task.scope?.personalContextExcludedIds,
+    personId: task.scope?.personId,
   });
 }
 export function outputCost(mode: TaskOutputMode | string): number {

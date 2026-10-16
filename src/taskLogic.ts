@@ -32,6 +32,14 @@ function personalDraftBody(task: Task, body: string[], context?: PersonalContext
   const background = context.entries.filter(entry => ['background', 'goal', 'habit'].includes(entry.kind));
   if (context.identity?.role) paragraphs.push('本次工作视角\n' + context.identity.role + (context.identity.context ? ' · ' + context.identity.context : ''));
   if (background.length) paragraphs.push('个人背景与目标\n' + background.map(entry => entry.text).join('\n') + '\n仅用于组织草稿，相关任务事实仍需按所选资料核对。');
+  const personEntries = context.entries.filter(entry => entry.kind.startsWith('person_'));
+  if (personEntries.length) {
+    const commitments = personEntries.filter(entry => entry.kind === 'person_commitment');
+    const relevant = personEntries.filter(entry => entry.kind !== 'person_commitment');
+    const describe = (entry: typeof personEntries[number]) => (entry.origin === 'quote' ? '对方原话整理：' : '我的私人记录（不是对方原话）：') + entry.text;
+    if (relevant.length) paragraphs.push('本次明确选择的人物：' + (context.personLabel || '已选人物') + '\n' + relevant.map(describe).join('\n') + '\n这是本人确认的人物记录，不推断性格或关系；沟通内容仍需核对。');
+    if (commitments.length) paragraphs.push('需要向' + (context.personLabel || '已选人物') + '核对的约定\n' + commitments.map(entry => '□ ' + describe(entry)).join('\n') + '\n保留原记录的承诺方向，不自动确定负责人、创建任务或宣称已完成。');
+  }
   if (preference?.focus) paragraphs.push('本次关注\n' + preference.focus);
   if (preference?.avoid) paragraphs.push('个人边界\n' + preference.avoid);
   if (/详细|展开|充分/.test(preference?.answerLength || '')) {

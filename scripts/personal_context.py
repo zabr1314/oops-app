@@ -24,6 +24,12 @@ context; enabled defaults to false. All values accept scenarios from SCENARIOS
 (default: 通用), and snapshot takes the explicit target scenario. Memories
 additionally require memory_id and source
 (``{kind: manual}`` or a meeting source), and accept title/body/category.
+Category person additionally requires a stable explicit person_id and a
+person_kind (fact/preference/background/commitment); person_name is a label.
+Those fields are forbidden on other categories. Person records currently only
+accept manual sources: this backend has no trustworthy stable speaker IDs.
+Snapshots require an explicit matching person_id to include any person record;
+memory_ids alone never imply consent to use someone else's information.
 
 Snapshots are server-built inputs, not execution or sharing permissions. Store
 the returned snapshot with a task and call validate_snapshot again immediately
@@ -80,6 +86,7 @@ class PersonalContext:
     _PROFILE = {"name": 80, "role": 160, "context": 800}
     _PREFERENCES = {"tone": 400, "answer_length": 80, "focus": 600, "avoid": 600}
     _MEMORY = {"title": 160, "body": 2000, "category": 30}
+    PERSON_KINDS = ("fact", "preference", "background", "commitment")
 
     SCENARIOS = ("通用", "会议", "汇报", "写作", "研究")
 
@@ -182,7 +189,9 @@ class PersonalContext:
     @staticmethod
     def _fields(kind, value):
         limits = PersonalContext._PROFILE if kind == "profile" else PersonalContext._PREFERENCES if kind == "preferences" else PersonalContext._MEMORY
-        allowed = set(limits) | {"scenarios"} | ({"enabled", "context"} if kind == "preferences" else set())
+        person = kind == 'memory' and isinstance(value, dict) and value.get('category') == 'person'
+        allowed = (set(limits) | {"scenarios"} | ({"enabled", "context"} if kind == "preferences" else set()) |
+                   ({"person_id", "person_name", "person_kind"} if person else set()))
         if not isinstance(value, dict) or set(value) - allowed:
             _fail(400, "PERSONAL_CONTEXT_INVALID", "个人上下文含不支持的字段")
         normalized = {}
@@ -208,8 +217,17 @@ class PersonalContext:
             if not normalized["title"] or not normalized["body"]:
                 _fail(400, "PERSONAL_CONTEXT_INVALID", "请填写记忆标题与内容")
             normalized["category"] = normalized["category"] or "background"
-            if normalized["category"] not in {"background", "goal", "fact", "preference"}:
+            if normalized["category"] not in {"background", "goal", "fact", "preference", "person"}:
                 _fail(400, "PERSONAL_CONTEXT_INVALID", "记忆类型无效")
+            if person:
+                normalized['person_id'] = _identifier(value.get('person_id'), '人物编号')
+                label = value.get('person_name', '')
+                if not isinstance(label, str) or len(label) > 80 or '\x00' in label:
+                    _fail(400, 'PERSONAL_CONTEXT_INVALID', '人物显示名称格式或长度无效')
+                if value.get('person_kind') not in PersonalContext.PERSON_KINDS:
+                    _fail(400, 'PERSONAL_CONTEXT_INVALID', '请选择人物记忆类型')
+                normalized['person_name'] = label.strip()
+                normalized['person_kind'] = value['person_kind']
         return normalized
 
     @staticmethod
@@ -265,8 +283,10 @@ class PersonalContext:
         if row["invalidated"]:
             return dict(item, status="needs_review")
         source = json.loads(row["source"])
+        value = json.loads(row['value'])
         try:
-            checked = self._checked_source(principal, source, "read")
+            checked = (None if value.get('category') == 'person' and source.get('kind') != 'manual' else
+                       self._checked_source(principal, source, "read"))
         except Exception:
             # No source text is returned when verification cannot complete.
             return dict(item, status="source_unavailable")
@@ -276,7 +296,7 @@ class PersonalContext:
                        (item["revision"], item["updated_at"], subject, row["kind"], row["id"]))
             self._bump(db, subject)
             return dict(item, status="needs_review")
-        return dict(item, status="current", confirmed=True, value=json.loads(row["value"]), source=source)
+        return dict(item, status="current", confirmed=True, value=value, source=source)
 
     def read(self, principal):
         identity = self._identity(principal)
@@ -310,6 +330,8 @@ class PersonalContext:
                 _fail(400, "PERSONAL_CONTEXT_CONFIRMATION_REQUIRED", "请本人明确核对后保存")
             value = self._fields(kind, body.get("value"))
             source = self._source(body.get("source")) if kind == "memory" else {"kind": "manual"}
+            if kind == 'memory' and value.get('category') == 'person' and source['kind'] != 'manual':
+                _fail(409, 'PERSON_IDENTITY_UNVERIFIED', '会议尚无可核实的稳定人物身份，请明确作为本人手工记录保存')
         request_hash = _hash({"kind": kind, "id": identifier, "expected_revision": expected, "delete": delete,
                               "value": value, "source": source})
         identity = self._identity(principal)
@@ -390,37 +412,46 @@ class PersonalContext:
                 "source_fingerprint": _hash(item["source"])}
 
     @staticmethod
-    def _content(items, scenario="通用"):
+    def _content(items, scenario="通用", person_id=None):
         profile = next((item for item in items if item["kind"] == "profile"), None)
         preferences = next((item for item in items if item["kind"] == "preferences"), None)
         return {"profile": profile["value"] if profile and PersonalContext._scenario_matches(profile["value"], scenario) else None,
                 "preferences": preferences["value"] if preferences and PersonalContext._scenario_matches(preferences["value"], scenario) else None,
                 "memories": [{"id": item["id"], **item["value"]} for item in items
-                             if item["kind"] == "memory" and PersonalContext._scenario_matches(item["value"], scenario)]}
+                             if item["kind"] == "memory" and PersonalContext._scenario_matches(item["value"], scenario)
+                             and PersonalContext._person_matches(item['value'], person_id)]}
 
     @staticmethod
     def _scenario_matches(value, scenario):
         scopes = value.get("scenarios", ["通用"])
         return "通用" in scopes or scenario in scopes
 
-    def _snapshot_value(self, identity, items, context_revision, excluded, scenario="通用"):
+    @staticmethod
+    def _person_matches(value, person_id):
+        return value.get('category') != 'person' or person_id is not None and value.get('person_id') == person_id
+
+    def _snapshot_value(self, identity, items, context_revision, excluded, scenario="通用", person_id=None):
         profile = next((item for item in items if item["kind"] == "profile"), None)
         preferences = next((item for item in items if item["kind"] == "preferences"), None)
         enabled = bool(preferences and preferences["value"]["enabled"])
         if not enabled:
             items, profile, preferences = [], None, None
-        content = self._content(items, scenario)
+        content = self._content(items, scenario, person_id)
         refs = [self._ref(item) for item in items]
         result = {"version": 1, "enabled": enabled, "identity_revision": identity["binding_revision"],
-                  "context_revision": context_revision, "entry_refs": refs, "context": content, "excluded": excluded, "scenario": scenario}
+                  "context_revision": context_revision, "entry_refs": refs, "context": content, "excluded": excluded,
+                  "scenario": scenario, 'person_id': person_id}
         # Hash only the selected evidence, not unrelated personal records.
         result["snapshot_id"] = _hash({"subject": self._subject(identity), "identity_revision": result["identity_revision"],
-                                       "enabled": enabled, "scenario": scenario, "entry_refs": refs, "context": content})
+                                       "enabled": enabled, "scenario": scenario, 'person_id': person_id,
+                                       "entry_refs": refs, "context": content})
         return result
 
-    def snapshot(self, principal, memory_ids=None, scenario="通用"):
+    def snapshot(self, principal, memory_ids=None, scenario="通用", person_id=None):
         if scenario not in self.SCENARIOS:
             _fail(400, "PERSONAL_CONTEXT_INVALID", "个人上下文场景无效")
+        if person_id is not None:
+            person_id = _identifier(person_id, '所选人物编号')
         if memory_ids is not None:
             if not isinstance(memory_ids, list) or len(memory_ids) > self.MAX_SNAPSHOT_MEMORIES:
                 _fail(400, "PERSONAL_CONTEXT_INVALID", "一次最多选择 20 条私人记忆")
@@ -443,6 +474,12 @@ class PersonalContext:
                         failure = (409, "PERSONAL_CONTEXT_SOURCE_CHANGED", "所选私人记忆已变化或不可用，请重新核对")
                     excluded.append({"kind": item["kind"], "id": item["id"], "status": item["status"]})
                     continue
+                if item['kind'] == 'memory' and not self._person_matches(item['value'], person_id):
+                    status = 'person_selection_required' if person_id is None else 'person_mismatch'
+                    if person_id is not None and memory_ids is not None:
+                        failure = (409, 'PERSONAL_CONTEXT_PERSON_MISMATCH', '所选记忆属于另一位人物，请重新选择')
+                    excluded.append({'kind': 'memory', 'id': item['id'], 'status': status})
+                    continue
                 if item["kind"] != "preferences" and not self._scenario_matches(item["value"], scenario):
                     if item["kind"] == "memory" and memory_ids is not None:
                         failure = (409, "PERSONAL_CONTEXT_SCENARIO_MISMATCH", "所选私人记忆不适用于本次场景")
@@ -452,7 +489,7 @@ class PersonalContext:
                     excluded.append({"kind": "memory", "id": item["id"], "status": "limit"})
                     continue
                 proposed = selected + [item]
-                size = len(_json(self._content(proposed, scenario)))
+                size = len(_json(self._content(proposed, scenario, person_id)))
                 if size > self.MAX_SNAPSHOT_CHARS:
                     if memory_ids is not None:
                         failure = (400, "PERSONAL_CONTEXT_LIMIT", "所选上下文过长，请减少私人记忆")
@@ -462,7 +499,7 @@ class PersonalContext:
                 memory_count += item["kind"] == "memory"
             if memory_ids is not None and found != set(memory_ids):
                 failure = (404, "PERSONAL_CONTEXT_NOT_FOUND", "所选私人记忆不存在或不属于本人")
-            result = self._snapshot_value(identity, selected, self._context_revision(db, subject), excluded, scenario)
+            result = self._snapshot_value(identity, selected, self._context_revision(db, subject), excluded, scenario, person_id)
             self._recheck(identity)
         self._recheck(identity)
         if failure:
@@ -474,8 +511,11 @@ class PersonalContext:
             _fail(400, "PERSONAL_CONTEXT_INVALID", "个人上下文快照无效")
         refs = snapshot["entry_refs"]
         scenario = snapshot.get("scenario")
+        person_id = snapshot.get('person_id')
         if scenario not in self.SCENARIOS:
             _fail(400, "PERSONAL_CONTEXT_INVALID", "个人上下文场景无效")
+        if person_id is not None:
+            person_id = _identifier(person_id, '所选人物编号')
         if (len(refs) > self.MAX_SNAPSHOT_MEMORIES + 2 or
                 sum(isinstance(ref, dict) and ref.get('kind') == 'memory' for ref in refs) > self.MAX_SNAPSHOT_MEMORIES):
             _fail(400, "PERSONAL_CONTEXT_INVALID", "个人上下文快照过长")
@@ -501,12 +541,14 @@ class PersonalContext:
                     continue
                 if kind != "preferences" and not self._scenario_matches(item["value"], scenario):
                     changed = True
+                if kind == 'memory' and not self._person_matches(item['value'], person_id):
+                    changed = True
                 items.append(item)
             preferences = self._row(db, subject, "preferences", "current")
             enabled = bool(preferences and not preferences["deleted"] and json.loads(preferences["value"]).get("enabled"))
             if enabled != snapshot.get("enabled") or identity["binding_revision"] != snapshot.get("identity_revision"):
                 changed = True
-            result = self._snapshot_value(identity, items, self._context_revision(db, subject), [], scenario)
+            result = self._snapshot_value(identity, items, self._context_revision(db, subject), [], scenario, person_id)
             if result["snapshot_id"] != snapshot.get("snapshot_id") or len(_json(result['context'])) > self.MAX_SNAPSHOT_CHARS:
                 changed = True
             self._recheck(identity)

@@ -5,28 +5,38 @@ import { Badge, Button, Card, Check, Chips, Empty, Field, Notice, Row, SectionTi
 import './PersonalAssistant.css';
 
 export const PERSONAL_SCENARIOS = ['通用', '会议', '汇报', '写作', '研究'];
-const labels: Record<string, string> = { identity: '当前身份', preference: '助理偏好', background: '已确认背景', goal: '当前目标', habit: '已确认习惯' };
+const labels: Record<string, string> = { identity: '当前身份', preference: '助理偏好', background: '已确认背景', goal: '当前目标', habit: '已确认习惯', person_fact: '人物身份', person_preference: '对方偏好', person_background: '交流背景', person_commitment: '双方约定' };
 export function personalSourceRoute(source: SourceReference): Route {
+  if (source.kind === 'person_memory') return { view: 'memory-person', id: source.personId };
   if (source.kind === 'profile') return { view: source.profileScope === 'preferences' ? 'settings-preferences' : 'settings-identity' };
   return { view: source.kind === 'session' ? 'session-transcript' : source.kind === 'memory' ? 'memory-detail' : source.kind === 'task' ? 'task-detail' : 'memory-project', id: source.id, mode: source.sourceId || source.sourceTime };
 }
 function sourceLabel(data: AppData, source: SourceReference) {
+  if (source.kind === 'person_memory') return '人物记忆 · ' + (data.people.find(person => person.id === source.personId)?.name || '查看人物');
   if (source.kind === 'profile') return source.profileScope === 'preferences' ? '本人设置的偏好' : '本人填写的身份';
   return source.kind === 'session' ? data.sessions.find(item => item.id === source.id)?.title || '原话来源' : source.kind === 'memory' ? data.memories.find(item => item.id === source.id)?.title || '记忆来源' : '查看来源';
 }
 
+export function PersonContextSelect({ personId = '', onChange }: { personId?: string; onChange: (id: string) => void }) {
+  const { data } = useOops();
+  if (data.settings.space !== '我的空间') return null;
+  const people = data.people.filter(person => person.name.trim() && !/未知|待确认|匿名|说话人|unknown|anonymous/i.test(person.name));
+  const label = (person: typeof people[number]) => `${person.name} · ${person.company || person.role || '人物卡'} · ${person.id}`;
+  return <SelectField label="这次与谁沟通" value={people.find(person => person.id === personId) ? label(people.find(person => person.id === personId)!) : '不使用人物记忆'} options={['不使用人物记忆', ...people.map(label)]} onChange={value => onChange(people.find(person => label(person) === value)?.id || '')}/>;
+}
+
 /** The caller owns exclusions so each request can freeze exactly what was selected. */
-export function PersonalContextPicker({ scenario = '通用', query = '', excludedIds = [], onChange }: { scenario?: PersonalScenario; query?: string; excludedIds?: string[]; onChange?: (ids: string[]) => void }) {
+export function PersonalContextPicker({ scenario = '通用', query = '', personId, excludedIds = [], onChange }: { scenario?: PersonalScenario; query?: string; personId?: string; excludedIds?: string[]; onChange?: (ids: string[]) => void }) {
   const { data, navigate } = useOops();
   if (data.settings.space !== '我的空间') return null;
-  const context = buildPersonalContext(data, { scenario, query });
-  const selected = buildPersonalContext(data, { scenario, query, excludeIds: excludedIds });
+  const context = buildPersonalContext(data, { scenario, query, personId });
+  const selected = buildPersonalContext(data, { scenario, query, personId, excludeIds: excludedIds });
   const entries = [...new Map([...context.entries,...selected.entries].map(entry=>[entry.id,entry])).values()];
   return <details className="personal-context-picker"><summary>本次使用的背景 <span>{context.enabled ? `${selected.entries.length} 项` : '已关闭'}</span></summary>
     <div className="stack">
       <p className="meta">适用场景：{scenario}。临时取消只影响这次准备。</p>
       {entries.map(entry => <div key={entry.id} className="personal-context-entry">
-        {onChange ? <Check label={`${labels[entry.kind] || '背景'}：${entry.text}`} value={!excludedIds.includes(entry.id)} onChange={selected => onChange(selected ? excludedIds.filter(id => id !== entry.id) : [...new Set([...excludedIds, entry.id])])}/> : <p>{entry.text}</p>}
+        {onChange ? <Check label={`${labels[entry.kind] || '背景'}${entry.kind.startsWith('person_') ? entry.origin === 'quote' ? '（对方原话整理）' : '（我的私人记录）' : ''}：${entry.text}`} value={!excludedIds.includes(entry.id)} onChange={selected => onChange(selected ? excludedIds.filter(id => id !== entry.id) : [...new Set([...excludedIds, entry.id])])}/> : <p>{entry.text}</p>}
         {entry.sources.slice(0, 2).map((source, index) => <Source key={index} title={sourceLabel(data, source)} onClick={() => navigate(personalSourceRoute(source))}/>)}
       </div>)}
       {!selected.entries.length && <p className="meta">{context.enabled ? '当前场景没有已确认且可用的个人背景。' : '开启个性化后，可以选择已确认的背景。'}</p>}

@@ -258,6 +258,41 @@ class PersonalContextHttpTest(unittest.TestCase):
         with self.assertRaises(MobileError):
             MobileFeishu(self.backend, linked, self.accounts)
 
+    def test_person_memory_wire_preserves_manual_label_and_stable_ids(self):
+        def body(person_id, operation, memory_id):
+            return self.body(dict(title='交流偏好', body='先给摘要', category='person', person_id=person_id,
+                person_name='同名同事', person_kind='preference'), operation=operation,
+                memory_id=memory_id, source={'kind': 'manual'})
+        first = self.request('POST', '/memories', body('person-a', 'save-person-a', 'person-memory-a'))
+        second = self.request('POST', '/memories', body('person-b', 'save-person-b', 'person-memory-b'))
+        self.assertEqual(200, first[0]); self.assertEqual(200, second[0])
+        self.assertEqual({'kind': 'manual'}, first[1]['item']['source'])
+        items = self.request('GET', token='token-a2')[1]['memories']
+        self.assertEqual(['person-a', 'person-b'], [item['value']['person_id'] for item in items])
+        self.assertEqual([], self.request('GET', token='token-b')[1]['memories'])
+        self.request('POST', '/preferences', self.body(dict(enabled=True), operation='enable-person-memory'))
+        absent = self.request('POST', '/snapshot', dict(memory_ids=['person-memory-a']))
+        self.assertEqual(200, absent[0])
+        self.assertEqual([], absent[1]['context']['memories'])
+        chosen = self.request('POST', '/snapshot', dict(person_id='person-a', scenario='通用'))
+        self.assertEqual(200, chosen[0])
+        self.assertEqual('person-a', chosen[1]['person_id'])
+        self.assertEqual(['person-a'], [item['person_id'] for item in chosen[1]['context']['memories']])
+        code, mismatch = self.request('POST', '/snapshot', dict(person_id='person-b', memory_ids=['person-memory-a']))
+        self.assertEqual(409, code)
+        self.assertEqual('PERSONAL_CONTEXT_PERSON_MISMATCH', mismatch['error']['code'])
+
+    def test_person_quote_is_rejected_and_person_metadata_cannot_hide_in_self_memory(self):
+        value = dict(title='人物事实', body='手工记下的信息', category='person', person_id='person-a', person_name='甲', person_kind='fact')
+        body = self.body(value, operation='person-quote', memory_id='person-quote',
+            source=dict(kind='meeting', session_id='meeting-a', utterance_ids=['u1']))
+        code, error = self.request('POST', '/memories', body)
+        self.assertEqual(409, code)
+        self.assertEqual('PERSON_IDENTITY_UNVERIFIED', error['error']['code'])
+        body['source'] = {'kind': 'manual'}
+        body['value']['category'] = 'background'
+        self.assertEqual(400, self.request('POST', '/memories', body)[0])
+
 
 if __name__ == '__main__':
     unittest.main()

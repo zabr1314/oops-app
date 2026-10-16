@@ -107,6 +107,107 @@ test('scenario checkboxes require an explicit nonempty choice and general exclud
   const v=ui();v.instance.input('scenario:通用',false);v.instance.input('confirmed',true);v.instance.action('save');assert.equal(v.last('personal.context.profile'),undefined);assert.match(v.html(),/至少一个适用场景/);
 });
 
+const personMemory=(id,personId,body,name='同名人物',personKind='fact')=>item('memory',id,1,{title:'关于此人的记录',body,category:'person',person_id:personId,person_name:name,person_kind:personKind,scenarios:['通用']});
+function openPerson(u,person,memories=[],people=[]) {u.instance.open({person,memory:true,people});u.bind();u.read({memories});}
+test('a person entry filters by an explicitly selected stable ID and does not mix same-name or ordinary memories',()=>{
+  const u=ui();
+  openPerson(u,{id:'person-a',name:'同名人物'},[personMemory('ma','person-a','只属于甲的记录'),personMemory('mb','person-b','只属于乙的记录'),item('memory','plain',1,{title:'普通记忆',body:'我的个人背景',category:'background'})], [{id:'person-a',name:'同名人物'},{id:'person-b',name:'同名人物'}]);
+  assert.match(u.html(),/只属于甲的记录/);assert.doesNotMatch(u.html(),/只属于乙的记录|我的个人背景/);assert.match(u.html(),/本人手工记录，不是对方原话/);
+  u.instance.action('new');u.instance.input('title','交流偏好');u.instance.input('body','我记录他偏好提前收到议程');u.instance.input('person_kind','preference');u.instance.input('person_id','person-b');u.instance.input('confirmed',true);u.instance.action('save');
+  const write=u.last('personal.context.memory');assert.equal(write.value.person_id,'person-a');assert.equal(write.value.person_kind,'preference');assert.equal(write.source.kind,'manual');assert.equal(write.value.category,'person');
+});
+test('name-only voice entries require a deliberate manual person record and never derive an ID from the name',()=>{
+  const u=ui();openPerson(u,{name:'同名人物'});
+  assert.match(u.html(),/尚无稳定人物编号/);assert.match(u.html(),/同名不会合并/);
+  u.instance.action('person-new');u.instance.input('title','会面背景');u.instance.input('body','这是我的手工记录');u.instance.input('confirmed',true);u.instance.action('save');
+  const first=u.last('personal.context.memory');assert.match(first.value.person_id,/^PERSON-/);assert.notEqual(first.value.person_id,'同名人物');assert.equal(first.value.person_name,'同名人物');
+  u.receive({identity_revision:1,context_revision:1,item:item('memory',first.memory_id,1,first.value),operation_revision:1});
+  openPerson(u,{name:'同名人物'},[item('memory',first.memory_id,1,first.value)]);u.instance.action('person-new');u.instance.input('title','另一个人的记录');u.instance.input('body','不同人，同一个称呼');u.instance.input('confirmed',true);u.instance.action('save');
+  assert.notEqual(u.last('personal.context.memory').value.person_id,first.value.person_id);
+});
+test('manual person memory works without voiceprint enrollment and preserves the ID when its label changes',()=>{
+  const u=ui();u.instance.action('tab','memory');u.instance.action('person-new');
+  u.instance.input('person_name','手工人物');u.instance.input('title','约好的下一步');u.instance.input('body','本人记录：下周联系');u.instance.input('person_kind','commitment');u.instance.input('confirmed',true);u.instance.action('save');
+  const first=u.last('personal.context.memory');assert.equal(first.value.person_kind,'commitment');assert.match(first.value.person_id,/^PERSON-/);
+  u.receive({identity_revision:1,context_revision:1,item:item('memory',first.memory_id,1,first.value),operation_revision:1});
+  u.instance.input('person_name','改过的显示称呼');u.instance.input('confirmed',true);u.instance.action('save');
+  const second=u.last('personal.context.memory');assert.equal(second.value.person_id,first.value.person_id);assert.equal(second.expected_revision,1);assert.equal(second.value.person_name,'改过的显示称呼');
+});
+test('person selection is mandatory and switching back to an ordinary category strips every person metadata field',()=>{
+  const u=ui();u.instance.action('new');u.instance.input('category','person');u.instance.input('person_name','只有名字');u.instance.input('title','没有明确人物');u.instance.input('body','不能凭名字关联');u.instance.input('confirmed',true);u.instance.action('save');
+  assert.equal(u.last('personal.context.memory'),undefined);assert.match(u.html(),/明确选择人物档案/);
+  u.instance.input('category','fact');u.instance.input('confirmed',true);u.instance.action('save');
+  const value=u.last('personal.context.memory').value;for(const key of ['person_id','person_name','person_kind'])assert.equal(Object.hasOwn(value,key),false);
+});
+test('person memory keeps its selected identity and subtype through unknown-request recovery',()=>{
+  const u=ui();openPerson(u,{id:'person-a',name:'甲'});u.instance.action('new');u.instance.input('title','交流背景');u.instance.input('body','这次由我手工整理');u.instance.input('person_kind','background');u.instance.input('confirmed',true);u.instance.action('save');
+  const original=u.last('personal.context.memory');u.timers.at(-1)();u.instance.action('retry');
+  const replay=u.last('personal.context.memory');assert.equal(replay.op_id,original.op_id);assert.deepEqual(replay.value,original.value);assert.equal(replay.value.person_id,'person-a');assert.equal(replay.value.person_kind,'background');
+});
+test('unverified quotation person imports and person metadata on ordinary memories are rejected at the display boundary',()=>{
+  for(const memory of [
+    {...personMemory('bad','person-a','不能冒充的原话'),source:{kind:'meeting',session_id:'s1',utterance_ids:['u1']}},
+    item('memory','bad',1,{title:'普通记忆',body:'不能混入的人物记录',category:'fact',person_id:'person-a',person_name:'甲',person_kind:'fact'})
+  ]){
+    const u=ui();u.instance.action('refresh');u.read({memories:[memory]});u.instance.action('tab','memory');
+    assert.match(u.html(),/无法核对/);assert.doesNotMatch(u.html(),/不能冒充的原话|不能混入的人物记录/);
+  }
+});
+test('creating a manual person from an already written memory draft preserves its title and body',()=>{
+  const u=ui();u.instance.action('new');u.instance.input('category','person');u.instance.input('title','已写的标题');u.instance.input('body','已写的手工内容');u.instance.input('person_name','新人物');u.instance.action('person-new');u.instance.input('confirmed',true);u.instance.action('save');
+  const value=u.last('personal.context.memory').value;assert.equal(value.title,'已写的标题');assert.equal(value.body,'已写的手工内容');assert.equal(value.person_name,'新人物');assert.match(value.person_id,/^PERSON-/);
+});
+test('person drafts remain recoverable from the general list but never appear inside another persons filter',()=>{
+  const u=ui();openPerson(u,{id:'person-a',name:'甲'},[],[{id:'person-a',name:'甲'},{id:'person-b',name:'乙'}]);u.instance.action('new');u.instance.input('title','甲的未保存草稿');u.instance.input('body','甲的未保存内容');
+  u.instance.action('all-memories');assert.match(u.html(),/未保存的修改稿/);assert.match(u.html(),/甲的未保存内容/);
+  u.instance.action('person-select','person-b');assert.doesNotMatch(u.html(),/甲的未保存草稿|甲的未保存内容/);
+  u.instance.action('all-memories');u.instance.action('person-select','person-a');assert.match(u.html(),/甲的未保存内容/);
+  const draftId=u.html().match(/data-pa-action="draft-open" data-id="([^"]+)"/)[1];u.instance.action('draft-open',draftId);u.instance.input('confirmed',true);u.instance.action('save');assert.equal(u.last('personal.context.memory').value.body,'甲的未保存内容');
+});
+test('person deletion conflicts preserve the correct draft and delete only the reviewed revision after explicit comparison',()=>{
+  const u=ui(),original=personMemory('memory-a','person-a','甲的原记录','甲');openPerson(u,{id:'person-a',name:'甲'},[original]);u.instance.action('edit','memory-a');u.instance.input('body','本人修改待核对');u.instance.input('confirmed',true);u.instance.action('delete');
+  const first=u.last('personal.context.delete');assert.equal(first.expected_revision,1);
+  u.receive({httpStatus:409,code:'PERSONAL_CONTEXT_REVISION_CONFLICT',message:'其他设备已更新'},'error');assert.match(u.html(),/本人修改待核对/);
+  u.instance.action('refresh');u.read({context_revision:2,memories:[{...original,revision:2,value:{...original.value,body:'另一设备更新'}}]});assert.match(u.html(),/另一设备更新/);assert.match(u.html(),/本人修改待核对/);
+  u.instance.action('rebase');u.instance.input('confirmed',true);u.instance.action('delete');const second=u.last('personal.context.delete');assert.equal(second.expected_revision,2);assert.equal(second.memory_id,'memory-a');assert.notEqual(second.op_id,first.op_id);
+  u.receive({identity_revision:1,context_revision:3,item:{kind:'memory',id:'memory-a',revision:3,status:'deleted',confirmed:false,value:null,source:null},operation_revision:3});assert.doesNotMatch(u.html(),/本人修改待核对|甲的原记录|另一设备更新/);
+});
+test('another persons preference is a private person memory and never backfills the current users assistant preferences',()=>{
+  const u=ui();u.instance.open({memory:true});u.bind();u.read({context_revision:2,preferences:item('preferences','current',1,{enabled:true,tone:'本人先结论',answer_length:'简短',focus:'本人的目标',avoid:'',context:'我的工作',scenarios:['通用']}),memories:[personMemory('other-pref','person-a','对方喜欢详细材料','甲','preference')]});
+  u.instance.action('person-select','person-a');assert.match(u.html(),/对方喜欢详细材料/);
+  assert.equal(u.last('personal.context.preferences'),undefined);
+  u.instance.action('tab','preferences');assert.match(u.html(),/本人先结论/);assert.doesNotMatch(u.html(),/对方喜欢详细材料/);
+  u.instance.input('confirmed',true);u.instance.action('save');const value=u.last('personal.context.preferences').value;assert.equal(value.tone,'本人先结论');assert.equal(value.focus,'本人的目标');assert.equal(Object.hasOwn(value,'person_id'),false);
+});
+test('a general memory source withdrawal clears a dirty draft and its retained-draft entry instead of reclassifying old text as manual',()=>{
+  const u=ui(),memory={...item('memory','source-memory',1,{title:'原话资料',body:'旧来源正文',category:'fact',scenarios:['通用']}),source:{kind:'meeting',session_id:'s1',utterance_ids:['u1']}};
+  u.instance.action('refresh');u.read({memories:[memory]});u.instance.action('edit','source-memory');u.instance.input('body','旧来源正文与尚未确认的修改');
+  u.instance.action('refresh');u.read({context_revision:2,memories:[{...memory,revision:2,status:'needs_review',confirmed:false,value:null,source:null}]});
+  assert.doesNotMatch(u.html(),/旧来源正文|尚未确认的修改/);assert.match(u.html(),/修改稿已清除/);
+  u.instance.input('confirmed',true);u.instance.action('rebase');u.instance.action('save');assert.equal(u.last('personal.context.memory'),undefined);
+  u.instance.action('all-memories');assert.doesNotMatch(u.html(),/旧来源正文|尚未确认的修改/);
+});
+test('source withdrawal also scrubs an unknown write journal while retaining its operation ID without resending stale content',()=>{
+  const u=ui(),memory={...item('memory','source-memory',1,{title:'原话资料',body:'原来源敏感正文',category:'fact',scenarios:['通用']}),source:{kind:'meeting',session_id:'s1',utterance_ids:['u1']}};
+  u.instance.action('refresh');u.read({memories:[memory]});u.instance.action('edit','source-memory');u.instance.input('body','原来源敏感正文与修改');u.instance.input('confirmed',true);u.instance.action('save');const original=u.last('personal.context.memory');u.timers.at(-1)();
+  u.instance.action('refresh');u.read({context_revision:2,memories:[{...memory,revision:2,status:'needs_review',confirmed:false,value:null,source:null}]});
+  assert.doesNotMatch(JSON.stringify([...u.saved.values.values()]),/原来源敏感正文/);assert.match(JSON.stringify([...u.saved.values.values()]),new RegExp(original.op_id));
+  u.instance.action('retry');assert.equal(u.messages.filter(message=>message.type==='personal.context.memory').length,1);assert.match(u.html(),/原请求正文已清除/);
+});
+test('the isolated mock preserves person fields and requires explicit matching person selection in snapshots',()=>{
+  const context={window:{},location:{search:'?preview=1'},URLSearchParams,crypto:{randomUUID:(()=>{let n=0;return()=>String(++n);})()},performance:{now:()=>0},Date,console,
+    localStorage:{getItem:()=>null,setItem(){}},queueMicrotask:fn=>fn(),setTimeout:fn=>{fn();return 1;},clearTimeout(){},setInterval:()=>1,clearInterval(){}};
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../main/assets/web/bridge-mock.js'),'utf8'),context);
+  const events=[],native=context.window.OopsNative;native.onmessage=event=>events.push(JSON.parse(event.data));
+  const send=(type,payload={})=>native.postMessage(JSON.stringify({type,payload}));const last=type=>events.filter(event=>event.type===type).at(-1)?.payload;
+  send('feishu.connect');send('personal.context.preferences',{requestId:'prefs',op_id:'prefs-op',expected_revision:0,confirmed:true,value:{enabled:true,scenarios:['通用']}});
+  send('personal.context.memory',{requestId:'person',op_id:'person-op',expected_revision:0,confirmed:true,memory_id:'person-memory',value:personMemory('person-memory','person-a','私人内容').value,source:{kind:'manual'}});
+  assert.equal(last('personal.context').item.value.person_id,'person-a');
+  send('personal.context.snapshot',{memory_ids:['person-memory']});assert.deepEqual(last('personal.context').context.memories,[]);assert.equal(last('personal.context').excluded[0].status,'person_selection_required');
+  send('personal.context.snapshot',{memory_ids:['person-memory'],person_id:'person-b'});assert.equal(last('error').code,'PERSONAL_CONTEXT_PERSON_MISMATCH');
+  send('personal.context.snapshot',{memory_ids:['person-memory'],person_id:'person-a'});assert.equal(last('personal.context').context.memories[0].person_id,'person-a');
+});
+
 function appUI() {
   const elements=new Map(),messages=[],errors=[],saved=storage();
   const el=id=>{if(!elements.has(id))elements.set(id,{id,dataset:{},style:{setProperty(){}},classList:{add(){},remove(){},toggle(){}},setAttribute(){},appendChild(){},insertBefore(){},querySelectorAll:()=>[],listeners:{},addEventListener(type,fn){(this.listeners[type] ||= []).push(fn);}});return elements.get(id);};
@@ -133,4 +234,15 @@ test('the app clears personal context on a backend change and ignores the old na
   u.receive('backend.changed',{backend:'http',backendUrl:'https://other.test',serviceEpoch:2});
   u.receive('personal.context',{requestId:request.requestId,identity_revision:1,context_revision:1,item:item('profile','current',1,request.value),operation_revision:1,backendUrl:'https://example.test',serviceEpoch:1});
   u.click('personal-open');assert.doesNotMatch(u.el('sheet').innerHTML,/不能跨服务复活/);assert.equal(u.errors.length,0);
+});
+test('the actual memory people entry opens the selected stable person and a name-only catalog stays unbound',()=>{
+  const u=appUI();u.receive('state',{voiceprint:{phase:'idle',catalog:{people:[{id:'person-a',name:'同名'},{id:'person-b',name:'同名'}]}}});u.click('go',{route:'memory'});u.click('memory-tab',{value:'people'});
+  assert.match(u.el('screen').innerHTML,/data-act="person-memory-open" data-person-id="person-a"/);
+  u.click('person-memory-open',{personId:'person-a',personLabel:'同名'});
+  u.receive('feishu.status',{requestId:u.last('feishu.status').requestId,status:'bound',binding_revision:1,account:{name:'本人',open_id:'ou_self',tenant_key:'t1'}});
+  u.receive('personal.context',{requestId:u.last('personal.context.read').requestId,identity_revision:1,context_revision:1,profile:null,preferences:null,memories:[personMemory('a','person-a','甲的内容'),personMemory('b','person-b','乙的内容')]});
+  assert.match(u.el('sheet').innerHTML,/甲的内容/);assert.doesNotMatch(u.el('sheet').innerHTML,/乙的内容/);
+  u.click('person-memory-open',{personLabel:'同名'});u.receive('feishu.status',{requestId:u.last('feishu.status').requestId,status:'bound',binding_revision:1,account:{name:'本人',open_id:'ou_self',tenant_key:'t1'}});
+  u.receive('personal.context',{requestId:u.last('personal.context.read').requestId,identity_revision:1,context_revision:1,profile:null,preferences:null,memories:[]});
+  assert.match(u.el('sheet').innerHTML,/尚无稳定人物编号/);assert.equal(u.errors.length,0);
 });
