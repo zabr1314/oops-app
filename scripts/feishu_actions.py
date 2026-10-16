@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 import minutes_items
 import minutes_quality
 import minutes_vote
+from minutes_model import MinutesModelError, load_minutes_model
 import question_watch
 from meeting_features import timestamp, read_json
 
@@ -347,6 +348,9 @@ MINUTES_PROMPT = (
 class FeishuActions:
     def __init__(self, backend, state_dir, lark, run_lark, log, dry_run=False):
         self.backend, self.log = backend, log
+        self.minutes_model = load_minutes_model()
+        if self.minutes_model:
+            self.log('会后整理模型：' + self.minutes_model.model)
         self.bot = Bot(lark, run_lark, dry_run=dry_run, log=log)
         self.state = State(os.path.join(state_dir, "feishu"))
         self.jobs = Jobs(os.path.join(state_dir, "agent-jobs"))
@@ -563,7 +567,7 @@ class FeishuActions:
 
     def analyse(self, row):
         """Minutes written minutes_vote.RUNS times independently; only what most runs agree on is kept (minutes_vote)."""
-        if not self.backend.resolver or len(row["utterances"]) < 5:
+        if not (getattr(self, 'minutes_model', None) or self.backend.resolver) or len(row["utterances"]) < 5:
             return self.analyse_once(row)
         hints = self.review_hints(row)
         with ThreadPoolExecutor(minutes_vote.RUNS) as pool:
@@ -594,7 +598,7 @@ class FeishuActions:
 
     def analyse_once(self, row, hints=None):
         """The model's minutes, kept only where each item points at sentences that exist."""
-        resolver = self.backend.resolver
+        resolver = getattr(self, 'minutes_model', None) or self.backend.resolver
         result = dict(version=self.MINUTES_VERSION, substantive=False, theme="", overview="", decisions=[], actions=[], topics=[],
                       undecided=[], open_questions=[], follow_ups=[])
         if not resolver or len(row["utterances"]) < 5:
@@ -606,7 +610,9 @@ class FeishuActions:
                 f"团队成员：{'、'.join(team)}\n\n")
         if hints is None:
             hints = self.review_hints(row)
-        answer, _ = resolver.complete_json(MINUTES_PROMPT, head + self.transcript(row, tags=False, hints=hints), timeout=120)
+        answer, used_model = resolver.complete_json(MINUTES_PROMPT, head + self.transcript(row, tags=False, hints=hints), timeout=120)
+        if getattr(self, 'minutes_model', None):
+            result['generation_model'] = used_model
         ids = {u["id"]: u for u in row["utterances"]}
 
         def backed(item, actionable=False):
@@ -649,7 +655,7 @@ class FeishuActions:
             minutes = f.get("minutes") if isinstance(f.get("minutes"), int) and 10 <= f["minutes"] <= 240 else 30
             result["follow_ups"].append(dict(title=clean(f.get("title"), 40) or "跟进会议", start=begin.isoformat(), minutes=minutes,
                                              attendees=[a for a in (f.get("attendees") or []) if a in team],
-                                             quote=ids[backed(f)[0]]["text"][:200]))
+                                             ids=backed(f), quote=ids[backed(f)[0]]["text"][:200]))
         result["decisions"], result["actions"] = result["decisions"][:8], result["actions"][:12]
         useful = (result["decisions"] or result["actions"] or result["topics"] or result["undecided"] or result["open_questions"]
                   or result["follow_ups"])
@@ -753,7 +759,7 @@ class FeishuActions:
                 self.state.put(True, "meetings", sid, "questions_final")
             self.after_meeting(self.titled(row))
         except Exception as error:  # noqa: BLE001
-            failures += 1
+            failures = 6 if isinstance(error, MinutesModelError) else failures + 1
             self.state.put(failures, "meetings", sid, "failures")
             self.state.put((now_utc() + dt.timedelta(minutes=2 ** failures)).isoformat(), "meetings", sid, "retry_at")
             last = "; giving up" if failures >= 6 else ""

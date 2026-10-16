@@ -38,6 +38,30 @@ class VoteTest(unittest.TestCase):
         self.assertIsNone(mv.vote([]))
         self.assertEqual(runs[0], mv.vote(runs[:1]))
 
+    def test_schedule_titles_can_differ_when_time_and_sources_agree(self):
+        a, b, c = run(), run(), run()
+        a['follow_ups'] = [dict(title='决赛路演', start='2026-10-17T15:00:00+08:00', minutes=240, ids=['u195', 'u196'])]
+        b['follow_ups'] = [dict(title='决赛作品路演', start='2026-10-17T07:00:00+00:00', minutes=240, ids=['u196'])]
+        result = mv.vote([a, b, c])
+        self.assertEqual(1, len(result['follow_ups']))
+        self.assertEqual({'u195', 'u196'}, set(result['follow_ups'][0]['ids']))
+
+    def test_conflicting_schedule_is_reviewed_even_with_two_agreeing_copies(self):
+        for field, changed in [('start', '2026-10-17T16:00:00+08:00'), ('minutes', 120)]:
+            with self.subTest(field=field):
+                values = [run(), run(), run()]
+                for value in values:
+                    value['follow_ups'] = [dict(title='决赛路演', start='2026-10-17T15:00:00+08:00', minutes=240, ids=['u196'])]
+                values[2]['follow_ups'][0][field] = changed
+                result = mv.vote(values)
+                self.assertEqual([], result['follow_ups'])
+                self.assertEqual(['u196'], result['undecided'][0]['ids'])
+
+    def test_one_schedule_copy_does_not_make_a_majority(self):
+        values = [run(), run(), run()]
+        values[0]['follow_ups'] = [dict(title='决赛路演', start='2026-10-17T15:00:00+08:00', minutes=240, ids=['u196'])]
+        self.assertEqual([], mv.vote(values)['follow_ups'])
+
 
 if __name__ == "__main__":
     unittest.main()
