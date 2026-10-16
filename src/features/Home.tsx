@@ -3,12 +3,14 @@ import { KeyboardTextarea, useKeyboard } from '../mobile';
 import { useOops, type AppData, type Route, type Task, type SourceReference, type AssistantMessage } from '../store';
 import { sharedMemoryEligible } from '../memoryAccess';
 import { makeSourceReference, materialVisible, messageAvailable, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '../sourceAccess';
-import { Badge, Button, Card, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, Source, Toggle, isTextEntryTarget } from '../ui';
+import { Badge, Button, Card, Chips, Empty, Field, Icon, Notice, Row, Search, SectionTitle, Source, Toggle, SelectField, isTextEntryTarget } from '../ui';
 import { taskAttentionReason, taskBelongsToMe, taskIsMyAttention, taskPrimaryAction } from '../taskWorkflow';
 import { assistantQuestion, unansweredAssistantQuestion } from '../assistantLogic';
 import { activeHomeRecording, recordingPeople, homeAssistantWork, assistantStage, homeDeviceSummary } from '../feedbackPresentation';
 import { PrivacyNoticeCard } from './PrivacyNotice';
 import { privacyNoticeAccepted, saveWelcomeChoices } from '../privacyNoticeLogic';
+import { buildPersonalContext, type PersonalScenario } from '../personalAssistant';
+import { PersonalContextPicker, PERSONAL_SCENARIOS } from './PersonalAssistant';
 import './Home.css';
 export function homeTitle(r:Route){return ({home:'首页',assistant:'问 Oops',voice:'说给 Oops 听',search:'搜索',notifications:'通知',welcome:'你好，我是 Oops'} as Record<string,string>)[r.view]||'Oops'}
 export function sessionVisible(d:AppData,id:string){return scopedSessionVisible(d,id)}
@@ -128,22 +130,32 @@ function localAnswer(q:string,all:AppData,context:boolean):LocalAnswer {
   return {text:`「${session.title}」里保留了这些原话：\n${turns.map(t=>`${t.speaker}：${t.text}`).join('\n')}\n可据此整理待验证的下一步，原话本身不代表已经确认的结论。`,sources:turns.map(t=>ref({kind:'session',id:session.id,sourceId:t.id,sourceTime:t.time}))};
 }
 
-export function buildLocalAnswer(q:string,all:AppData,context:boolean):LocalAnswer {
-  const result=localAnswer(q,all,context);if(!context)return result;
-  // Personal preferences must not be copied into a team answer or a shared derivation.
-  if(all.settings.space!=='我的空间')return result;
-  const length=all.settings.retention.answerLength||'适中',tone=all.settings.tone,focus=all.settings.retention.focus?.trim();
+export function buildLocalAnswer(q:string,all:AppData,context:boolean,options:{scenario?:PersonalScenario;excludeIds?:string[]}={}):LocalAnswer {
+  const snapshot=buildPersonalContext(all,{scenario:options.scenario||'通用',query:q,excludeIds:options.excludeIds});
+  let result=localAnswer(q,all,context);
+  if(!context||all.settings.space!=='我的空间')return result;
+  if(/角色|我是谁|偏好/.test(q)) {
+    const entries=snapshot.entries.filter(entry=>/偏好/.test(q)?['preference','habit'].includes(entry.kind):['identity','background'].includes(entry.kind));
+    return entries.length?{text:entries.map(entry=>entry.kind==='identity'?'当前档案：'+entry.text.replace('适用背景：','适用场景：'):entry.kind==='background'?'已核对的历史背景（单独保留）：\n'+(all.memories.find(memory=>memory.id===entry.id)?.body||entry.text):entry.text).join('\n\n'),sources:[...new Map(entries.flatMap(entry=>entry.sources).map(ref=>[JSON.stringify(ref),ref])).values()]}:{text:snapshot.enabled?'当前场景没有选用这类个人背景，可以在个性化助理里补充。':'个性化已暂停，开启后再使用你的个人背景。',sources:[]};
+  }
+  if(!snapshot.enabled)return result;
+  const preferences=snapshot.preferences,habits=snapshot.entries.filter(entry=>entry.kind==='habit');
+  const instruction=[preferences?.tone||'',...habits.map(entry=>entry.text)].join('；');
+  const length=preferences?.answerLength||'适中',tone=preferences?.tone||'',focus=preferences?.focus;
   const customLength=length.startsWith('自定义：')?length.slice(4):'',customTone=tone.startsWith('自定义：')?tone.slice(4):'';
   const requestedLimit=customLength.match(/(\d{2,4})\s*字/);const limit=requestedLimit?Math.max(40,Math.min(2000,Number(requestedLimit[1]))):220;
-  let text=result.text;
-
-  if(tone==='先一起探索，再给建议'||/探索|一起讨论/.test(customTone))text='先核对已有信息：\n'+text;
-  else if(tone==='逐步说明操作'||/步骤|分步/.test(customTone))text='1. 查看已有内容\n'+text+'\n2. 打开来源核对\n3. 决定是否整理待办或候选记忆';
-  if(length==='详细'||/详细|充分展开/.test(customLength))text+='\n核对时分别确认：哪些已有依据、哪些仍缺资料、下一步由谁负责。这里只整理本地记录，不自动确认事实或执行。';
-  if(focus)text+='\n你当前希望关注：'+focus;
-  if(length==='简短'||!!requestedLimit||/简短|精简/.test(customLength)){const suffix='…（完整依据见来源）';if(text.length>limit)text=text.slice(0,limit-suffix.length)+suffix;}
-  const usesPreferences=!!focus||length!=='适中'||tone==='先一起探索，再给建议'||tone==='逐步说明操作'||!!customTone;
-  const sources=usesPreferences&&!result.sources.some(ref=>ref.kind==='profile'&&ref.profileScope==='preferences')?[...result.sources,makeSourceReference(all,{kind:'profile',id:'my-profile',profileScope:'preferences'})]:result.sources;
+  let text=result.text,usesPreferences=false;
+  if(/探索|一起讨论/.test(instruction)){text='先核对已有信息：\n'+text;usesPreferences=true;}
+  else if(/逐步|步骤|分步/.test(instruction)){text='1. 查看已有内容\n'+text+'\n2. 打开来源核对\n3. 决定是否整理待办或候选记忆';usesPreferences=true;}
+  if(length==='详细'||/详细|充分展开/.test(customLength)){text+='\n核对时分别确认：哪些已有依据、哪些仍缺资料、下一步由谁负责。';usesPreferences=true;}
+  if(focus){text+='\n你当前希望关注：'+focus;usesPreferences=true;}
+  if(/优先|安排|建议|我接下来/.test(q)) {
+    const goals=snapshot.entries.filter(entry=>entry.kind==='goal').slice(0,2);
+    if(goals.length){text+='\n已确认目标：'+goals.map(entry=>entry.text).join('；');result={...result,sources:[...result.sources,...goals.flatMap(entry=>entry.sources)]};}
+  }
+  if(length==='简短'||/简短|精简/.test(instruction)||!!requestedLimit){const suffix='…（完整依据见来源）';if(text.length>limit)text=text.slice(0,limit-suffix.length)+suffix;usesPreferences=true;}
+  const used=usesPreferences?[...snapshot.entries.filter(entry=>entry.kind==='preference'),...habits]:[];
+  const sources=[...new Map([...result.sources,...used.flatMap(entry=>entry.sources)].map(ref=>[JSON.stringify(ref),ref])).values()];
   return {...result,text,sources};
 }
 
@@ -156,12 +168,14 @@ function referenceTitle(data:AppData,ref:SourceReference):string {
 export function Assistant() {
   const {data,update,navigate,route,toast}=useOops(); const [input,setInput]=useState(''),[context,setContext]=useState(true),[pending,setPending]=useState(false);
   const timer=useRef<ReturnType<typeof setTimeout>|null>(null),once=useRef(false);
+  const [scenario,setScenario]=useState<PersonalScenario>('通用'),[excludedIds,setExcludedIds]=useState<string[]>([]);
   function send(q:string,retryId?:string) {
     if(!q.trim()||pending)return;
     const text=q.trim(),space=data.settings.space,useBackground=context,questionId=retryId||`u${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
     if(retryId&&!data.messages.some(message=>message.id===retryId&&message.role==='user'&&(message.space||'我的空间')===space))return;
     if(!retryId)update(d=>({...d,messages:[...d.messages,{id:questionId,role:'user',text,space}]}));setInput('');setPending(true);
-    timer.current=setTimeout(()=>{update(d=>{const answer=buildLocalAnswer(text,{...d,settings:{...d.settings,space}},useBackground);return {...d,messages:[...d.messages,{id:`a${Date.now()}`,role:'assistant',text:answer.text,space,sources:answer.sources,replyToId:questionId}]}});setPending(false)},700);
+    const answer=buildLocalAnswer(text,data,useBackground,{scenario,excludeIds:excludedIds});
+    timer.current=setTimeout(()=>{update(d=>{if(d.settings.space!==space)return d;const valid=provenanceAvailable(d,answer.sources);return {...d,messages:[...d.messages,{id:`a${Date.now()}`,role:'assistant',text:valid?answer.text:'背景或来源已变化，请重新提问。',invalidated:!valid,space,sources:answer.sources,replyToId:questionId}]}});setPending(false)},700);
   }
   useEffect(()=>{if(route.mode&&!once.current){once.current=true;send(route.mode);window.history.replaceState(null,'','#assistant')}return()=>{if(timer.current)clearTimeout(timer.current)}},[]);
   const messages=data.messages.filter(m=>(m.space||'我的空间')===data.settings.space);
@@ -182,7 +196,7 @@ export function Assistant() {
     const id=`MEM-${Date.now().toString(36)}`;
     update(d=>({...d,memories:[{id,title:'提问中的待验证建议',body:answer.text,category:'记忆',tags:['待确认'],visibility:'私有',updated:'今天',confirmed:false,sources:answer.sources,...derivedSource(answer)},...d.memories],settings:{...d.settings,space:'我的空间'}}));toast('引用已保留，确认后才可使用');navigate({view:'memory-candidate',id});
   }
-  return <div className="stack"><div className="private-caption"><Icon name="lock-key" size={14}/>私人提问<Badge>本地资料整理</Badge></div>{messages.length===0?<><div className="assistant-welcome"><img src="/brand/mascot.png" alt="Oops"/><h2>从一个问题开始</h2><p>一起回想、整理，再找到下一步。</p></div><div className="suggestion-grid">{['今天有哪些待办？','帮我整理桌面伙伴的灵感','项目预算是多少？'].map(q=><button key={q} onClick={()=>send(q)}>{q}<Icon name="arrow-up-left" size={16}/></button>)}</div></>:messages.map(m=>{const available=messageAvailable(data,m);return <div key={m.id} className={`chat-bubble ${m.role}`}><small>{m.role==='user'?'我':'Oops'}</small><p>{available?m.text:'这条回答的来源已变化或撤回，请重新提问。'}</p>{available&&m.role==='assistant'&&(m.sources?.map((ref,i)=><Source key={`${ref.kind}:${ref.id}:${i}`} title={referenceTitle(data,ref)} time={ref.sourceTime} onClick={()=>navigate(referenceRoute(ref))}/>)||m.sourceSession&&<Source title={data.sessions.find(s=>s.id===m.sourceSession)?.title||'相关会话'} onClick={()=>navigate({view:'session-detail',id:m.sourceSession})}/>)}</div>})}{pending&&<div className="chat-bubble assistant" role="status">正在整理可引用的本地资料…</div>}{unanswered&&!pending&&<Card><Notice>刚才的问题还没有整理完成，可以从这里继续。</Notice><Button tone="secondary" onClick={()=>send(unanswered.text,unanswered.id)}>继续整理这个问题</Button></Card>}{last&&!pending&&<div className="action-grid"><Button tone="secondary" icon="check-square" onClick={draft}>形成待办</Button><Button tone="secondary" icon="bookmark-simple" onClick={remember}>留下候选</Button></div>}<Toggle label="使用我的已保存背景" value={context} onChange={setContext} hint="仅引用当前可查看、来源仍有效的内容"/><Field label="继续问 Oops" value={input} onChange={setInput} placeholder="输入问题…" multiline/><Button onClick={()=>send(input)} disabled={!input.trim()||pending} icon="arrow-up">发送</Button><Button tone="quiet" icon="microphone" onClick={()=>navigate({view:'voice'})}>改用语音</Button></div>;
+  return <div className="stack"><div className="private-caption"><Icon name="lock-key" size={14}/>私人提问<Badge>本地资料整理</Badge></div>{messages.length===0?<><div className="assistant-welcome"><img src="/brand/mascot.png" alt="Oops"/><h2>从一个问题开始</h2><p>一起回想、整理，再找到下一步。</p></div><div className="suggestion-grid">{['今天有哪些待办？','帮我整理桌面伙伴的灵感','项目预算是多少？'].map(q=><button key={q} onClick={()=>send(q)}>{q}<Icon name="arrow-up-left" size={16}/></button>)}</div></>:messages.map(m=>{const available=messageAvailable(data,m);return <div key={m.id} className={`chat-bubble ${m.role}`}><small>{m.role==='user'?'我':'Oops'}</small><p>{available?m.text:'这条回答的来源已变化或撤回，请重新提问。'}</p>{available&&m.role==='assistant'&&(m.sources?.map((ref,i)=><Source key={`${ref.kind}:${ref.id}:${i}`} title={referenceTitle(data,ref)} time={ref.sourceTime} onClick={()=>navigate(referenceRoute(ref))}/>)||m.sourceSession&&<Source title={data.sessions.find(s=>s.id===m.sourceSession)?.title||'相关会话'} onClick={()=>navigate({view:'session-detail',id:m.sourceSession})}/>)}</div>})}{pending&&<div className="chat-bubble assistant" role="status">正在整理可引用的本地资料…</div>}{unanswered&&!pending&&<Card><Notice>刚才的问题还没有整理完成，可以从这里继续。</Notice><Button tone="secondary" onClick={()=>send(unanswered.text,unanswered.id)}>继续整理这个问题</Button></Card>}{last&&!pending&&<div className="action-grid"><Button tone="secondary" icon="check-square" onClick={draft}>形成待办</Button><Button tone="secondary" icon="bookmark-simple" onClick={remember}>留下候选</Button></div>}<SelectField label="本次场景" value={scenario} options={PERSONAL_SCENARIOS} onChange={value=>{setScenario(value as PersonalScenario);setExcludedIds([])}}/>{context&&<PersonalContextPicker scenario={scenario} query={input} excludedIds={excludedIds} onChange={setExcludedIds}/>}<Toggle label="使用我的已保存背景" value={context} onChange={setContext} hint="仅引用当前可查看、来源仍有效的内容"/><Field label="继续问 Oops" value={input} onChange={setInput} placeholder="输入问题…" multiline/><Button onClick={()=>send(input)} disabled={!input.trim()||pending} icon="arrow-up">发送</Button><Button tone="quiet" icon="microphone" onClick={()=>navigate({view:'voice'})}>改用语音</Button></div>;
 }
 export function Voice(){const {navigate}=useOops();const [stage,setStage]=useState<'idle'|'listening'|'review'>('idle');const [text,setText]=useState('');useEffect(()=>{if(stage!=='listening')return;const steps=['帮我整理…','帮我整理桌面伙伴…','帮我整理桌面伙伴的想法，形成一个待验证的产品故事。'];let i=0;const timer=setInterval(()=>{setText(steps[i++]);if(i===steps.length){clearInterval(timer);setStage('review')}},1000);return()=>clearInterval(timer)},[stage]);return <div className="stack"><div className="voice-stage"><img src="/brand/mascot.png" className={stage==='listening'?'home-mascot-listening':stage==='review'?'home-mascot-ready':''} alt="Oops正在听"/><h2>{stage==='listening'?'正在听你的想法':stage==='review'?'核对刚才说的话':'把想法说给 Oops'}</h2><p>用一段示例语音体验流程</p><button className={`voice-record ${stage==='listening'?'listening':''}`} aria-label={stage==='listening'?'停止语音输入':'体验语音输入'} onClick={()=>{if(stage==='listening')setStage('review');else{setText('');setStage('listening')}}}><Icon name={stage==='listening'?'stop':'microphone'} size={32}/></button></div>{text&&<Field label={stage==='listening'?'正在识别':'确认后的文字'} value={text} onChange={setText} multiline/>}{stage==='review'&&<><Notice>可以修改文字后再提交。</Notice><Button disabled={!text.trim()} onClick={()=>navigate({view:'assistant',mode:text})}>确认并提问</Button></>}<Button tone="secondary" onClick={()=>navigate({view:'assistant'})}>改用文字输入</Button></div>}
 export function SearchScreen(){const {data,navigate}=useOops();const [q,setQ]=useState('');const [kind,setKind]=useState('全部');const results=searchSavedContent(data,q,kind);return <div className="stack"><Search value={q} onChange={setQ} placeholder="搜索原话、会话、任务、记忆…"/><Chips items={['全部','会话','任务','记忆','人物']} value={kind} onChange={setKind}/>{!q&&<div className="search-hints">{['KPI','资料卡','预算','王宁'].map(x=><button className="chip" onClick={()=>setQ(x)} key={x}>{x}</button>)}</div>}<p className="meta">{data.settings.space} · {results.length}项结果</p>{results.length?results.map((r,i)=><Row key={`${r.title}${i}`} title={r.title} subtitle={`${r.kind} · ${r.body.slice(0,65)}`} icon={r.icon} onClick={()=>navigate(r.route)}/>):<Empty title="没有找到相关内容" body="换一个原话关键词，或清除当前筛选。" action="清除筛选" onAction={()=>{setQ('');setKind('全部')}}/>}</div>}

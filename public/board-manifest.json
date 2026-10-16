@@ -1,32 +1,21 @@
 {
   "metadata": {
-    "revision": "p1-device-settings-20261012",
-    "logicReviewedAt": "2026-10-13",
+    "revision": "personal-assistant-20261016",
+    "logicReviewedAt": "2026-10-16",
     "browserVerified": true,
     "screenshotRefreshPending": false,
     "changedViews": [
-      "home",
-      "memory-project",
-      "session-create",
-      "session-detail",
-      "session-listening",
-      "session-mode",
-      "settings",
-      "settings-deskpet",
-      "settings-device",
-      "settings-devices",
-      "settings-listening",
-      "settings-members",
-      "settings-pair",
-      "settings-retention",
-      "settings-sharing",
-      "settings-spaces"
+      "settings-personal-assistant",
+      "assistant",
+      "task-plan",
+      "memory",
+      "settings"
     ],
-    "capturedAt": "2026-10-13T02:26:14.920Z",
+    "capturedAt": "2026-10-16T10:36:34.054001+00:00",
     "capturedFrom": "2026-10-12T13:54:13.404Z",
     "app": "https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/",
-    "screenshots": 194,
-    "coverage": 217
+    "screenshots": 197,
+    "coverage": 220
   },
   "pages": [
     {
@@ -2542,6 +2531,42 @@
           "kind": "click",
           "role": "switch",
           "name": "开机自动聆听",
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "f24-personal-assistant",
+      "title": "个性化助理 · 场景背景与学习开关",
+      "group": "设置",
+      "route": {
+        "view": "settings-personal-assistant"
+      },
+      "scene": "personal-assistant"
+    },
+    {
+      "key": "f25-personal-habit-review",
+      "title": "个人习惯 · 原话核对、修改与忽略",
+      "group": "记忆",
+      "route": {
+        "view": "settings-personal-assistant",
+        "mode": "pending"
+      },
+      "scene": "personal-assistant"
+    },
+    {
+      "key": "f26-personal-context",
+      "title": "问答 · 本次个人背景选择",
+      "group": "首页",
+      "route": {
+        "view": "assistant"
+      },
+      "scene": "personal-assistant",
+      "actions": [
+        {
+          "kind": "click",
+          "role": "button",
+          "name": "本次使用的背景 4 项",
           "exact": true
         }
       ]
@@ -5913,6 +5938,46 @@
       ],
       "key": "D12",
       "group": "设置"
+    },
+    {
+      "id": "PA01",
+      "title": "个性化助理 · 场景背景与学习开关",
+      "module": "设置",
+      "route": {
+        "view": "settings-personal-assistant"
+      },
+      "scene": "personal-assistant",
+      "shot": "f24-personal-assistant",
+      "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。",
+      "key": "PA01",
+      "group": "设置"
+    },
+    {
+      "id": "PA02",
+      "title": "个人习惯 · 原话核对、修改与忽略",
+      "module": "记忆",
+      "route": {
+        "view": "settings-personal-assistant",
+        "mode": "pending"
+      },
+      "scene": "personal-assistant",
+      "shot": "f25-personal-habit-review",
+      "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。",
+      "key": "PA02",
+      "group": "记忆"
+    },
+    {
+      "id": "PA03",
+      "title": "问答 · 本次个人背景选择",
+      "module": "首页",
+      "route": {
+        "view": "assistant"
+      },
+      "scene": "personal-assistant",
+      "shot": "f26-personal-context",
+      "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。",
+      "key": "PA03",
+      "group": "首页"
     }
   ]
 }

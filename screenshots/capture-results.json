@@ -14,20 +14,6 @@
     "revision": "p1-device-settings-20261012"
   },
   {
-    "key": "h02-assistant",
-    "title": "问 Oops",
-    "route": {
-      "view": "assistant"
-    },
-    "scene": "default",
-    "status": "captured",
-    "capturedAt": "2026-10-12T13:54:36.792Z",
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 9:54\n- banner:\n  - button \"返回上一页\"\n  - heading \"问 Oops\" [level=1]\n  - button \"回到首页\"\n- main \"问 Oops\":\n  - text: 私人提问\n  - generic: 本地资料整理\n  - img \"Oops\"\n  - heading \"从一个问题开始\" [level=2]\n  - paragraph: 一起回想、整理，再找到下一步。\n  - button \"今天有哪些待办？\"\n  - button \"帮我整理桌面伙伴的灵感\"\n  - button \"项目预算是多少？\"\n  - strong: 使用我的已保存背景\n  - generic: 仅引用当前可查看、来源仍有效的内容\n  - switch \"使用我的已保存背景\" [checked]\n  - generic: 继续问 Oops\n  - textbox \"继续问 Oops\":\n    - /placeholder: 输入问题…\n  - button \"发送\" [disabled]:\n    - generic: 发送\n  - button \"改用语音\":\n    - generic: 改用语音\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
-    "bytes": 24356,
-    "sha256": "82d05a2e6125da8d2d87906fa4b4233a71b693ec04f0cdb91ddc3db2798b0c19",
-    "revision": "p1-device-settings-20261012"
-  },
-  {
     "key": "h03-voice",
     "title": "说给 Oops 听",
     "route": {
@@ -487,21 +473,6 @@
     "revision": "p1-device-settings-20261012"
   },
   {
-    "key": "t08-task-plan",
-    "title": "助手准备 · 资料与产出",
-    "route": {
-      "view": "task-plan",
-      "id": "TASK-021"
-    },
-    "scene": "tasks-plan",
-    "status": "captured",
-    "capturedAt": "2026-10-12T13:54:58.054Z",
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 9:54\n- banner:\n  - button \"返回上一页\"\n  - heading \"助手准备\" [level=1]\n  - button \"新建任务\"\n- main \"助手准备\":\n  - generic: 为这项任务准备内容\n  - heading \"准备第三季度 KPI 复盘\" [level=2]\n  - paragraph: 先整理目标、实际、差异与原因，再准备6页汇报PPT。缺少的数据先确认。\n  - paragraph: 我负责 · 10月09日 17:00 · 待做\n  - button \"工作助手 查资料、整理报告、做 PPT · 体验工作状态\":\n    - strong: 工作助手\n    - generic: 查资料、整理报告、做 PPT · 体验工作状态\n  - heading \"准备个人草稿\" [level=2]\n  - generic: 准备的内容\n  - combobox \"准备的内容\":\n    - option \"资料要点\"\n    - option \"跟进文字\"\n    - option \"行动步骤\"\n    - option \"文档正文\"\n    - option \"文档正文与汇报提纲\" [selected]\n  - heading \"这次允许使用\" [level=2]\n  - checkbox \"任务引用的原话\" [checked]\n  - generic: 任务引用的原话\n  - paragraph: 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。\n  - button \"产品头脑风暴 · 00:18:02\":\n    - generic: 产品头脑风暴 · 00:18:02\n  - checkbox \"产品指标.xlsx\" [checked]\n  - generic: 产品指标.xlsx\n  - paragraph: 预设演示资料：第三季度有效记录完成率目标80%，实际74%；样本为100次体验记录。统计口径：开始记录后完成保存与核对的占比。正式汇报前需核对原始业务数据。\n  - button \"管理附入资料\":\n    - generic: 管理附入资料\n  - text: 本次预计\n  - heading \"16点\" [level=2]\n  - text: 已经使用\n  - heading \"0点\" [level=2]\n  - generic: 本任务额度上限\n  - spinbutton \"本任务额度上限\": \"40\"\n  - paragraph: 准备可修改的正文、资料要点或汇报提纲，可预览、编辑并下载文本。额度与准备为本地示例。\n  - checkbox \"允许读取以上所选原话与资料\"\n  - generic: 允许读取以上所选原话与资料\n  - checkbox \"允许生成这次个人草稿\"\n  - generic: 允许生成这次个人草稿\n  - button \"允许并开始准备\":\n    - generic: 允许并开始准备\n  - button \"保存配置，稍后准备\":\n    - generic: 保存配置，稍后准备\n  - paragraph: 外部消息、邮件、共享与日程需在具体内容旁再次确认。\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
-    "bytes": 27349,
-    "sha256": "aa81c642c356b0c6f5ff6d60a9e49b0e4f784e78a406758f1e03b42195234eee",
-    "revision": "p1-device-settings-20261012"
-  },
-  {
     "key": "t09-task-authorize",
     "title": "允许助手准备",
     "route": {
@@ -760,20 +731,6 @@
     "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 9:55\n- banner:\n  - button \"返回上一页\"\n  - heading \"补充资料\" [level=1]\n  - button \"新建任务\"\n- main \"补充资料\":\n  - generic: 选择当前可见资料\n  - combobox \"选择当前可见资料\":\n    - option \"不选已有资料\" [selected]\n    - option \"产品指标.xlsx · 产品头脑风暴 · 6%A0%87.xlsx\"\n    - option \"用户访谈摘要.pdf · 产品头脑风暴 · E8%A6%81.pdf\"\n  - generic: 资料名称（可留空）\n  - textbox \"资料名称（可留空）\":\n    - /placeholder: \"\"\n  - generic: 本人补充内容\n  - textbox \"本人补充内容\":\n    - /placeholder: \"\"\n  - button \"附入这项工作\":\n    - generic: 附入这项工作\n  - heading \"已附入的资料\" [level=2]\n  - generic: 已附入\n  - heading \"产品指标.xlsx\" [level=3]\n  - paragraph: 预设演示资料：第三季度有效记录完成率目标80%，实际74%；样本为100次体验记录。统计口径：开始记录后完成保存与核对的占比。正式汇报前需核对原始业务数据。\n  - button \"从当前任务移除\":\n    - generic: 从当前任务移除\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
     "bytes": 26074,
     "sha256": "340feec94811bb57a56ed0d23bb370ab2b8ffbcfe70dd11e2e79bfad2fe7129a",
-    "revision": "p1-device-settings-20261012"
-  },
-  {
-    "key": "m01-memory",
-    "title": "记忆",
-    "route": {
-      "view": "memory"
-    },
-    "scene": "default",
-    "status": "captured",
-    "capturedAt": "2026-10-12T13:55:02.324Z",
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 9:55\n- banner:\n  - button \"搜索全部内容\"\n  - heading \"记忆\" [level=1]\n  - button \"回到首页\"\n- main \"记忆\":\n  - tablist:\n    - tab \"记忆\" [selected]\n    - tab \"人物\"\n    - tab \"项目\"\n  - textbox \"搜索内容、标签\"\n  - region \"筛选\":\n    - button \"全部\" [pressed]\n    - button \"可用\"\n    - button \"待核对\"\n    - button \"已收藏\"\n    - button \"已停用\"\n  - generic: 只对你可见\n  - heading \"Oops 对我的理解\" [level=3]\n  - button \"核对\":\n    - generic: 核对\n  - paragraph: 来自你填写的身份、偏好和已确认的目标与背景，随时可以纠正。\n  - button \"灵感\":\n    - generic: 灵感\n  - button \"成长\":\n    - generic: 成长\n  - button \"收藏\":\n    - generic: 收藏\n  - button \"模板\":\n    - generic: 模板\n  - button \"需要你确认 1 条新信息待核对 核对后再用于后续建议\":\n    - generic: 需要你确认\n    - heading \"1 条新信息待核对\" [level=3]\n    - paragraph: 核对后再用于后续建议\n  - heading \"长期记忆\" [level=2]\n  - button \"新增\"\n  - button \"记忆 我在 Oops 项目的角色 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我在 Oops 项目的角色\" [level=3]\n    - paragraph: 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n    - paragraph: 今天 · 私有\n  - button \"记忆 我的职责是否发生变化？ 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我的职责是否发生变化？\" [level=3]\n    - paragraph: 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。\n    - paragraph: 今天 · 私有\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
-    "bytes": 26405,
-    "sha256": "5cb46a929e4ecd3992fda0378bd9cc2184e20d4680826a98fff0b77523967641",
     "revision": "p1-device-settings-20261012"
   },
   {
@@ -1067,20 +1024,6 @@
     "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 9:55\n- banner:\n  - button \"返回上一页\"\n  - heading \"项目库\" [level=1]\n  - button \"回到首页\"\n- main \"项目库\":\n  - tablist:\n    - tab \"记忆\"\n    - tab \"人物\"\n    - tab \"项目\" [selected]\n  - textbox \"搜索项目\"\n  - heading \"进行中的项目\" [level=2]\n  - button \"新增\"\n  - button \"Oops 首版 3 位成员 · 预算 ¥100,000\":\n    - strong: Oops 首版\n    - generic: 3 位成员 · 预算 ¥100,000\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
     "bytes": 18577,
     "sha256": "bc4d10c7664ea117234a986264834630657a8a8c5067724d7f233d5f854bc24f",
-    "revision": "p1-device-settings-20261012"
-  },
-  {
-    "key": "u01-settings",
-    "title": "设置",
-    "route": {
-      "view": "settings"
-    },
-    "scene": "default",
-    "status": "captured",
-    "capturedAt": "2026-10-12T13:55:19.004Z",
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 9:55\n- banner:\n  - button \"搜索全部内容\"\n  - heading \"设置\" [level=1]\n  - button \"回到首页\"\n- main \"设置\":\n  - paragraph: 调整你的助理、设备与资料使用方式\n  - heading \"账户\" [level=2]\n  - button \"账户与安全 林\":\n    - strong: 账户与安全\n    - generic: 林\n  - button \"用量与方案\":\n    - strong: 用量与方案\n  - heading \"身份与助理\" [level=2]\n  - button \"身份与角色 产品负责人\":\n    - strong: 身份与角色\n    - generic: 产品负责人\n  - button \"助理偏好 回答方式、长度与关注事项\":\n    - strong: 助理偏好\n    - generic: 回答方式、长度与关注事项\n  - button \"我的声音身份 声音样本、身份关联与使用范围\":\n    - strong: 我的声音身份\n    - generic: 声音样本、身份关联与使用范围\n  - heading \"设备与聆听\" [level=2]\n  - button \"设备与声音入口 0 台示例设备\":\n    - strong: 设备与声音入口\n    - generic: 0 台示例设备\n  - button \"聆听设置 对话检测、唤醒与自动起止\":\n    - strong: 聆听设置\n    - generic: 对话检测、唤醒与自动起止\n  - heading \"工具与通知\" [level=2]\n  - button \"工具连接 0 个示例连接\":\n    - strong: 工具连接\n    - generic: 0 个示例连接\n  - button \"通知与自主等级\":\n    - strong: 通知与自主等级\n  - heading \"隐私与共享\" [level=2]\n  - button \"隐私与数据 记录保存、声音许可与数据管理\":\n    - strong: 隐私与数据\n    - generic: 记录保存、声音许可与数据管理\n  - button \"内容范围与共享 我的内容 · 管理主动共享的内容\":\n    - strong: 内容范围与共享\n    - generic: 我的内容 · 管理主动共享的内容\n  - paragraph: Oops 体验版\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
-    "bytes": 25626,
-    "sha256": "dd6f447e1d4349572f5ed7909494d79cfe30ac710b6f9902d0de7d82535ae7ce",
     "revision": "p1-device-settings-20261012"
   },
   {
@@ -2403,20 +2346,6 @@
     "revision": "p1-device-settings-20261012"
   },
   {
-    "key": "f14-memory-understanding",
-    "title": "个人理解 · 场景、更新时间与纠正",
-    "route": {
-      "view": "memory"
-    },
-    "scene": "default",
-    "status": "captured",
-    "capturedAt": "2026-10-12T13:56:30.585Z",
-    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 9:56\n- banner:\n  - button \"搜索全部内容\"\n  - heading \"记忆\" [level=1]\n  - button \"回到首页\"\n- main \"记忆\":\n  - tablist:\n    - tab \"记忆\" [selected]\n    - tab \"人物\"\n    - tab \"项目\"\n  - textbox \"搜索内容、标签\"\n  - region \"筛选\":\n    - button \"全部\" [pressed]\n    - button \"可用\"\n    - button \"待核对\"\n    - button \"已收藏\"\n    - button \"已停用\"\n  - generic: 只对你可见\n  - heading \"Oops 对我的理解\" [level=3]\n  - button \"收起\" [active]:\n    - generic: 收起\n  - paragraph: 来自你填写的身份、偏好和已确认的目标与背景，随时可以纠正。\n  - generic: 由你填写 · 当前身份\n  - button \"产品负责人 林\":\n    - strong: 产品负责人\n    - generic: 林\n  - paragraph: 适用场景：Oops 首版\n  - paragraph: 更新时间未记录\n  - button \"查看与纠正身份\":\n    - generic: 查看与纠正身份\n  - generic: 由你设置 · 助理偏好\n  - button \"先结论，再给依据 回答长度：简洁\":\n    - strong: 先结论，再给依据\n    - generic: 回答长度：简洁\n  - paragraph: 适用场景：尚未限定，可在偏好中补充\n  - paragraph: 更新时间未记录\n  - paragraph: 当前关注：推进明确的下一步\n  - button \"查看与纠正偏好\":\n    - generic: 查看与纠正偏好\n  - heading \"已确认目标\" [level=4]\n  - generic: 已确认目标\n  - generic: 私有\n  - heading \"让表达更有结构\" [level=4]\n  - paragraph: 每次讨论先说明结论、依据和下一步，每周回顾两段表达。\n  - paragraph: 原记录更新时间：本周\n  - generic \"查看依据与来源\"\n  - button \"查看完整内容\":\n    - generic: 查看完整内容\n  - button \"纠正这条信息\":\n    - generic: 纠正这条信息\n  - heading \"已确认背景\" [level=4]\n  - generic: 已确认背景\n  - generic: 私有\n  - heading \"我在 Oops 项目的角色\" [level=4]\n  - paragraph: 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n  - paragraph: 原记录更新时间：今天\n  - generic \"查看依据与来源\"\n  - button \"查看完整内容\":\n    - generic: 查看完整内容\n  - button \"纠正这条信息\":\n    - generic: 纠正这条信息\n  - button \"灵感\":\n    - generic: 灵感\n  - button \"成长\":\n    - generic: 成长\n  - button \"收藏\":\n    - generic: 收藏\n  - button \"模板\":\n    - generic: 模板\n  - button \"需要你确认 1 条新信息待核对 核对后再用于后续建议\":\n    - generic: 需要你确认\n    - heading \"1 条新信息待核对\" [level=3]\n    - paragraph: 核对后再用于后续建议\n  - heading \"长期记忆\" [level=2]\n  - button \"新增\"\n  - button \"记忆 我在 Oops 项目的角色 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我在 Oops 项目的角色\" [level=3]\n    - paragraph: 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n    - paragraph: 今天 · 私有\n  - button \"记忆 我的职责是否发生变化？ 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我的职责是否发生变化？\" [level=3]\n    - paragraph: 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。\n    - paragraph: 今天 · 私有\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
-    "bytes": 26333,
-    "sha256": "878dcb3e8fb2b2fd56c9ff4e1334308ddd8dfa536a5ef2340af6c92716310858",
-    "revision": "p1-device-settings-20261012"
-  },
-  {
     "key": "f15-document-role-source",
     "title": "文档角色 · 选定来源与原话",
     "route": {
@@ -2885,5 +2814,119 @@
     "bytes": 30008,
     "sha256": "04bee8681aedcd9309b1fb3b3d3b9a7ebe25a9142217dc531233552da4bfd5b5",
     "revision": "p1-device-settings-20261012"
+  },
+  {
+    "key": "h02-assistant",
+    "title": "问 Oops",
+    "route": {
+      "view": "assistant"
+    },
+    "scene": "default",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:31.731781+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"返回上一页\"\n  - heading \"问 Oops\" [level=1]\n  - button \"回到首页\"\n- main \"问 Oops\":\n  - text: 私人提问\n  - generic: 本地资料整理\n  - img \"Oops\"\n  - heading \"从一个问题开始\" [level=2]\n  - paragraph: 一起回想、整理，再找到下一步。\n  - button \"今天有哪些待办？\"\n  - button \"帮我整理桌面伙伴的灵感\"\n  - button \"项目预算是多少？\"\n  - generic: 本次场景\n  - combobox \"本次场景\":\n    - option \"通用\" [selected]\n    - option \"会议\"\n    - option \"汇报\"\n    - option \"写作\"\n    - option \"研究\"\n  - generic \"本次使用的背景 4 项\":\n    - text: 本次使用的背景\n    - generic: 4 项\n  - strong: 使用我的已保存背景\n  - generic: 仅引用当前可查看、来源仍有效的内容\n  - switch \"使用我的已保存背景\" [checked]\n  - generic: 继续问 Oops\n  - textbox \"继续问 Oops\":\n    - /placeholder: 输入问题…\n  - button \"发送\" [disabled]:\n    - generic: 发送\n  - button \"改用语音\":\n    - generic: 改用语音\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 35860,
+    "sha256": "7001e4f15bc335a2bf18656ff2616ca3beb98584ccba5747c1a0de1b8da43dca",
+    "revision": "personal-assistant-20261016"
+  },
+  {
+    "key": "t08-task-plan",
+    "title": "助手准备 · 资料与产出",
+    "route": {
+      "view": "task-plan",
+      "id": "TASK-021"
+    },
+    "scene": "tasks-plan",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:32.011116+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"返回上一页\"\n  - heading \"助手准备\" [level=1]\n  - button \"新建任务\"\n- main \"助手准备\":\n  - generic: 为这项任务准备内容\n  - heading \"准备第三季度 KPI 复盘\" [level=2]\n  - paragraph: 先整理目标、实际、差异与原因，再准备6页汇报PPT。缺少的数据先确认。\n  - paragraph: 我负责 · 10月09日 17:00 · 待做\n  - button \"工作助手 查资料、整理报告、做 PPT · 体验工作状态\":\n    - strong: 工作助手\n    - generic: 查资料、整理报告、做 PPT · 体验工作状态\n  - heading \"准备个人草稿\" [level=2]\n  - generic: 准备的内容\n  - combobox \"准备的内容\":\n    - option \"资料要点\"\n    - option \"跟进文字\"\n    - option \"行动步骤\"\n    - option \"文档正文\"\n    - option \"文档正文与汇报提纲\" [selected]\n  - heading \"这次允许使用\" [level=2]\n  - checkbox \"任务引用的原话\" [checked]\n  - generic: 任务引用的原话\n  - paragraph: 第三季度 KPI 复盘先给一版框架，再做六页 PPT，周五17点前给我。\n  - button \"产品头脑风暴 · 00:18:02\":\n    - generic: 产品头脑风暴 · 00:18:02\n  - checkbox \"产品指标.xlsx\" [checked]\n  - generic: 产品指标.xlsx\n  - paragraph: 预设演示资料：第三季度有效记录完成率目标80%，实际74%；样本为100次体验记录。统计口径：开始记录后完成保存与核对的占比。正式汇报前需核对原始业务数据。\n  - button \"管理附入资料\":\n    - generic: 管理附入资料\n  - generic \"本次使用的背景 4 项\":\n    - text: 本次使用的背景\n    - generic: 4 项\n  - text: 本次预计\n  - heading \"16点\" [level=2]\n  - text: 已经使用\n  - heading \"0点\" [level=2]\n  - generic: 本任务额度上限\n  - spinbutton \"本任务额度上限\": \"40\"\n  - paragraph: 准备可修改的正文、资料要点或汇报提纲，可预览、编辑并下载文本。额度与准备为本地示例。\n  - checkbox \"允许读取以上所选原话与资料\"\n  - generic: 允许读取以上所选原话与资料\n  - checkbox \"允许生成这次个人草稿\"\n  - generic: 允许生成这次个人草稿\n  - button \"允许并开始准备\":\n    - generic: 允许并开始准备\n  - button \"保存配置，稍后准备\":\n    - generic: 保存配置，稍后准备\n  - paragraph: 外部消息、邮件、共享与日程需在具体内容旁再次确认。\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 43567,
+    "sha256": "4c8991a32b3ba049fda54795f929955eaefedb04490b3b90716c2c62b677ea03",
+    "revision": "personal-assistant-20261016"
+  },
+  {
+    "key": "m01-memory",
+    "title": "记忆",
+    "route": {
+      "view": "memory"
+    },
+    "scene": "default",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:32.240079+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"搜索全部内容\"\n  - heading \"记忆\" [level=1]\n  - button \"回到首页\"\n- main \"记忆\":\n  - tablist:\n    - tab \"记忆\" [selected]\n    - tab \"人物\"\n    - tab \"项目\"\n  - textbox \"搜索内容、标签\"\n  - region \"筛选\":\n    - button \"全部\" [pressed]\n    - button \"可用\"\n    - button \"待核对\"\n    - button \"已收藏\"\n    - button \"已停用\"\n  - generic: 只对你可见\n  - heading \"Oops 对我的理解\" [level=3]\n  - button \"管理背景与习惯\"\n  - button \"核对\":\n    - generic: 核对\n  - paragraph: 来自你填写的身份、偏好和已确认的目标与背景，随时可以纠正。\n  - button \"灵感\":\n    - generic: 灵感\n  - button \"成长\":\n    - generic: 成长\n  - button \"收藏\":\n    - generic: 收藏\n  - button \"模板\":\n    - generic: 模板\n  - button \"需要你确认 1 条新信息待核对 核对后再用于后续建议\":\n    - generic: 需要你确认\n    - heading \"1 条新信息待核对\" [level=3]\n    - paragraph: 核对后再用于后续建议\n  - heading \"长期记忆\" [level=2]\n  - button \"新增\"\n  - button \"记忆 我在 Oops 项目的角色 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我在 Oops 项目的角色\" [level=3]\n    - paragraph: 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n    - paragraph: 今天 · 私有\n  - button \"记忆 我的职责是否发生变化？ 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我的职责是否发生变化？\" [level=3]\n    - paragraph: 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。\n    - paragraph: 今天 · 私有\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 40131,
+    "sha256": "41db7ea7381c57874c2df16c8f129f7a1e5d8fc0e24dd8b9bae8b83e83c745e0",
+    "revision": "personal-assistant-20261016"
+  },
+  {
+    "key": "u01-settings",
+    "title": "设置",
+    "route": {
+      "view": "settings"
+    },
+    "scene": "default",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:32.441671+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"搜索全部内容\"\n  - heading \"设置\" [level=1]\n  - button \"回到首页\"\n- main \"设置\":\n  - paragraph: 调整你的助理、设备与资料使用方式\n  - heading \"账户\" [level=2]\n  - button \"账户与安全 林\":\n    - strong: 账户与安全\n    - generic: 林\n  - button \"用量与方案\":\n    - strong: 用量与方案\n  - heading \"身份与助理\" [level=2]\n  - button \"个性化助理\":\n    - strong: 个性化助理\n  - button \"身份与角色 产品负责人\":\n    - strong: 身份与角色\n    - generic: 产品负责人\n  - button \"助理偏好 回答方式、长度与关注事项\":\n    - strong: 助理偏好\n    - generic: 回答方式、长度与关注事项\n  - button \"我的声音身份 声音样本、身份关联与使用范围\":\n    - strong: 我的声音身份\n    - generic: 声音样本、身份关联与使用范围\n  - heading \"设备与聆听\" [level=2]\n  - button \"设备与声音入口 0 台示例设备\":\n    - strong: 设备与声音入口\n    - generic: 0 台示例设备\n  - button \"聆听设置 对话检测、唤醒与自动起止\":\n    - strong: 聆听设置\n    - generic: 对话检测、唤醒与自动起止\n  - heading \"工具与通知\" [level=2]\n  - button \"工具连接 0 个示例连接\":\n    - strong: 工具连接\n    - generic: 0 个示例连接\n  - button \"通知与自主等级\":\n    - strong: 通知与自主等级\n  - heading \"隐私与共享\" [level=2]\n  - button \"隐私与数据 记录保存、声音许可与数据管理\":\n    - strong: 隐私与数据\n    - generic: 记录保存、声音许可与数据管理\n  - button \"内容范围与共享 我的内容 · 管理主动共享的内容\":\n    - strong: 内容范围与共享\n    - generic: 我的内容 · 管理主动共享的内容\n  - paragraph: Oops 体验版\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 38582,
+    "sha256": "e4b0059e431bc438443076cfc4195f3e731a118e7a03a7b486bec32f24ab4dbb",
+    "revision": "personal-assistant-20261016"
+  },
+  {
+    "key": "f14-memory-understanding",
+    "title": "个人理解 · 场景、更新时间与纠正",
+    "route": {
+      "view": "memory"
+    },
+    "scene": "default",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:32.946642+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"搜索全部内容\"\n  - heading \"记忆\" [level=1]\n  - button \"回到首页\"\n- main \"记忆\":\n  - tablist:\n    - tab \"记忆\" [selected]\n    - tab \"人物\"\n    - tab \"项目\"\n  - textbox \"搜索内容、标签\"\n  - region \"筛选\":\n    - button \"全部\" [pressed]\n    - button \"可用\"\n    - button \"待核对\"\n    - button \"已收藏\"\n    - button \"已停用\"\n  - generic: 只对你可见\n  - heading \"Oops 对我的理解\" [level=3]\n  - button \"管理背景与习惯\"\n  - button \"收起\" [active]:\n    - generic: 收起\n  - paragraph: 来自你填写的身份、偏好和已确认的目标与背景，随时可以纠正。\n  - generic: 由你填写 · 当前身份\n  - button \"产品负责人 林\":\n    - strong: 产品负责人\n    - generic: 林\n  - paragraph: 适用场景：Oops 首版\n  - paragraph: 更新时间未记录\n  - button \"查看与纠正身份\":\n    - generic: 查看与纠正身份\n  - generic: 由你设置 · 助理偏好\n  - button \"先结论，再给依据 回答长度：简洁\":\n    - strong: 先结论，再给依据\n    - generic: 回答长度：简洁\n  - paragraph: 适用场景：尚未限定，可在偏好中补充\n  - paragraph: 更新时间未记录\n  - paragraph: 当前关注：推进明确的下一步\n  - button \"查看与纠正偏好\":\n    - generic: 查看与纠正偏好\n  - heading \"已确认目标\" [level=4]\n  - generic: 已确认目标\n  - generic: 私有\n  - heading \"让表达更有结构\" [level=4]\n  - paragraph: 每次讨论先说明结论、依据和下一步，每周回顾两段表达。\n  - paragraph: 原记录更新时间：本周\n  - generic \"查看依据与来源\"\n  - button \"查看完整内容\":\n    - generic: 查看完整内容\n  - button \"纠正这条信息\":\n    - generic: 纠正这条信息\n  - heading \"已确认背景\" [level=4]\n  - generic: 已确认背景\n  - generic: 私有\n  - heading \"我在 Oops 项目的角色\" [level=4]\n  - paragraph: 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n  - paragraph: 原记录更新时间：今天\n  - generic \"查看依据与来源\"\n  - button \"查看完整内容\":\n    - generic: 查看完整内容\n  - button \"纠正这条信息\":\n    - generic: 纠正这条信息\n  - button \"灵感\":\n    - generic: 灵感\n  - button \"成长\":\n    - generic: 成长\n  - button \"收藏\":\n    - generic: 收藏\n  - button \"模板\":\n    - generic: 模板\n  - button \"需要你确认 1 条新信息待核对 核对后再用于后续建议\":\n    - generic: 需要你确认\n    - heading \"1 条新信息待核对\" [level=3]\n    - paragraph: 核对后再用于后续建议\n  - heading \"长期记忆\" [level=2]\n  - button \"新增\"\n  - button \"记忆 我在 Oops 项目的角色 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我在 Oops 项目的角色\" [level=3]\n    - paragraph: 负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n    - paragraph: 今天 · 私有\n  - button \"记忆 我的职责是否发生变化？ 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。 今天 · 私有\":\n    - generic: 记忆\n    - heading \"我的职责是否发生变化？\" [level=3]\n    - paragraph: 之前是团队协调，现在会议中提到由我负责首版产品规划。需要确认适用的项目与时间。\n    - paragraph: 今天 · 私有\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 39006,
+    "sha256": "59dea6bd5317fdba794fb70da7268361fd144a43350fc74ba729e554ddd39ce1",
+    "revision": "personal-assistant-20261016"
+  },
+  {
+    "key": "f24-personal-assistant",
+    "title": "个性化助理 · 场景背景与学习开关",
+    "route": {
+      "view": "settings-personal-assistant"
+    },
+    "scene": "personal-assistant",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:33.247414+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"返回上一页\"\n  - heading \"个性化助理\" [level=1]\n  - button \"回到首页\"\n- main \"个性化助理\":\n  - generic: 示例 · 只对你可见\n  - heading \"按你的方式， 做好下一步。\" [level=2]:\n    - text: 按你的方式，\n    - text: 做好下一步。\n  - paragraph: 记住你确认的信息，在合适的时候用上。\n  - strong: \"4\"\n  - text: 项当前背景\n  - strong: \"1\"\n  - text: 条等你确认\n  - strong: 使用已确认的个人背景\n  - generic: 用于私人问答与个人草稿；每次都可以调整。\n  - switch \"使用已确认的个人背景\" [checked]\n  - strong: 从我的明确表达中学习偏好\n  - generic: 先形成待确认建议，确认后才使用。\n  - switch \"从我的明确表达中学习偏好\" [checked]\n  - tablist:\n    - tab \"正在使用\" [selected]\n    - tab \"待确认\"\n    - tab \"已停用\"\n  - region \"筛选\":\n    - button \"通用\" [pressed]\n    - button \"会议\"\n    - button \"汇报\"\n    - button \"写作\"\n    - button \"研究\"\n  - button \"身份与职责 产品负责人\":\n    - strong: 身份与职责\n    - generic: 产品负责人\n  - button \"回答与工作偏好 先结论，再给依据\":\n    - strong: 回答与工作偏好\n    - generic: 先结论，再给依据\n  - button \"当前目标 优先推进什么，由你确认\":\n    - strong: 当前目标\n    - generic: 优先推进什么，由你确认\n  - heading \"用于一般交流的背景\" [level=2]\n  - generic: 当前身份\n  - paragraph: 称呼：林；角色：产品负责人；适用背景：Oops 首版\n  - button \"本人填写的身份\":\n    - generic: 本人填写的身份\n  - button \"本人设置的偏好\":\n    - generic: 本人设置的偏好\n  - generic: 助理偏好\n  - paragraph: 回答方式：先结论，再给依据；回答长度：简洁；关注：推进明确的下一步\n  - button \"本人设置的偏好\":\n    - generic: 本人设置的偏好\n  - generic: 已确认背景\n  - paragraph: 我在 Oops 项目的角色：负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n  - button \"我在 Oops 项目的角色\":\n    - generic: 我在 Oops 项目的角色\n  - button \"产品头脑风暴\":\n    - generic: 产品头脑风暴\n  - generic: 当前目标\n  - paragraph: 让表达更有结构：每次讨论先说明结论、依据和下一步，每周回顾两段表达。\n  - button \"让表达更有结构\":\n    - generic: 让表达更有结构\n  - button \"本人设置的偏好\":\n    - generic: 本人设置的偏好\n  - button \"记下一条偏好\":\n    - generic: 记下一条偏好\n  - button \"这份背景保存在哪里？ 当前网页保存在本机；安卓版接入个人服务后可同步。\":\n    - strong: 这份背景保存在哪里？\n    - generic: 当前网页保存在本机；安卓版接入个人服务后可同步。\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 42768,
+    "sha256": "921d8d99450faaca70e4381ac94be98eda13000e0386ef38c333e9f56f483fb8",
+    "revision": "personal-assistant-20261016"
+  },
+  {
+    "key": "f25-personal-habit-review",
+    "title": "个人习惯 · 原话核对、修改与忽略",
+    "route": {
+      "view": "settings-personal-assistant",
+      "mode": "pending"
+    },
+    "scene": "personal-assistant",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:33.548902+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"返回上一页\"\n  - heading \"个性化助理\" [level=1]\n  - button \"回到首页\"\n- main \"个性化助理\":\n  - generic: 示例 · 只对你可见\n  - heading \"按你的方式， 做好下一步。\" [level=2]:\n    - text: 按你的方式，\n    - text: 做好下一步。\n  - paragraph: 记住你确认的信息，在合适的时候用上。\n  - strong: \"4\"\n  - text: 项当前背景\n  - strong: \"1\"\n  - text: 条等你确认\n  - strong: 使用已确认的个人背景\n  - generic: 用于私人问答与个人草稿；每次都可以调整。\n  - switch \"使用已确认的个人背景\" [checked]\n  - strong: 从我的明确表达中学习偏好\n  - generic: 先形成待确认建议，确认后才使用。\n  - switch \"从我的明确表达中学习偏好\" [checked]\n  - tablist:\n    - tab \"正在使用\"\n    - tab \"待确认\" [selected]\n    - tab \"已停用\"\n  - paragraph: 只从已核对为你本人的明确表达整理；不会把他人的话当成你的习惯。\n  - button \"检查新的偏好表达\":\n    - generic: 检查新的偏好表达\n  - generic: 待你确认 · 汇报\n  - paragraph: 我希望做汇报时先给结论，再列依据和下一步。\n  - button \"偏好沟通示例 · 00:00:10\":\n    - generic: 偏好沟通示例 · 00:00:10\n  - button \"确认记住\":\n    - generic: 确认记住\n  - button \"修改\":\n    - generic: 修改\n  - button \"不记住\":\n    - generic: 不记住\n  - button \"这份背景保存在哪里？ 当前网页保存在本机；安卓版接入个人服务后可同步。\":\n    - strong: 这份背景保存在哪里？\n    - generic: 当前网页保存在本机；安卓版接入个人服务后可同步。\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 40757,
+    "sha256": "652b16f79badbf35e1eb4b36089e0ff8e3810454e1eb7326c51c99a6aac87b60",
+    "revision": "personal-assistant-20261016"
+  },
+  {
+    "key": "f26-personal-context",
+    "title": "问答 · 本次个人背景选择",
+    "route": {
+      "view": "assistant"
+    },
+    "scene": "personal-assistant",
+    "status": "captured",
+    "capturedAt": "2026-10-16T10:36:34.054001+00:00",
+    "snapshot": "- 'button \"Preview device: iPhone\"':\n  - generic: iPhone\n- generic \"Device status bar\":\n  - generic: 6:36\n- banner:\n  - button \"返回上一页\"\n  - heading \"问 Oops\" [level=1]\n  - button \"回到首页\"\n- main \"问 Oops\":\n  - text: 私人提问\n  - generic: 本地资料整理\n  - img \"Oops\"\n  - heading \"从一个问题开始\" [level=2]\n  - paragraph: 一起回想、整理，再找到下一步。\n  - button \"今天有哪些待办？\"\n  - button \"帮我整理桌面伙伴的灵感\"\n  - button \"项目预算是多少？\"\n  - generic: 本次场景\n  - combobox \"本次场景\":\n    - option \"通用\" [selected]\n    - option \"会议\"\n    - option \"汇报\"\n    - option \"写作\"\n    - option \"研究\"\n  - generic \"本次使用的背景 4 项\" [active]:\n    - text: 本次使用的背景\n    - generic: 4 项\n  - paragraph: 适用场景：通用。临时取消只影响这次准备。\n  - checkbox \"当前身份：称呼：林；角色：产品负责人；适用背景：Oops 首版\" [checked]\n  - generic: 当前身份：称呼：林；角色：产品负责人；适用背景：Oops 首版\n  - button \"本人填写的身份\":\n    - generic: 本人填写的身份\n  - button \"本人设置的偏好\":\n    - generic: 本人设置的偏好\n  - checkbox \"助理偏好：回答方式：先结论，再给依据；回答长度：简洁；关注：推进明确的下一步\" [checked]\n  - generic: 助理偏好：回答方式：先结论，再给依据；回答长度：简洁；关注：推进明确的下一步\n  - button \"本人设置的偏好\":\n    - generic: 本人设置的偏好\n  - checkbox \"已确认背景：我在 Oops 项目的角色：负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\" [checked]\n  - generic: 已确认背景：我在 Oops 项目的角色：负责首版产品体验与功能规划；给我的建议先说结论，再给依据。\n  - button \"我在 Oops 项目的角色\":\n    - generic: 我在 Oops 项目的角色\n  - button \"产品头脑风暴\":\n    - generic: 产品头脑风暴\n  - checkbox \"当前目标：让表达更有结构：每次讨论先说明结论、依据和下一步，每周回顾两段表达。\" [checked]\n  - generic: 当前目标：让表达更有结构：每次讨论先说明结论、依据和下一步，每周回顾两段表达。\n  - button \"让表达更有结构\":\n    - generic: 让表达更有结构\n  - button \"本人设置的偏好\":\n    - generic: 本人设置的偏好\n  - button \"管理个性化助理\":\n    - generic: 管理个性化助理\n  - strong: 使用我的已保存背景\n  - generic: 仅引用当前可查看、来源仍有效的内容\n  - switch \"使用我的已保存背景\" [checked]\n  - generic: 继续问 Oops\n  - textbox \"继续问 Oops\":\n    - /placeholder: 输入问题…\n  - button \"发送\" [disabled]:\n    - generic: 发送\n  - button \"改用语音\":\n    - generic: 改用语音\n- navigation \"主导航\":\n  - button \"首页\":\n    - generic: 首页\n  - button \"会话\":\n    - generic: 会话\n  - button \"任务\":\n    - generic: 任务\n    - generic: \"3\"\n  - button \"记忆\":\n    - generic: 记忆\n  - button \"设置\":\n    - generic: 设置",
+    "bytes": 39725,
+    "sha256": "f165bf7de03bcca1f419575b9f33ee10c55901698144b8901cf862c95a550aa5",
+    "revision": "personal-assistant-20261016"
   }
 ]

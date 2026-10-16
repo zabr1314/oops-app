@@ -1,25 +1,14 @@
 {
-  "revision": "p1-device-settings-20261012",
-  "reviewedAt": "2026-10-13",
-  "scope": "两项P1前端：设备首配与开机自动聆听、设置入口整理；沿用现有会话与保存逻辑，安卓设备状态保持独立示例",
+  "revision": "personal-assistant-20261016",
+  "reviewedAt": "2026-10-16",
+  "scope": "个性化助理：确认的场景背景、可拒绝习惯候选、本次背景选择及个人账号同步接口；React保持本地示例",
   "browserVerified": true,
   "changedViews": [
-    "home",
-    "memory-project",
-    "session-create",
-    "session-detail",
-    "session-listening",
-    "session-mode",
-    "settings",
-    "settings-deskpet",
-    "settings-device",
-    "settings-devices",
-    "settings-listening",
-    "settings-members",
-    "settings-pair",
-    "settings-retention",
-    "settings-sharing",
-    "settings-spaces"
+    "settings-personal-assistant",
+    "assistant",
+    "task-plan",
+    "memory",
+    "settings"
   ],
   "screenshotRefreshPending": false,
   "fixedIssueGroups": 10,
@@ -30,15 +19,15 @@
     "total": 29
   },
   "verification": {
-    "logicTestsPassed": 323,
+    "logicTestsPassed": 410,
     "newLogicTests": 26,
     "boardTestsPassed": 7,
     "hostingTestsPassed": 4,
     "protectedRuntimeFiles": 28,
-    "nativeUITestEntriesPassed": 53,
+    "nativeUITestEntriesPassed": 114,
     "backendMeetingTestsPassed": 15,
-    "screenshotsCaptured": 194,
-    "interactiveEntries": 217,
+    "screenshotsCaptured": 197,
+    "interactiveEntries": 220,
     "backendSourceChangeTestsPassed": 12,
     "backendFakeFeishuTestsPassed": 11,
     "nativePreviewTestsPassed": 7,
@@ -52,7 +41,8 @@
     "newBackendStorageTests": 21,
     "inheritedBackendEvidence": "后端与JVM数字沿用P0已验证证据；本轮未改动或重跑后端/JVM。",
     "mergedBackendTestsPassed": 98,
-    "integrationBase": "024df7a"
+    "integrationBase": "024df7a",
+    "personalBackendTestsPassed": 71
   },
   "nativeFlow": {
     "entry": "native-flow.html",

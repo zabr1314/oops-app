@@ -59,3 +59,8 @@ python3 -m py_compile scripts/meeting_features.py scripts/notice_probe.py script
 python3 -m py_compile scripts/latency_report.py scripts/task_eval.py scripts/archive_to_eval.py scripts/filler_report.py scripts/meetings_overview.py scripts/label_meeting.py scripts/asr_words_probe.py deploy/live-speed-upgrade.py
 sh -n deploy/mac/oops-archive-pull.sh
 python3 -m py_compile scripts/speaker_attribution.py scripts/speaker_validation.py scripts/speaker_acceptance.py deploy/speaker-attribution-upgrade.py
+
+# Personal account context and native UI recovery, all offline fixtures.
+node --check android/app/src/main/assets/web/personal-assistant.js
+node --test android/app/src/test/js/personal-assistant-ui.test.js
+PYTHONPATH=scripts python3 -B -m unittest scripts.test_personal_context scripts.test_personal_context_http

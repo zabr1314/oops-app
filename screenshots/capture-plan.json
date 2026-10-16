@@ -2515,5 +2515,41 @@
         "exact": true
       }
     ]
+  },
+  {
+    "key": "f24-personal-assistant",
+    "title": "个性化助理 · 场景背景与学习开关",
+    "group": "设置",
+    "route": {
+      "view": "settings-personal-assistant"
+    },
+    "scene": "personal-assistant"
+  },
+  {
+    "key": "f25-personal-habit-review",
+    "title": "个人习惯 · 原话核对、修改与忽略",
+    "group": "记忆",
+    "route": {
+      "view": "settings-personal-assistant",
+      "mode": "pending"
+    },
+    "scene": "personal-assistant"
+  },
+  {
+    "key": "f26-personal-context",
+    "title": "问答 · 本次个人背景选择",
+    "group": "首页",
+    "route": {
+      "view": "assistant"
+    },
+    "scene": "personal-assistant",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "本次使用的背景 4 项",
+        "exact": true
+      }
+    ]
   }
 ]

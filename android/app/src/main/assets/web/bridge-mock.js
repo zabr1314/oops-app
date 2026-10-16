@@ -15,6 +15,29 @@
   const emitFeishuStatus = requestId => emit('feishu.status', {requestId, status:feishuStatus, account:feishuAccount,
     binding_revision:1,capabilities:{minutes_delivery:feishuStatus==='connected',recipients:feishuStatus==='connected',documents_write:feishuStatus==='connected',sharing:feishuStatus==='connected',messages_send:feishuStatus==='connected',calendar_delivery:feishuStatus==='connected',calendar_invite:feishuStatus==='connected',agent_file_delivery:feishuStatus==='connected'},mock:true});
   const deliveryReply = (p, status, extra = {}) => emit('minutes.delivery', {session_id:p.sessionId, requestId:p.requestId, status, draft:deliveryDrafts.get(p.sessionId), mock:true, ...extra});
+  const personalContext = {context_revision:0,profile:null,preferences:null,memories:[]}, personalOps = new Map();
+  function personalContextMock(type,p) {
+    if (!type.startsWith('personal.context.')) return false;
+    const reply = value => emit('personal.context',{...value,requestId:p.requestId,identity_revision:1,mock:true});
+    const failure = (code,message,status=409) => emit('error',{scope:'personalContext',operation:type,requestId:p.requestId,code,message,httpStatus:status});
+    if (feishuStatus !== 'connected') { failure('FEISHU_NOT_CONNECTED','先连接本人的示例账号',403);return true; }
+    if (type === 'personal.context.read') { reply(personalContext);return true; }
+    const action=type.split('.').at(-1),kind=['memory','delete'].includes(action)?'memory':action,id=kind==='memory'?p.memory_id:'current';
+    if (!['profile','preferences','memory'].includes(kind)) {failure('PERSONAL_CONTEXT_INVALID','不支持的示例操作',400);return true;}
+    const row=kind==='memory'?personalContext.memories.find(x=>x.id===id):personalContext[kind];
+    const op=personalOps.get(p.op_id),frozen=JSON.stringify({...p,requestId:undefined});
+    if (op && op.frozen!==frozen) {failure('PERSONAL_CONTEXT_OPERATION_CONFLICT','原操作不能换内容');return true;}
+    if (!op) {
+      if (p.expected_revision!==(row?.revision || 0)) {failure('PERSONAL_CONTEXT_REVISION_CONFLICT','其他设备已更新，请刷新后核对');return true;}
+      if (action!=='delete' && p.confirmed!==true) {failure('PERSONAL_CONTEXT_CONFIRMATION_REQUIRED','请明确确认本人内容',400);return true;}
+      const item={kind,id,revision:p.expected_revision+1,updated_at:new Date().toISOString(),status:action==='delete'?'deleted':'current',confirmed:action!=='delete',value:action==='delete'?null:p.value,source:action==='delete'?null:{kind:'manual'}};
+      if (kind==='memory') personalContext.memories=[...personalContext.memories.filter(x=>x.id!==id),item];else personalContext[kind]=item;
+      personalContext.context_revision++;personalOps.set(p.op_id,{frozen,revision:item.revision});
+      if (flow==='personal-timeout' && !failedOnce.has(p.op_id)) {failedOnce.add(p.op_id);return true;}
+    }
+    const item=kind==='memory'?personalContext.memories.find(x=>x.id===id):personalContext[kind];
+    reply({item,context_revision:personalContext.context_revision,replayed:!!op,operation_revision:personalOps.get(p.op_id).revision});return true;
+  }
   const team = ['Jason', '黄丽萍', '江古月', '洪玉麟', '林春源'];
   // Real device ASR observations for assets/test/dialog.wav (2026-10-06).
   const sample = [
@@ -207,6 +230,7 @@
     reply(agent?{delivery:op || null}:{calendar:op || null});return true;
   }
   function handle(type, p) {
+    if(personalContextMock(type,p))return;
     if(personalWorkflowMock(type,p))return;
     const listFailure = flow === 'list-failure' && ['history.list', 'projects.list', 'project.open', 'tasks.list'].includes(type);
     const reviewFailure = flow === 'review-failure' && ['review.set', 'speaker.correct'].includes(type);

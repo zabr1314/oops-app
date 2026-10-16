@@ -1,5 +1,6 @@
 import type { AppData, Session, SessionStorage, Transcript } from './store';
 import { invalidateSessionSources, makeSourceReference } from './sourceAccess';
+import { reconcilePersonalAssistantState } from './personalAssistant';
 
 export const DAILY_WINDOW_MS = 300000;
 const DAY_MS = 86400000;
@@ -183,7 +184,7 @@ export function archiveSafeData(data: AppData, now = Date.now()): AppData {
       sessions: safe.sessions.map(s => s.id === session.id ? { ...s, status: '已结束', transcript: sessionEvidence(s), summary: [],
         storage: { ...s.storage!, audioState: 'cleared', transcriptState: 'cleared' } } : s) };
   }
-  return safe;
+  return reconcilePersonalAssistantState(safe);
 }
 
 export function switchDailyToMeeting(data: AppData, id: string, nextId: string, confirmed: boolean,

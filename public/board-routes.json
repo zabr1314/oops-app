@@ -2802,5 +2802,39 @@
         "exact": true
       }
     ]
+  },
+  {
+    "id": "PA01",
+    "title": "个性化助理 · 场景背景与学习开关",
+    "module": "设置",
+    "route": {
+      "view": "settings-personal-assistant"
+    },
+    "scene": "personal-assistant",
+    "shot": "f24-personal-assistant",
+    "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。"
+  },
+  {
+    "id": "PA02",
+    "title": "个人习惯 · 原话核对、修改与忽略",
+    "module": "记忆",
+    "route": {
+      "view": "settings-personal-assistant",
+      "mode": "pending"
+    },
+    "scene": "personal-assistant",
+    "shot": "f25-personal-habit-review",
+    "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。"
+  },
+  {
+    "id": "PA03",
+    "title": "问答 · 本次个人背景选择",
+    "module": "首页",
+    "route": {
+      "view": "assistant"
+    },
+    "scene": "personal-assistant",
+    "shot": "f26-personal-context",
+    "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。"
   }
 ]

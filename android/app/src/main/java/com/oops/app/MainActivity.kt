@@ -233,6 +233,7 @@ class MainActivity : ComponentActivity() {
                 "feishu.status", "feishu.disconnect", "feishu.recipients",
                 "minutes.delivery.open", "minutes.delivery.save", "minutes.delivery.confirm", "minutes.delivery.status",
                 "assistant.jobs", "assistant.delivery.open", "assistant.delivery.save", "assistant.delivery.confirm", "assistant.delivery.status",
+                "personal.context.read", "personal.context.profile", "personal.context.preferences", "personal.context.memory", "personal.context.delete", "personal.context.snapshot",
                 "calendar.open", "calendar.save", "calendar.confirm", "calendar.status" -> OopsEngine.feishu(type, p)
                 "history.delete" -> OopsEngine.history("delete", p.getString("sessionId"), p.optBoolean("confirm"), p.optString("requestId"))
                 "projects.list" -> OopsEngine.projects()

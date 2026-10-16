@@ -12,6 +12,7 @@ import { Avatar, Badge, Button, Card, Check, Chips, Empty, Field, Icon, Notice, 
 import { PrivacyNoticeCard } from './PrivacyNotice';
 import { DocumentRoleDraft } from './DocumentRoleDraft';
 import { DevicePair, DeviceDetail } from './DeviceStartup';
+import { PersonalAssistantScreen } from './PersonalAssistant';
 import './MemorySettings.css';
 
 const PERSONAL = '我的空间';
@@ -418,7 +419,7 @@ export function memoryTitle(route: Route) {
   return titles[route.view] || '记忆';
 }
 export function settingsTitle(route: Route) {
-  const titles: Record<string, string> = { settings: '设置', 'settings-role-import': '文档角色建议', 'settings-identity': '身份与角色', 'settings-preferences': '助理偏好', 'settings-voice': '我的声音身份', 'settings-voice-identities': '声音样本与身份', 'settings-voice-match': '声音识别与核对', 'settings-devices': '设备与声音入口', 'settings-device': '设备详情', 'settings-pair': '添加设备', 'settings-deskpet': '桌面伙伴', 'settings-tools': '工具连接', 'settings-tool': '连接与权限', 'settings-sync': '离线记录', 'settings-sharing': '已共享内容', 'settings-retention': '保存期限', 'settings-spaces': '内容范围与共享', 'settings-members': '协作与共享', 'settings-trash': '回收站', 'settings-privacy': '隐私与数据', 'settings-export': '导出与清理', 'settings-logs': '操作记录', 'settings-notifications': '通知与自主等级', 'settings-account': '账户与安全', 'settings-usage': '用量与方案' };
+  const titles: Record<string, string> = { settings: '设置', 'settings-personal-assistant': '个性化助理', 'settings-role-import': '文档角色建议', 'settings-identity': '身份与角色', 'settings-preferences': '助理偏好', 'settings-voice': '我的声音身份', 'settings-voice-identities': '声音样本与身份', 'settings-voice-match': '声音识别与核对', 'settings-devices': '设备与声音入口', 'settings-device': '设备详情', 'settings-pair': '添加设备', 'settings-deskpet': '桌面伙伴', 'settings-tools': '工具连接', 'settings-tool': '连接与权限', 'settings-sync': '离线记录', 'settings-sharing': '已共享内容', 'settings-retention': '保存期限', 'settings-spaces': '内容范围与共享', 'settings-members': '协作与共享', 'settings-trash': '回收站', 'settings-privacy': '隐私与数据', 'settings-export': '导出与清理', 'settings-logs': '操作记录', 'settings-notifications': '通知与自主等级', 'settings-account': '账户与安全', 'settings-usage': '用量与方案' };
   return titles[route.view] || '设置';
 }
 export function MemoryScreens() {
@@ -452,7 +453,7 @@ function UnderstandingMemoryItem({ memory }: { memory: Memory }) {
 function UnderstandingCard({open,onToggle}: {open: boolean; onToggle: () => void}) {
   const { data, navigate } = useOops(); const evidence = understandingEvidence(data);
   if (data.settings.space !== PERSONAL) return null;
-  return <Card className="ms-understanding"><div className="ms-card-heading"><div><Badge tone="gray">只对你可见</Badge><h3>Oops 对我的理解</h3></div><Button tone="quiet" onClick={onToggle}>{open ? '收起' : '核对'}</Button></div>
+  return <Card className="ms-understanding"><div className="ms-card-heading"><div><Badge tone="gray">只对你可见</Badge><h3>Oops 对我的理解</h3><button className="text-action" onClick={() => navigate({view:'settings-personal-assistant'})}>管理背景与习惯</button></div><Button tone="quiet" onClick={onToggle}>{open ? '收起' : '核对'}</Button></div>
     <p className="meta">来自你填写的身份、偏好和已确认的目标与背景，随时可以纠正。</p>
     {open && <div className="ms-understanding-sections">
       <div className="ms-understanding-evidence"><Badge tone="gray">由你填写 · 当前身份</Badge><Row title={data.settings.role || '还没有填写角色'} subtitle={data.settings.name || '称呼未填写'} icon="user-circle" onClick={() => navigate({view:'settings-identity'})}/><p className="meta">适用场景：{data.settings.retention.roleContext?.trim() || '尚未填写'}</p><p className="meta">{profileUpdateLabel(data,'identity')}</p><Button tone="quiet" onClick={() => navigate({view:'settings-identity'})}>查看与纠正身份</Button></div>
@@ -734,14 +735,14 @@ function Social() {
 
 export function SettingsScreens() {
   const { route } = useOops();
-  const components: Record<string, ReactNode> = { 'settings-role-import': <DocumentRoleDraft />, 'settings-identity': <Identity />, 'settings-preferences': <Preferences />, 'settings-voice': <VoiceEnrollment />, 'settings-voice-identities': <VoiceIdentitySamples key={route.id || 'all'} />, 'settings-voice-match': <VoiceIdentityMatch key={(route.id || 'all') + ':' + (route.mode || '')} />, 'settings-devices': <Devices />, 'settings-pair': <DevicePair key={route.id} />, 'settings-device': <DeviceDetail key={route.id} />, 'settings-deskpet': <Deskpet />, 'settings-tools': <Tools />, 'settings-tool': <ToolDetail key={route.id} />, 'settings-sync': <OfflineSync />, 'settings-sharing': <Sharing />, 'settings-retention': <Retention />, 'settings-spaces': <Spaces />, 'settings-members': <Members />, 'settings-trash': <Trash />, 'settings-privacy': <Privacy />, 'settings-export': <ExportData />, 'settings-logs': <Logs />, 'settings-notifications': <NotificationSettings />, 'settings-account': <Account />, 'settings-usage': <Usage /> };
+  const components: Record<string, ReactNode> = { 'settings-personal-assistant': <PersonalAssistantScreen />, 'settings-role-import': <DocumentRoleDraft />, 'settings-identity': <Identity />, 'settings-preferences': <Preferences />, 'settings-voice': <VoiceEnrollment />, 'settings-voice-identities': <VoiceIdentitySamples key={route.id || 'all'} />, 'settings-voice-match': <VoiceIdentityMatch key={(route.id || 'all') + ':' + (route.mode || '')} />, 'settings-devices': <Devices />, 'settings-pair': <DevicePair key={route.id} />, 'settings-device': <DeviceDetail key={route.id} />, 'settings-deskpet': <Deskpet />, 'settings-tools': <Tools />, 'settings-tool': <ToolDetail key={route.id} />, 'settings-sync': <OfflineSync />, 'settings-sharing': <Sharing />, 'settings-retention': <Retention />, 'settings-spaces': <Spaces />, 'settings-members': <Members />, 'settings-trash': <Trash />, 'settings-privacy': <Privacy />, 'settings-export': <ExportData />, 'settings-logs': <Logs />, 'settings-notifications': <NotificationSettings />, 'settings-account': <Account />, 'settings-usage': <Usage /> };
   return components[route.view] || <SettingsHome />;
 }
 function SettingsHome() {
   const { data, navigate } = useOops();
   const sections = [
     { title: '账户', rows: [['账户与安全', 'settings-account', 'lock-key'], ['用量与方案', 'settings-usage', 'chart-bar']] },
-    { title: '身份与助理', rows: [['身份与角色', 'settings-identity', 'user-circle'], ['助理偏好', 'settings-preferences', 'sliders-horizontal'], ['我的声音身份', 'settings-voice', 'waveform']] },
+    { title: '身份与助理', rows: [['个性化助理', 'settings-personal-assistant', 'sparkle'], ['身份与角色', 'settings-identity', 'user-circle'], ['助理偏好', 'settings-preferences', 'sliders-horizontal'], ['我的声音身份', 'settings-voice', 'waveform']] },
     { title: '设备与聆听', rows: [['设备与声音入口', 'settings-devices', 'bluetooth'], ['聆听设置', 'settings-listening', 'ear']] },
     { title: '工具与通知', rows: [['工具连接', 'settings-tools', 'plugs-connected'], ['通知与自主等级', 'settings-notifications', 'bell']] },
     { title: '隐私与共享', rows: [['隐私与数据', 'settings-privacy', 'shield-check'], ['内容范围与共享', 'settings-spaces', 'share-network']] },

@@ -8,6 +8,7 @@ import { refreshTaskSuggestions } from './taskSuggestionsLogic';
 import { refreshSessionIntelligence, saveNoticePlan, readSessionIntelligence, updateIntelligenceItem } from './sessionIntelligenceLogic';
 import { SELF_VOICE_ID, addVoiceSample, bindVoiceSample, runVoiceMatch } from './voiceIdentityLogic';
 import { applyStorageDeadlines, finishDailySession, newStoragePolicy, pinSessionEvidence } from './storagePolicy';
+import { collectPersonalHabitCandidates, setPersonalLearning } from './personalAssistant';
 import { pairStartupDevice, transitionDeviceStartup, reconcileDeviceStartupHolds, type DeviceCondition } from './deviceStartupLogic';
 
 const PERSONAL = '我的空间';
@@ -160,6 +161,13 @@ function deviceStartupPreview(data: AppData, scene: string): AppData {
 export function boardPreviewData(scene: string): AppData {
   let data = baseData();
   switch (scene) {
+    case 'personal-assistant': {
+      data.sessions.unshift({id:'personal-example',title:'偏好沟通示例',kind:'会议',date:'示例记录',duration:'00:30',status:'已结束',transcript:[{id:'own-preference',speaker:'我',time:'00:00:10',text:'我希望做汇报时先给结论，再列依据和下一步。'},{id:'other-preference',speaker:'同事',time:'00:00:20',text:'我喜欢详细讨论每一个过程。'}],summary:[],agenda:[],participants:['我','同事'],attachments:[],privateNotes:[],project:'Oops 首版'});
+      data.settings.toggles['speaker-confirmed:personal-example:own-preference']=true;
+      data=collectPersonalHabitCandidates(setPersonalLearning(data,true),{scenario:'汇报'});
+      break;
+    }
+
     case 'p0-daily-active':
     case 'p0-daily-finished':
     case 'p0-meeting-retention':

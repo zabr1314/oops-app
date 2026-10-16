@@ -459,3 +459,7 @@ Android：H5 发 `items.review`（`sessionId,itemId,fingerprint,action,…`）�
 任务板 `tasks` 只含通过来源检查的待办及已完成/作废历史；`review_queue` 保存待核对候选，状态为 `needs_review`，含 `quality: {status, reason, ids, issues?}`。待核对内容不计入可执行待办。草稿数字含混时 `what` 留空并通过 `task_context.missing` 请求核对，不能直接预填确定任务。
 
 会后纪要与已有缓存共用质量检查：被拒动作保留在派生 `quality_rejected` 审计，含混动作转入 `undecided`；不修改原缓存、不触发模型重生成、不确认负责人。引用或来源变化继续遵循原有失效与人工核对规则。
+
+## 个性化个人上下文（2026-10-16）
+
+本人档案、偏好、已确认记忆、场景和可信快照使用 `/v1/personal/context` 系列接口，要求已有个人绑定。完整字段、版本冲突、幂等与发布依赖见 [个性化助理实现记录](personal-assistant-20261016.md)。

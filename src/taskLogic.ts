@@ -1,17 +1,57 @@
 import type { AppData, Task, TaskArtifact } from './store';
 import { generationCanComplete, provenanceAvailable, selectedTaskMaterials, taskSourceAvailable } from './sourceAccess';
-import { taskArtifacts, taskOutputMode } from './taskWorkflow';
+import { taskArtifacts, taskOutputMode, taskPersonalContext } from './taskWorkflow';
+import { personalContextCurrent, type PersonalContextSnapshot } from './personalAssistant';
 export { taskArtifacts } from './taskWorkflow';
 
 export type TaskDetails = Task;
 const stamp = () => new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date());
 const artifactId = () => `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-export function buildTaskArtifacts(task: Task): TaskArtifact[] {
+function focusScore(text: string, focus = ''): number {
+  const words = focus.toLowerCase().match(/[a-z0-9]+|[\u4e00-\u9fff]{2,}/g) || [];
+  const tokens = new Set(words.flatMap(word => /[\u4e00-\u9fff]/.test(word) ? [...Array(word.length - 1)].map((_, index) => word.slice(index, index + 2)) : [word]));
+  return [...tokens].filter(token => text.toLowerCase().includes(token)).length;
+}
+
+function personalDraftBody(task: Task, body: string[], context?: PersonalContextSnapshot): string[] {
+  if (!context?.enabled) return body;
+  const preference = context.preferences;
+  let paragraphs = [...body];
+  if (/先.*(?:依据|证据|背景)|(?:依据|证据).*优先/.test(preference?.tone || '')) {
+    const index = paragraphs.findIndex(text => /^(?:本次允许的资料|已选资料摘录|可供核对的本地材料|已提供的依据)/.test(text));
+    if (index > 0) paragraphs = [paragraphs[index], ...paragraphs.filter((_, i) => i !== index)];
+  } else if (/先.*(?:行动|下一步)|行动.*优先/.test(preference?.tone || '')) {
+    const index = paragraphs.findIndex(text => /^(?:推进安排|下一步)/.test(text));
+    if (index > 0) paragraphs = [paragraphs[index], ...paragraphs.filter((_, i) => i !== index)];
+  }
+  if (taskOutputMode(task) === '回复草稿') {
+    const greeting = /直接|先结论|简洁/.test(preference?.tone || '') ? '关于' : /温和|轻松|自然/.test(preference?.tone || '') ? '你好，想和你确认' : '你好，关于';
+    paragraphs = paragraphs.map(text => text.replace(/^你好，关于/, greeting));
+  }
+  const background = context.entries.filter(entry => ['background', 'goal', 'habit'].includes(entry.kind));
+  if (context.identity?.role) paragraphs.push('本次工作视角\n' + context.identity.role + (context.identity.context ? ' · ' + context.identity.context : ''));
+  if (background.length) paragraphs.push('个人背景与目标\n' + background.map(entry => entry.text).join('\n') + '\n仅用于组织草稿，相关任务事实仍需按所选资料核对。');
+  if (preference?.focus) paragraphs.push('本次关注\n' + preference.focus);
+  if (preference?.avoid) paragraphs.push('个人边界\n' + preference.avoid);
+  if (/详细|展开|充分/.test(preference?.answerLength || '')) {
+    paragraphs.push('逐项核对路径\n1. 对照本次要求与所选材料，确认每项事实。\n2. 按验收清单核对缺口，未回答的问题继续保留。\n3. 由' + task.owner + '补充实际进展，确认后再选择交付版本。');
+  } else if (/简短|简洁|精简|一句话/.test(preference?.answerLength || '')) {
+    // Keep every supplied fact and criterion; brevity changes the presentation,
+    // rather than silently removing source material or unanswered questions.
+    paragraphs = paragraphs.map(text => text.replace('\n', '：').replace(/\n/g, '；'));
+  }
+  return paragraphs;
+}
+
+export function buildTaskArtifacts(task: Task, personalContext?: PersonalContextSnapshot): TaskArtifact[] {
   const mode = taskOutputMode(task);
-  const materials = selectedTaskMaterials(task).map(material => `${material.title}${material.body ? '：' + material.body : '（附件正文尚未提供，不代表已解析）'}${material.note?.trim() ? '\n本人补充说明：' + material.note.trim() : ''}`);
-  const evidence = { sourceSession: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime, sources: task.generationSources || task.sources, needsReview: true };
-  const make = (kind: TaskArtifact['kind'], title: string, body: string[]): TaskArtifact => ({ ...evidence, id: artifactId(), kind, title, version: task.version, created: stamp(), body });
+  const selected = selectedTaskMaterials(task);
+  const focus = personalContext?.enabled ? personalContext.preferences?.focus : undefined;
+  const materials = [...selected].sort((a, b) => focusScore(b.title + (b.body || ''), focus) - focusScore(a.title + (a.body || ''), focus)).map(material => `${material.title}${material.body ? '：' + material.body : '（附件正文尚未提供，不代表已解析）'}${material.note?.trim() ? '\n本人补充说明：' + material.note.trim() : ''}`);
+  const sources = [...(task.generationSources || task.sources || []), ...(personalContext?.enabled ? personalContext.sources : [])];
+  const evidence = { sourceSession: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime, sources, needsReview: true };
+  const make = (kind: TaskArtifact['kind'], title: string, body: string[]): TaskArtifact => ({ ...evidence, id: artifactId(), kind, title, version: task.version, created: stamp(), body: personalDraftBody(task, body, personalContext) });
   const materialText = materials.length ? materials.join('\n') : '这次未选择可读取的资料。具体事实与执行结果仍需本人提供。';
   const criteria = task.criteria?.length ? task.criteria : ['内容与依据已核对', '完成范围与遗留事项已说明'];
   const openQuestions = (task.inquiries ? task.inquiries.filter(inquiry => inquiry.status !== '已解决').map(inquiry => inquiry.question) : task.questions || []).join('\n');
@@ -34,10 +74,10 @@ export function finishLocalGeneration(current: AppData, id: string, token: strin
     if (task.id !== id || task.generationToken !== token || task.aiStatus !== '准备中') return task;
     const snapshot = task.generationSnapshot;
     const actorData = { ...current, settings: { ...current.settings, space: snapshot?.space || task.generationSpace || task.scope?.space || current.settings.retention['task-space:' + task.id] || '我的空间' } };
-    if (!snapshot || !generationCanComplete(actorData, task, token)) return { ...task, generationToken: undefined, generationSnapshot: undefined, authorized: false, aiStatus: '待授权' as const, needsReview: taskArtifacts(task).some(artifact => !!artifact.needsReview), sourceNeedsReview: !taskSourceAvailable(actorData, task, new Set(), true) || !provenanceAvailable(actorData, snapshot?.sourceRefs || task.generationSources), activities: [...task.activities, `${stamp()} · 准备范围、额度或来源已变化，原成果保留，请重新允许`] };
+    if (!snapshot || !generationCanComplete(actorData, task, token) || snapshot.personalContext && (!personalContextCurrent(actorData, snapshot.personalContext) || snapshot.personalContext.fingerprint !== taskPersonalContext(actorData, task).fingerprint)) return { ...task, generationToken: undefined, generationSnapshot: undefined, authorized: false, aiStatus: '待授权' as const, needsReview: taskArtifacts(task).some(artifact => !!artifact.needsReview), sourceNeedsReview: !taskSourceAvailable(actorData, task, new Set(), true) || !provenanceAvailable(actorData, snapshot?.sourceRefs || task.generationSources), activities: [...task.activities, `${stamp()} · 准备范围、个人上下文、额度或来源已变化，原成果保留，请重新允许`] };
     // Output is built from the immutable authorized request, never from later UI edits.
     const fixedTask: Task = { ...task, ...snapshot.task, version: snapshot.version, outputMode: snapshot.mode, scope: snapshot.scope, materialRefs: snapshot.materials, generationSources: snapshot.sourceRefs, questions: snapshot.task.questions, inquiries: undefined, sourceSession: snapshot.task.sourceSession, sourceId: snapshot.task.sourceId, sourceTime: snapshot.task.sourceTime };
-    const generated = buildTaskArtifacts(fixedTask), existing = taskArtifacts(task);
+    const generated = buildTaskArtifacts(fixedTask, snapshot.personalContext), existing = taskArtifacts(task);
     return { ...task, status: snapshot.businessStatus, aiStatus: '草稿完成' as const, generationToken: undefined, generationSnapshot: undefined, artifacts: [...existing, ...generated], results: task.results, used: (task.used ?? 0) + snapshot.cost, needsReview: true, retryMissing: false, failure: undefined, activities: [...task.activities, `${stamp()} · 新草稿 v${snapshot.version}已保存，等待本人核对；工作尚未完成`] };
   }) };
 }
