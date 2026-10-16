@@ -8,7 +8,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-class HttpFailure(val status: Int, message: String, val errorCode: String? = null) : IOException(message)
+class HttpFailure(val status: Int, message: String, val errorCode: String? = null,
+                  /** Explicit server guarantee for this operation, never inferred from an HTTP status alone. */
+                  val noExternalWrite: Boolean = false) : IOException(message)
 
 /** One instance per capture session; old requests cannot disable an endpoint in a new session. */
 class OptionalRequests(private val maxPending: Int = 8) {

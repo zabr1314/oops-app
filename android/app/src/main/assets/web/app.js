@@ -39,12 +39,14 @@
     route: { name: 'home' },
     liveTab: 'live', meetingTab: 'overview', memoryTab: 'projects',
     history: null, historyItems: null, historyFilter: '', transcriptFilter: { speaker: null, query: '' },
-    tasks: { scope: 'review', mine: false, status: 'all', items: null, parsedItems: null, meetingItems: null, parsedStatus: null, parsedSerial: 0, reviewFilter: 'all', query: '', cache: new Map(), expanded: new Set(), requests: new Map(), pending: new Set(), serial: 0, refreshedAt: null, archived: [] }, openTaskCount: 0,
+    tasks: { scope: 'review', mine: false, status: 'all', items: null, parsedItems: null, meetingItems: null, parsedStatus: null, parsedSerial: 0, reviewFilter: 'all', query: '', cache: new Map(), expanded: new Set(), requests: new Map(), pending: new Set(), timers: new Map(), serial: 0, refreshedAt: null, archived: [], candidateRequest:null, candidateCompat:false }, openTaskCount: 0,
+    taskReview: null, taskReviewDrafts: new Map(), taskReviewSerial: 0,
     homeTasks: null, homeTasksState: { loading: false, error: null },
     requests: { history: {}, projects: {}, project: {}, tasks: {} }, pendingMeetingId: null, meetingRequest: null,
+    feishu: {status:'loading', account:null, capabilities:{}, recipients:[], knownRecipients:{}, busy:false}, deliveries: new Map(), feishuSerial:0,
     minutes: new Map(), minutesRequest: 0, remoteEpoch: null, pendingRetention: null, retentionRequest: 0,
     projects: { items: null, open: null, section: 'decisions' }, liveProject: null,
-    review: null, pendingReview: null, sessionsQuery: '', homeQuery: '',
+    review: null, pendingReview: null, itemTaskRequest: null, itemTaskSerial: 0, sessionsQuery: '', homeQuery: '',
     historySerial: 0, historyRequestId: null, searchRequestId: null, pendingDelete: null, deletedSessions: new Set(), pendingReviewReturn: false, externalReviewHidden: false, settingsSave: null,
   };
 
@@ -126,8 +128,8 @@
   };
 
   function handle(type, p) {
-    const remote = ['history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'items.saved', 'tasks.list', 'tasks.board'].includes(type)
-      || type === 'error' && ['history', 'minutes', 'projects', 'review', 'items', 'tasks', 'retention'].includes(p.scope);
+    const remote = ['feishu.status', 'feishu.authorization', 'feishu.recipients', 'minutes.delivery', 'history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'items.saved', 'tasks.list', 'tasks.candidates', 'tasks.review.open', 'tasks.review.saved', 'tasks.board'].includes(type)
+      || type === 'error' && ['history', 'minutes', 'projects', 'review', 'items', 'items.task', 'tasks', 'taskCandidates', 'taskReview', 'retention', 'feishu', 'minutes.delivery'].includes(p.scope);
     if (remote) {
       if ('backendUrl' in p && S.state.backendUrl !== undefined && p.backendUrl !== S.state.backendUrl) return;
       if (p.serviceEpoch !== undefined && S.remoteEpoch !== null && p.serviceEpoch !== S.remoteEpoch) return;
@@ -175,6 +177,13 @@
         S.historyItems = (p.items || []).filter(x => !S.deletedSessions.has(x.session_id)); S.requests.history = {}; if (['home', 'sessions'].includes(S.route.name)) render(); if (S.sheet?.kind === 'history') renderSheet(); break;
       case 'history.open': historyOpen(p); break;
       case 'history.minutes': onMinutes(p); break;
+      case 'feishu.status': onFeishuStatus(p); break;
+      case 'feishu.authorization': onFeishuAuthorization(p); break;
+      case 'feishu.recipients':
+        if (p.requestId !== S.feishu.recipientRequestId) break;
+        S.feishu.recipientSource = p.source; S.feishu.recipientSearched = true; S.feishu.recipients = p.items || []; S.feishu.knownRecipients ||= {}; S.feishu.recipients.forEach(person => { S.feishu.knownRecipients[deliveryPersonId(person)] = person; }); S.feishu.recipientsLoading = false; S.feishu.recipientsError = p.message || null;
+        if (S.sheet?.kind === 'minutesDelivery') renderSheet(); break;
+      case 'minutes.delivery': onMinutesDelivery(p); break;
       case 'meeting.retained': {
         const pending=S.pendingRetention;
         if (!pending || pending.requestId!==p.requestId || pending.sessionId!==p.sessionId) break;
@@ -195,6 +204,9 @@
       case 'review.saved': onReviewSaved(p); break;
       case 'items.saved': onItemsSaved(p); break;
       case 'tasks.list': onTasks(p); break;
+      case 'tasks.candidates': onTaskCandidates(p); break;
+      case 'tasks.review.open': onTaskReview(p, false); break;
+      case 'tasks.review.saved': onTaskReview(p, true); break;
       case 'settings.saved':
         if (S.settingsSave?.requestId !== p.requestId) break;
         S.settingsSave = { ...S.settingsSave, status: 'saved' }; updateSettingsSaveStatus(); break;
@@ -261,7 +273,7 @@
         toast('已保存到长期记忆');
         if (S.sheet?.kind === 'card' && S.card?.data.id === p.cardId) closeSheet();
         break;
-      case 'action.draft': openDraft(p); break;
+      case 'action.draft': if (p.requestId || p.sourceItemId) onItemTaskDraft(p); else openDraft(p); break;
       case 'action.suggestion':
         if (window.OopsDraftState.merge(S.draft, p) && S.sheet?.kind === 'draft') renderSheet();
         break;
@@ -293,7 +305,7 @@
       { activeSessionId: S.state.sessionId || 'native-pending' });
     if (serverChanged) enter();
     if (before.selfName !== S.state.selfName) {
-      if (S.route.name === 'home' && S.state.selfName) loadHomeTasks();
+      if (S.route.name === 'home' && canReadMyTasks()) loadHomeTasks();
       if (S.route.name === 'tasks') openTasks();
     }
     if (s.notices) { S.notices = new Map(s.notices.map(n => [n.id,n])); S.activeNotices = S.activeNotices.filter(id => S.notices.has(id)); renderNoticeBanners(); }
@@ -515,7 +527,7 @@
   /** What a page needs from native or the server each time it is opened. */
   function enter() {
     const r = S.route.name;
-    if (r === 'home') { loadHistory(); if (S.state.selfName) loadHomeTasks(); else requestTasks(false, 'all'); }
+    if (r === 'home') { loadHistory(); if (canReadMyTasks()) loadHomeTasks(); else requestTasks(false, 'all'); }
     if (r === 'sessions') loadHistory();
     if (r === 'tasks') openTasks();
     if (r === 'memory') { if (S.memoryTab === 'projects') { loadProjects(); requestTasks(false, 'all'); } else send('voiceprint.list'); }
@@ -646,13 +658,13 @@
           sub: `${formatDate(m.started_at)} · ${reviewPending(m) ? `${reviewPending(m)}项待核对` : `${m.utterance_count}句`}` })).join('')}
         ${!live && !recent.length && !S.requests.history.error ? `<p class="meta">${S.historyItems ? '还没有已存会议。正式会议需单独选择云端保存；日常候选在记忆里核对。' : '正在读取…'}</p>` : ''}
       </div>
-      ${sectionTitle('需要你处理', S.state.selfName ? S.homeTasks == null ? S.homeTasksState.error ? '查看任务' : '读取中' : `${S.homeTasks.length + (pendingMeeting ? 1 : 0)}项待处理` : '选择本人', 'go', `data-route="${S.state.selfName ? 'tasks' : 'me'}"`)}
-      ${S.state.selfName ? requestNotice(S.homeTasksState, 'home-tasks-retry', !!S.homeTasks) : ''}
+      ${sectionTitle('需要你处理', canReadMyTasks() ? S.homeTasks == null ? S.homeTasksState.error ? '查看任务' : '读取中' : `${S.homeTasks.length + (pendingMeeting ? 1 : 0)}项待处理` : '选择本人', 'go', `data-route="${canReadMyTasks() ? 'tasks' : 'me'}"`)}
+      ${canReadMyTasks() ? requestNotice(S.homeTasksState, 'home-tasks-retry', !!S.homeTasks) : ''}
       ${tasks.map((t) => listRow({ act: 'task-open', data: `data-url="${esc(t.url || '')}"`, ic: 'check-square', title: t.what,
         sub: t.overdue ? '期限已到，核对进度' : t.feishu?.due_ms ? `截止 ${shortDate(new Date(t.feishu.due_ms).toISOString()).split(' ')[0]}` : '在飞书里推进' })).join('')}
       ${pendingMeeting ? listRow({ act: 'review-start', data: `data-id="${esc(pendingMeeting.session_id)}"`, ic: 'check-circle', title: `会后核对 · ${meetingName(pendingMeeting)}`,
         sub: `${reviewPending(pendingMeeting)}项待核对` }) : ''}
-      ${!tasks.length && !pendingMeeting ? `<p class="meta">${S.state.selfName ? S.homeTasks == null ? S.homeTasksState.error ? '暂时无法确认你的正式任务。' : '正在读取你的正式任务…' : '没有待处理的本人飞书正式任务。' : '在「设置」里选择本人后，这里会列出你负责的飞书任务。'}</p>` : ''}
+      ${!tasks.length && !pendingMeeting ? `<p class="meta">${canReadMyTasks() ? S.homeTasks == null ? S.homeTasksState.error ? '暂时无法确认你的正式任务。' : '正在读取你的正式任务…' : '没有待处理的本人飞书正式任务。' : '在「设置」里选择本人后，这里会列出你负责的飞书任务。'}</p>` : ''}
       ${meetingWorkEntryHtml()}
       ${sectionTitle('刚才说过什么？', '问已有记录', 'ask-open')}
       <button class="card clickable recall-entry" data-act="recall">${icon('clock-counter-clockwise')}<div><strong>找回最近5分钟</strong><p>选择重要的片段，再决定是否留下</p></div>${icon('caret-right', 17)}</button>
@@ -962,10 +974,17 @@
   // ---- 任务 ---------------------------------------------------------------------------------
 
   const TASK_STATE = { done: ['已完成', 'green'], deleted: ['飞书里已删除', 'gray'], unknown: ['状态未知', 'gray'], open: ['未完成', 'purple'] };
+  const usesPersonalTaskIdentity = () => S.state.backend === 'http';
+  const canReadMyTasks = () => usesPersonalTaskIdentity() || !!S.state.selfName;
   const taskKey = (mine, status) => `${mine ? S.state.selfName || '' : '*'}:${status}`;
   function clearTaskIdentity() {
+    for (const timer of S.tasks.timers.values()) clearTimeout(timer);
+    S.tasks.timers.clear();
+    clearTimeout(S.tasks.candidateRequest?.timer); S.tasks.candidateRequest = null; S.tasks.candidateCompat = false;
+    clearTimeout(S.taskReview?.timer); S.taskReview = null; S.taskReviewDrafts.clear();
+    if (S.sheet?.kind === 'taskReview') closeSheet();
     S.tasks.cache.clear(); S.tasks.requests.clear(); S.tasks.pending.clear(); S.tasks.expanded.clear();
-    S.tasks.items = null; S.tasks.archived = []; S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = null; S.tasks.parsedSerial = 0; S.tasks.refreshedAt = null; S.homeTasks = null; S.openTaskCount = 0;
+    S.tasks.items = null; S.tasks.mineAssignee = null; S.tasks.archived = []; S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = null; S.tasks.parsedSerial = 0; S.tasks.refreshedAt = null; S.homeTasks = null; S.openTaskCount = 0;
     S.homeTasksState = {}; S.requests.tasks = {};
   }
   function clearRemoteState() {
@@ -973,16 +992,16 @@
     if (S.playingKey || S.loadingKey) send('clip.stop');
     S.playingKey = null; S.loadingKey = null;
     S.history = null; S.historyItems = null; S.projects.items = null; S.projects.open = null; S.liveProject = null;
-    S.minutes.clear(); S.board = null; clearTaskIdentity();
+    S.minutes.clear(); S.deliveries.clear(); S.feishu = {status:'loading',account:null,recipients:[],knownRecipients:{},capabilities:{},busy:false}; S.board = null; clearTaskIdentity();
     S.requests = { history: {}, projects: {}, project: {}, tasks: {} };
     S.pendingMeetingId = null; S.pendingReview = null; S.pendingTools = null; S.review = null; S.pendingRetention=null;
-    S.itemReview = null; S.pendingDelete = null; S.deletedSessions.clear(); S.pendingReviewReturn = false;
+    S.itemReview = null; S.itemTaskRequest = null; S.pendingDelete = null; S.deletedSessions.clear(); S.pendingReviewReturn = false;
     S.historyRequestId = null; S.searchRequestId = null;
     // A cancelled intent prevents an old response from opening the same session on the new server.
     S.meetingRequest = { active: false };
     S.draft = null;
     if (remoteCard) S.card = null;
-    if (['pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result', 'retain'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
+    if (['feishu', 'minutesDelivery', 'pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result', 'retain', 'itemTaskPending'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
     if (S.route.name === 'meeting') S.route = { name: 'sessions' };
     if (S.route.name === 'project') S.route = { name: 'memory' };
     renderNav();
@@ -995,44 +1014,72 @@
   function loadHomeTasks() {
     S.homeTasksState = { loading: true }; requestTasks(true, 'open');
   }
-  function requestTasks(mine, status) {
+  function requestTasks(mine, status, formalOnly = false) {
+    if (!formalOnly) requestTaskCandidates();
     const key = taskKey(mine, status);
     if (S.tasks.pending.has(key)) return;
     const requestId = `tasks-${++S.tasks.serial}`;
-    S.tasks.parsedSerial = S.tasks.serial;
     S.tasks.requests.set(key, requestId); S.tasks.pending.add(key);
-    S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = { state: 'loading', meetings: [] };
-    S.tasks.refreshedAt = null;
-    for (const saved of S.tasks.cache.values()) { saved.parsedItems = null; saved.meetingItems = null; saved.parsedStatus = S.tasks.parsedStatus; }
+    S.tasks.timers.set(requestId, setTimeout(() => {
+      if (S.tasks.requests.get(key) !== requestId || !S.tasks.pending.has(key)) return;
+      onError({scope:'tasks',mine,status,requestId,message:'正式任务读取超时，请重新读取；会议候选单独加载。'});
+      S.tasks.requests.delete(key);
+    }, 25000));
     send('tasks.list', { mine, status, requestId });
   }
+  function requestTaskCandidates(force = false) {
+    if (S.tasks.candidateRequest?.pending && !force) return;
+    clearTimeout(S.tasks.candidateRequest?.timer);
+    const requestId = `candidates-${++S.tasks.serial}`;
+    S.tasks.candidateRequest = {requestId,pending:true};
+    S.tasks.parsedItems = null; S.tasks.meetingItems = null;
+    S.tasks.parsedStatus = {state:'loading',meetings:[]}; S.tasks.refreshedAt = null; S.tasks.candidateCompat = false;
+    S.tasks.candidateRequest.timer = setTimeout(() => onError({scope:'taskCandidates',requestId,message:'会议候选读取超时，请重新读取。'}),25000);
+    send('tasks.candidates',{requestId});
+  }
+  function setTaskCandidates(p) {
+    S.tasks.parsedItems = (Array.isArray(p.parsed_items) ? p.parsed_items : []).filter(candidateCurrent);
+    S.tasks.meetingItems = (Array.isArray(p.meeting_items) ? p.meeting_items : []).filter(candidateCurrent);
+    S.tasks.parsedStatus = p.parsed_status || {state:'unsupported',meetings:[]};
+    S.tasks.reviewer = p.reviewer || null;
+    S.tasks.refreshedAt = new Date().toISOString();
+  }
+  function onTaskCandidates(p) {
+    if (p.requestId !== S.tasks.candidateRequest?.requestId || !S.tasks.candidateRequest.pending) return;
+    clearTimeout(S.tasks.candidateRequest.timer); S.tasks.candidateRequest.pending = false;
+    setTaskCandidates(p);
+    if (['tasks','home','memory'].includes(S.route.name)) render();
+  }
   function currentTaskReply(p) {
-    if (p.mine && p.selfName !== S.state.selfName) return false;
+    if (p.mine && !usesPersonalTaskIdentity() && p.selfName !== S.state.selfName) return false;
     return !p.requestId || S.tasks.requests.get(taskKey(!!p.mine, p.status || 'open')) === p.requestId;
   }
   function resumeReviewReturn(force = false) {
     if (!S.pendingReviewReturn || !force && (document.hidden || !S.externalReviewHidden)) return;
     S.pendingReviewReturn = false; S.externalReviewHidden = false;
     if (S.route.name === 'tasks') openTasks();
-    else if (S.route.name === 'home' && S.state.selfName) loadHomeTasks();
+    else if (S.route.name === 'home' && canReadMyTasks()) loadHomeTasks();
     else requestTasks(false, 'all');
     render();
   }
   function openTasks() {
     const saved = S.tasks.cache.get(taskKey(S.tasks.mine, S.tasks.status));
     S.tasks.items = saved?.items || null; S.tasks.archived = saved?.archived || [];
+    if (S.tasks.mine) S.tasks.mineAssignee = saved?.mineAssignee || null;
     S.requests.tasks = { loading: true };
-    if (!S.tasks.mine || S.state.selfName) requestTasks(S.tasks.mine, S.tasks.status);
+    if (!S.tasks.mine || canReadMyTasks()) requestTasks(S.tasks.mine, S.tasks.status);
   }
   function onTasks(p) {
     // A delayed reply for another filter or another selected person never becomes the visible list.
     if (!currentTaskReply(p)) return;
+    clearTimeout(S.tasks.timers.get(p.requestId)); S.tasks.timers.delete(p.requestId);
     S.tasks.pending.delete(taskKey(!!p.mine, p.status || 'open'));
     const items = (p.items || []).map(visibleTaskSource);
     const archived = (p.archived_items || []).map(visibleTaskSource);
     const serial = Number(String(p.requestId || '').replace(/^tasks-/, '')) || 0;
     // Candidate reads are independent of Feishu filters. A newly observed withdrawal must clear every cached scope.
-    if (!p.requestId || serial >= S.tasks.parsedSerial) {
+    if (Array.isArray(p.parsed_items) && (!p.requestId || serial >= S.tasks.parsedSerial)) {
+      S.tasks.candidateCompat = true;
       S.tasks.parsedSerial = serial;
       S.tasks.parsedItems = Array.isArray(p.parsed_items) ? p.parsed_items.filter(candidateCurrent) : [];
       S.tasks.meetingItems = Array.isArray(p.meeting_items) ? p.meeting_items.filter(candidateCurrent) : [];
@@ -1040,7 +1087,9 @@
       S.tasks.refreshedAt = new Date().toISOString();
       for (const saved of S.tasks.cache.values()) { saved.parsedItems = S.tasks.parsedItems; saved.meetingItems = S.tasks.meetingItems; saved.parsedStatus = S.tasks.parsedStatus; }
     }
-    S.tasks.cache.set(taskKey(!!p.mine, p.status || 'open'), { items, archived, parsedItems: S.tasks.parsedItems, meetingItems: S.tasks.meetingItems, parsedStatus: S.tasks.parsedStatus });
+    const mineAssignee = p.mine ? usesPersonalTaskIdentity() ? p.mine_assignee || null : p.selfName || S.state.selfName : null;
+    if (p.mine) S.tasks.mineAssignee = mineAssignee;
+    S.tasks.cache.set(taskKey(!!p.mine, p.status || 'open'), { items, archived, mineAssignee, parsedItems: S.tasks.parsedItems, meetingItems: S.tasks.meetingItems, parsedStatus: S.tasks.parsedStatus });
     if (p.mine && p.status === 'open') {
       S.homeTasks = items; S.homeTasksState = {}; S.openTaskCount = items.length;
     }
@@ -1108,15 +1157,16 @@
         ${expanded && r.updated_at ? `<p class="meta">${esc(formatDate(r.updated_at))}${r.revision != null ? ` · 核对版本 ${esc(r.revision)}` : ''}</p>` : ''}</div>`;
     }).join('');
     return `<article class="card parsed-task-card" data-parsed-id="${esc(item.id)}">
-      <div class="section-title"><span class="badge ${state === 'confirmed' ? 'purple' : 'gray'}">${esc(PARSED_FILTER[state])}</span><span class="meta">${meetingSource ? 'App 会后核对结果' : '原核对站 · 独立候选'}</span></div>
+      <div class="section-title"><span class="badge ${state === 'confirmed' ? 'purple' : 'gray'}">${esc(PARSED_FILTER[state])}</span><span class="meta">${meetingSource ? '会后核对结果' : '会议候选'}</span></div>
       <h3>${esc(item.title || item.what)}</h3><p class="meta">来源：${esc(item.source_meeting?.title || item.source_meeting?.id || '会议未记录')}${item.source_meeting?.started_at ? ` · ${esc(formatDate(item.source_meeting.started_at))}` : ''}</p>
       ${item.source_status === 'retained' ? '<p class="meta">完整原文已到期，依据为独立确认保留的短原话。</p>' : ''}
       <p class="parsed-owner">${owner ? `人工负责人：${esc(parsedOwnerLabel(owner))}` : state === 'disputed' ? '核对有分歧，负责人尚未统一' : '负责人待人工确认'}${item.due ? ` · ${esc(item.due)}` : ''}</p>
       ${reviewRows ? `<div class="parsed-reviews" aria-label="各人核对状态">${reviewRows}</div>` : '<p class="meta">尚无人工核对记录</p>'}
-      ${current ? `${evidence.length ? `<div class="parsed-evidence">${(expanded ? evidence : evidence.slice(0, 1)).map(e => `<blockquote><p>${esc(expanded ? e.text : String(e.text || '').slice(0, 110))}${!expanded && String(e.text || '').length > 110 ? '…' : ''}</p><cite>${esc(e.speaker || '说话人待核对')} · ${clock(e.start_ms || 0)}${expanded ? ` · 原话 ${esc(e.id)}` : ''}</cite></blockquote>`).join('')}</div>` : '<p class="warn-text">未读到原话依据，请回核对站核验。</p>'}` : '<p class="error-text">来源已失效，旧正文和依据不可继续使用。</p>'}
+      ${current ? `${evidence.length ? `<div class="parsed-evidence">${(expanded ? evidence : evidence.slice(0, 1)).map(e => `<blockquote><p>${esc(expanded ? e.text : String(e.text || '').slice(0, 110))}${!expanded && String(e.text || '').length > 110 ? '…' : ''}</p><cite>${esc(e.speaker || '说话人待核对')} · ${clock(e.start_ms || 0)}${expanded ? ` · 原话 ${esc(e.id)}` : ''}</cite></blockquote>`).join('')}</div>` : '<p class="warn-text">未读到原话依据，请重新读取。</p>'}` : '<p class="error-text">来源已失效，旧正文和依据不可继续使用。</p>'}
       <div class="inline-actions parsed-actions"><button class="chip" type="button" data-act="parsed-expand" data-id="${esc(item.id)}" aria-expanded="${expanded}">${expanded ? '收起原话与核对详情' : `展开原话${evidence.length ? ` ${evidence.length}` : ''}与核对详情`}</button>
+        ${current && meetingSource && candidateSession(item) && !item.linked_created ? `<button class="chip" type="button" data-act="meeting-item-task-draft" data-id="${esc(item.id)}">整理成飞书任务</button>` : ''}
         ${current && meetingSource && candidateSession(item) ? `<button class="chip selected" type="button" data-act="meeting-open" data-id="${esc(candidateSession(item))}">到原会话查看与核对</button>`
-          : current && item.review_url && /^https?:\/\//i.test(item.review_url) ? `<button class="chip selected" type="button" data-act="parsed-review-open" data-id="${esc(item.id)}">去原核对站继续核对</button>` : '<span class="meta">核对入口暂不可用</span>'}</div>
+          : current && item.source === 'label_review' ? `<button class="chip selected" type="button" data-act="parsed-review-open" data-id="${esc(item.id)}">在 App 内核对</button>` : '<span class="meta">核对入口暂不可用</span>'}</div>
     </article>`;
   }
   function parsedStatusHtml(status) {
@@ -1125,16 +1175,103 @@
     const message = { loading: '正在读取当前核对状态，旧候选暂不展示或操作。', partial: '部分会议暂不可读取；下方只显示当前有效的候选。', unavailable: '暂时读不到核对站事项，请重新读取。', disabled: '当前服务未连接核对站。', unsupported: '当前服务尚未提供核对站事项，请更新服务后重试。' }[state];
     const meetings = (status.meetings || []).filter(m => !['ready', 'current'].includes(m.status));
     const label = { source_changed: '来源已变化', stale: '来源已失效', expired: '依据已到期', withdrawn: '来源已撤回', unavailable: '读取失败', failed: '读取失败', waiting_summary: '等待纪要', waiting_transcript: '等待原话' };
-    return message || meetings.length ? `<section class="card parsed-source-state" role="status">${message ? `<p>${esc(message)}</p>` : ''}${meetings.map(m => `<p class="meta">${esc(m.title || m.id)} · ${esc(label[m.status] || '来源暂不可用')}</p>`).join('')}<button class="button quiet" type="button" data-act="tasks-retry">重新读取核对状态</button></section>` : '';
+    return message || meetings.length ? `<section class="card parsed-source-state" role="status">${message ? `<p>${esc(message)}</p>` : ''}${meetings.map(m => `<p class="meta">${esc(m.title || m.id)} · ${esc(label[m.status] || '来源暂不可用')}</p>`).join('')}<button class="button quiet" type="button" data-act="candidates-retry">重新读取核对状态</button></section>` : '';
+  }
+  function startTaskReview(item, reload = false) {
+    if (!item || item.source !== 'label_review' || !candidateCurrent(item)) return;
+    const old = S.taskReview;
+    if (!reload && old?.source.id === item.id && ['saving','unconfirmed'].includes(old.status)) return openSheet({kind:'taskReview'});
+    clearTimeout(old?.timer);
+    const requestId = `task-review-${++S.taskReviewSerial}`;
+    const key = `${feishuAccountKey()}:${item.id}:${item.fingerprint}`;
+    S.taskReview = {source:item,key,requestId,account:feishuAccountKey(),status:'loading',draft:S.taskReviewDrafts.get(key)};
+    openSheet({kind:'taskReview'});
+    send('tasks.review.open',{source_meeting_id:item.source_meeting.id,item_id:item.item_id,requestId});
+    armTaskReviewTimeout(S.taskReview);
+  }
+  function armTaskReviewTimeout(r) {
+    clearTimeout(r.timer);
+    r.timer = setTimeout(() => {
+      if (S.taskReview !== r || !['loading','saving'].includes(r.status)) return;
+      onError({scope:'taskReview',requestId:r.requestId,message:r.payload?'保存回执尚未确认，请重新读取或重试同一次保存。':'核对依据读取超时，请重新读取。'});
+    },25000);
+  }
+  function onTaskReview(p, saved) {
+    const r = S.taskReview;
+    if (!r || r.requestId !== p.requestId || r.account !== feishuAccountKey()
+      || p.source_meeting_id !== r.source.source_meeting.id || p.item_id !== r.source.item_id
+      || p.fingerprint !== r.source.fingerprint || p.source_status !== 'current'
+      || !p.reviewer || !Number.isInteger(p.revision) || !p.item) return;
+    clearTimeout(r.timer); r.data = p; r.status = 'ready'; r.error = null; r.payload = null;
+    if (!r.draft || saved) {
+      const own = p.item.review?.status === 'confirmed' ? p.item.review : {};
+      r.draft = {kind:own.kind || p.item.kind,title:own.title || p.item.title,detail:own.detail ?? p.item.detail ?? '',due:own.due ?? p.item.due ?? '',owner:own.owner || '',into:''};
+    }
+    S.taskReviewDrafts.set(r.key,r.draft);
+    if (saved) { requestTaskCandidates(true); toast('你的核对已保存'); }
+    if (S.sheet?.kind === 'taskReview') renderSheet();
+  }
+  function taskReviewHtml() {
+    const r = S.taskReview;
+    if (!r) return frame('核对会议待办','<p>请重新选择当前事项。</p>');
+    const d = r.draft || {}, data = r.data, saving = ['saving','loading'].includes(r.status);
+    if (!data || r.status === 'changed') return frame('核对会议待办',`${saving?spinnerHtml('正在读取原话与我的核对…'):''}${r.error?`<p class="error-text">${esc(r.error)}</p>`:''}${!saving?'<button class="button primary" data-act="task-review-reload">重新读取当前依据</button>':''}`);
+    const locked = saving || r.status === 'unconfirmed';
+    const own = data.item.review, status = PARSED_REVIEW[own?.status] || '待核对';
+    const options = (data.owners || []).map(name=>`<option value="${esc(name)}" ${d.owner===name?'selected':''}>${esc(parsedOwnerLabel(name))}</option>`).join('');
+    const merge = (S.tasks.parsedItems || []).filter(x=>x.source_meeting?.id===r.source.source_meeting.id&&x.id!==r.source.id&&candidateCurrent(x));
+    const evidence = (data.evidence || []).map(e=>`<blockquote><p>${esc(e.text)}</p><cite>${esc(e.speaker || '说话人待核对')} · ${clock(e.start_ms || 0)}</cite></blockquote>`).join('');
+    return frame('核对会议待办',`<p class="meta">${esc(r.source.source_meeting.title)} · 以 ${esc(data.reviewer)} 的身份核对</p><span class="badge purple">${esc(status)}</span>
+      ${r.error?`<p class="error-text" role="status">${esc(r.error)}</p>`:''}
+      ${r.status==='unconfirmed'?'<div class="inline-actions"><button class="button primary" data-act="task-review-retry">重试同一次保存</button><button class="button secondary" data-act="task-review-reload">重新读取核对结果</button></div>':''}
+      <fieldset class="review-answer" ${locked?'disabled':''}>
+        <label class="form-field"><span>类别</span><select id="task-review-kind">${[['task','待办'],['decision','决定'],['open','待定']].map(([k,v])=>`<option value="${k}" ${d.kind===k?'selected':''}>${v}</option>`).join('')}</select></label>
+        <label class="form-field"><span>事项</span><input id="task-review-title" maxlength="80" value="${esc(d.title || '')}"></label>
+        <label class="form-field"><span>补充说明</span><textarea id="task-review-detail" maxlength="400">${esc(d.detail || '')}</textarea></label>
+        <label class="form-field"><span>时间约定</span><input id="task-review-due" maxlength="40" placeholder="原话没有约定时留空" value="${esc(d.due || '')}"></label>
+        ${d.kind==='task'?`<label class="form-field"><span>负责人</span><select id="task-review-owner"><option value="">请明确选择</option>${options}</select></label>`:''}
+        <div class="inline-actions"><button class="button primary" data-act="task-review-save" data-action="confirm">确认并保存我的答案</button><button class="button secondary" data-act="task-review-save" data-action="reject">排除这件事</button>${own?'<button class="button quiet" data-act="task-review-save" data-action="reopen">撤回我的核对</button>':''}</div>
+        ${merge.length?`<label class="form-field"><span>与同一会议中的其他事项合并</span><select id="task-review-into"><option value="">选择合并目标</option>${merge.map(x=>`<option value="${esc(x.item_id)}" ${d.into===x.item_id?'selected':''}>${esc(x.title)}</option>`).join('')}</select></label><button class="button secondary" data-act="task-review-save" data-action="merge">合并到选定事项</button>`:''}
+      </fieldset>
+      <p class="meta">这里只保存你的核对答案，其他人的答案分别保留。确认内容后，创建飞书任务与业务完成仍需分别操作。</p>
+      ${sectionTitle('依据原话')}${evidence || '<p class="error-text">依据暂不可读取</p>'}`);
+  }
+  function captureTaskReviewDraft() {
+    const r = S.taskReview;
+    if (!r?.draft) return;
+    for (const key of ['kind','title','detail','due','owner','into']) {
+      const el = $(`task-review-${key}`);
+      if (el) r.draft[key] = el.value;
+    }
+    S.taskReviewDrafts.set(r.key,r.draft);
+  }
+  function saveTaskReview(action) {
+    const r = S.taskReview;
+    if (!r?.data || r.status !== 'ready' || r.account !== feishuAccountKey()) return;
+    captureTaskReviewDraft();
+    const d = r.draft;
+    if (action==='confirm' && ((d.title?.trim().length || 0)<2 || d.kind==='task'&&!d.owner)) return toast('请填写事项并明确选择负责人',true);
+    if (action==='merge' && !d.into) return toast('请先选择合并目标',true);
+    const requestId = `task-save-${Date.now()}-${++S.taskReviewSerial}`;
+    r.requestId = requestId;
+    r.payload = {source_meeting_id:r.source.source_meeting.id,item_id:r.source.item_id,fingerprint:r.source.fingerprint,
+      revision:r.data.revision,request_id:requestId,requestId,action,...d};
+    retryTaskReview();
+  }
+  function retryTaskReview() {
+    const r = S.taskReview;
+    if (!r?.payload || r.account!==feishuAccountKey() || r.status==='saving') return;
+    r.status = 'saving'; r.error = null; send('tasks.review.save',r.payload); armTaskReviewTimeout(r); renderSheet();
   }
   function tasksHtml() {
     const t = S.tasks;
-    const needSelf = t.mine && !S.state.selfName;
+    const needSelf = t.mine && !canReadMyTasks();
+    const mineAssignee = usesPersonalTaskIdentity() ? t.mineAssignee || t.reviewer : S.state.selfName;
     const q = t.query.trim().toLocaleLowerCase();
     const matches = value => !q || String(value || '').toLocaleLowerCase().includes(q);
     const items = (t.items || []).filter(x => matches([x.what, x.who, x.quote, x.meeting?.title, x.meeting?.goal].join(' ')));
     const archived = (t.archived || []).filter(x => matches([x.what, x.who, x.quote, x.meeting?.title, x.meeting?.goal].join(' ')));
-    const available = [...(t.parsedItems || []), ...(t.meetingItems || []).filter(x => !x.linked_created)].filter(x => !t.mine || parsedOwner(x) === S.state.selfName);
+    const available = [...(t.parsedItems || []), ...(t.meetingItems || []).filter(x => !x.linked_created)].filter(x => !t.mine || !!mineAssignee && parsedOwner(x) === mineAssignee);
     const parsed = available.filter(x => (t.reviewFilter === 'all' || parsedReviewState(x) === t.reviewFilter)
       && matches([x.title, x.what, x.detail, x.source_meeting?.title, ...(x.evidence || []).map(e => e.text), ...(x.reviews || []).flatMap(r => [r.by, r.owner, r.title])].join(' ')));
     const overdue = items.filter((x) => x.overdue), open = items.filter((x) => !x.overdue && ['open', 'unknown'].includes(x.feishu?.state));
@@ -1145,14 +1282,15 @@
       <div class="segmented" role="tablist">${[['review', '待核对'], ['mine', '我的任务'], ['all', '团队任务']].map(([k, label]) => `<button role="tab" aria-selected="${k === t.scope}" data-act="tasks-scope" data-value="${k}">${label}</button>`).join('')}</div>
       <div class="task-search-row"><div class="search-input">${icon('magnifying-glass', 18)}<input id="tasks-search" aria-label="搜索任务、原话或会议" placeholder="搜索任务、原话或会议" value="${esc(t.query)}"></div></div>
       ${needSelf ? `<section class="card"><h3>先选你是谁</h3><p class="meta">选好后，这里只列你负责的任务。</p><div class="inline-actions">${S.team.map((n) => `<button class="chip" data-act="tasks-self" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div></section>`
-        : `${requestNotice(S.requests.tasks, 'tasks-retry', t.items !== null)}${t.items == null ? S.requests.tasks.error ? '' : spinnerHtml('正在读取会议待办和正式任务…', '读取原核对站的当前人工核对状态')
+        : `${t.parsedItems === null ? spinnerHtml('正在读取会议待办…', '正式任务单独加载')
         : `<section class="stack task-group parsed-task-group"><div class="section-title"><h2>${t.mine ? '明确由我负责的会议候选' : '会议待办候选'} <span class="meta">${parsed.length}${parsed.length !== available.length ? ` / ${available.length}` : ''}</span></h2></div>
           <p class="meta">${t.mine ? '只显示人工明确指定本人、且核对没有分歧的候选。' : '未分配的待办也在这里。'}确认内容不代表业务完成；原话中的说话人与人工负责人分别记录。${t.refreshedAt ? ` · 本次读取 ${esc(formatDate(t.refreshedAt))}` : ''}</p>
           <div class="parsed-filters" aria-label="候选核对状态">${Object.entries(PARSED_FILTER).map(([key, label]) => `<button class="chip ${t.reviewFilter === key ? 'selected' : ''}" type="button" data-act="parsed-filter" data-value="${key}" aria-pressed="${t.reviewFilter === key}">${label}</button>`).join('')}</div>
-          ${parsedStatusHtml(t.parsedStatus)}${[['label_review', '原核对站候选'], ['meeting_review', 'App 会后已确认待办']].map(([source, title]) => { const rows = parsed.filter(x => x.source === source); return rows.length ? `<h3 class="parsed-source-heading">${title} · ${rows.length}</h3>${rows.map(parsedCard).join('')}` : ''; }).join('')}
-          ${!parsed.length && !['loading', 'unavailable', 'disabled', 'unsupported'].includes(t.parsedStatus?.state) ? `<p class="meta">${t.mine ? '暂没有明确由你负责且符合筛选的会议候选；未分配或有分歧的内容可在「待核对」查看。' : '没有符合筛选的当前候选。可清除搜索或切换核对状态。'}</p>` : ''}</section>
+          ${parsedStatusHtml(t.parsedStatus)}${[['label_review', '会议待核对'], ['meeting_review', 'App 会后已确认待办']].map(([source, title]) => { const rows = parsed.filter(x => x.source === source); return rows.length ? `<h3 class="parsed-source-heading">${title} · ${rows.length}</h3>${rows.map(parsedCard).join('')}` : ''; }).join('')}
+          ${!parsed.length && !['loading', 'unavailable', 'disabled', 'unsupported'].includes(t.parsedStatus?.state) ? `<p class="meta">${t.mine ? '暂没有明确由你负责且符合筛选的会议候选；未分配或有分歧的内容可在「待核对」查看。' : '没有符合筛选的当前候选。可清除搜索或切换核对状态。'}</p>` : ''}</section>`}
+          ${requestNotice(S.requests.tasks, 'formal-tasks-retry', t.items !== null)}${t.items === null ? S.requests.tasks.error ? '' : spinnerHtml('正在读取飞书正式任务…', '会议候选和核对入口可以独立使用') : `
           <section class="stack task-group formal-task-group"><div class="section-title"><h2>飞书正式任务 <span class="meta">${items.length}</span></h2><button class="chip" type="button" data-act="tasks-status-cycle" aria-label="筛选飞书业务状态">${{ open: '未完成', done: '已完成', all: '全部状态' }[t.status]}</button></div>
-          <p class="meta">${t.mine ? `${esc(S.state.selfName)}负责` : '团队全部负责人'} · 已创建的飞书任务，业务状态单独读取</p>
+          <p class="meta">${t.mine ? `${esc(mineAssignee || '当前个人飞书账号')}负责` : '团队全部负责人'} · 已创建的飞书任务，业务状态单独读取</p>
           ${group('需要跟进', overdue)}${group('进行中', open)}${group('已完成', done)}${group('飞书里已删除', gone)}
           ${!items.length ? '<p class="meta">没有符合条件的飞书正式任务。上方候选尚不等于已创建任务。</p>' : ''}
           ${archived.length ? `<details><summary>已收起的验收记录 ${archived.length} 条</summary><p class="meta">保留原记录，已移出业务待办，不计入正式任务数量。</p>${archived.map(taskCard).join('')}</details>` : ''}</section>`}
@@ -1217,7 +1355,7 @@
     const group = (title, rows) => `<div>${sectionTitle(title)}<section class="card">${rows.join('')}</section></div>`;
     return `<div class="stack">
       <section class="card ms-profile"><div class="ms-person-head"><span class="avatar">${esc(s.selfName ? initial(s.selfName) : '?')}</span>
-        <div><h2>${esc(s.selfName || '还没选择本人')}</h2><p class="meta">${s.selfName ? '当前任务身份 · 不授予声音或共享权限' : '选择任务身份，分别管理声音与共享许可'}</p></div></div>
+        <div><h2>${esc(s.selfName || '还没选择本人')}</h2><p class="meta">${usesPersonalTaskIdentity() ? '本机显示名 · 我的任务以个人飞书账号为准' : s.selfName ? '当前任务身份 · 不授予声音或共享权限' : '选择任务身份，分别管理声音与共享许可'}</p></div></div>
         <button class="ms-space" data-act="self-pick">${esc(s.selfName ? '切换本人' : '选择本人')}${icon('caret-down', 13)}</button></section>
       ${group('账户与身份', [
         listRow({ act: 'self-pick', ic: 'user-circle', title: '当前身份', sub: s.selfName || '未选择' }),
@@ -1226,6 +1364,7 @@
         listRow({ act: 'go', data: 'data-route="device"', ic: 'bluetooth', title: '设备与开机自动聆听', sub: '首配独立选择 · 暂停与停止优先 · 设备示例' }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'microphone', title: '收音、唤醒与提醒偏好', sub: `${SOURCE_TEXT[s.source] || s.source || '未设置音源'} · ${s.voiceTrigger !== false ? '语音唤醒开' : '语音唤醒关'}` })])}
       ${group('连接与数据', [
+        listRow({ act: 'feishu-open', ic: 'plugs-connected', title: '我的飞书', sub: S.feishu.status === 'connected' ? S.feishu.account?.name || '已绑定我的账号' : '每人授权自己的账号 · 纪要确认后才发送' }),
         listRow({ act: 'go', data: 'data-route="settings"', ic: 'plugs-connected', title: '服务连接', sub: s.backend === 'mock' ? 'Mock 后端（不连服务器）' : s.backendUrl || '未配置' }),
         listRow({ act: 'privacy-open', ic: 'shield-check', title: '隐私、保存与共享', sub: '日常临时5分钟；正式会议每次单独确认' })])}
       ${group('运行信息', [
@@ -1375,6 +1514,7 @@
       if (['saving', 'testing'].includes(S.state.voiceprint?.phase)) return toast('请等待当前请求结束');
       send('voiceprint.cancel');
     }
+    if (S.sheet?.kind === 'itemTaskPending' && sheet.kind !== 'itemTaskPending') S.itemTaskRequest = null;
     S.sheet = sheet;
     renderSheet();
     $('sheet').hidden = false;
@@ -1382,11 +1522,13 @@
   }
 
   function closeSheet() {
+    if (S.sheet?.kind === 'taskReview') captureTaskReviewDraft();
     if (S.sheet?.kind === 'voiceprint') {
       if (['saving', 'testing'].includes(S.state.voiceprint?.phase)) return toast('请等待当前请求结束');
       send('voiceprint.cancel');
     }
     if (S.playingKey) send('clip.stop');
+    if (S.sheet?.kind === 'itemTaskPending') S.itemTaskRequest = null;
     if (['pending', 'requestError'].includes(S.sheet?.kind) && S.pendingMeetingId) {
       if (S.meetingRequest) S.meetingRequest.active = false;
       S.pendingMeetingId = null; S.pendingReview = null; S.pendingTools = null;
@@ -1411,6 +1553,7 @@
     $('sheet').dataset.kind = k || '';
     const html = {
       pending: () => frame(esc(S.sheet.title || '请稍等'), spinnerHtml(S.sheet.title || '请稍等', S.sheet.sub || '')),
+      itemTaskPending: itemTaskPendingHtml,
       draftPending: () => frame('整理行动草稿', spinnerHtml('正在整理行动草稿…', '提取负责人、事项、截止时间和约束')),
       notFound: notFoundHtml,
       card: cardHtml,
@@ -1425,7 +1568,10 @@
       speaker: speakerPickHtml,
       review: reviewHtml,
       items: itemReviewHtml,
+      taskReview: taskReviewHtml,
       minutesSource: minutesSourceHtml,
+      feishu: feishuHtml,
+      minutesDelivery: minutesDeliveryHtml,
       requestError: () => frame('暂时无法读取', `<p class="error-text">${esc(S.sheet.error)}</p><button class="button primary" type="button" data-act="meeting-retry"><span>重新打开会议</span></button>`),
       projectPick: projectPickHtml,
       rename: renameHtml,
@@ -1574,11 +1720,18 @@
   // ---- action draft -----------------------------------------------------------------------
 
   function openDraft(d) {
+    const itemId = d.sourceItemId || (d.evidence?.sourceBinding || d.evidence?.source_binding)?.item_id;
+    if (itemId && !d.sourceItemId) d = {...d, sourceItemId:itemId};
     const sourceSessionId = d.sessionId || d.session_id || (d.evidence?.sourceBinding || d.evidence?.source_binding)?.session_id || S.card?.data.sessionId || S.card?.data.sourceSessionId
       || (d.evidence?.utteranceIds?.some(id => S.records.has(id)) ? S.state.sessionId : null);
     if (S.deletedSessions.has(sourceSessionId)) return;
     S.draft = window.OopsDraftState.create(d);
     S.draft.sourceSessionId = sourceSessionId;
+    if (d.sourceItemId) {
+      // The owner came from a human-reviewed item; this is still a fresh, unsent task draft.
+      S.draft.data.who = d.who === COLLECTIVE || d.who === 'collective' ? '' : d.who || '';
+      S.draft.dirty.who = true;
+    }
     openSheet({ kind: 'draft' });
   }
   function draftSourceValid(d) {
@@ -1625,7 +1778,7 @@
     const submitted = status === 'waiting' || status === 'failed' || sending;
     const validSource = draftSourceValid(d);
     const dailyUnavailable = !validSource && S.state.recordingMode === 'daily' && (d.sourceError || d.source_error);
-    const tier = d.tier === 'A' ? ['A · 模型高可信', 'green'] : d.tier === 'B' ? ['B · 建议，请核对', 'amber'] : ['C · 模型未确认负责人', 'gray'];
+    const tier = d.sourceItemId ? ['会后事项 · 人工已核对', 'purple'] : d.tier === 'A' ? ['A · 模型高可信', 'green'] : d.tier === 'B' ? ['B · 建议，请核对', 'amber'] : ['C · 模型未确认负责人', 'gray'];
     const suggestions = [...new Set([d.suggestedOwner, ...(d.ownerCandidates || []).map((c) => c.name)].filter(Boolean))].slice(0, 2);
     return frame('整理成飞书任务', `<div class="inline-actions"><span class="badge ${tier[1]}">${tier[0]}</span><span class="badge ${sourceChanged ? 'gray' : S.draft.reviewStatus === 'confirmed' ? 'green' : 'purple'}">${sourceChanged ? '来源已变化 · 原操作记录' : S.draft.reviewStatus === 'confirmed' ? '人工已确认' : '待你确认'}</span></div>
       <p class="meta">${esc(d.reason || '请核对负责人')}${typeof d.ownerConfidence === 'number' ? ` · 模型建议可信度 ${(d.ownerConfidence * 100).toFixed(0)}%` : ''}</p>
@@ -1643,6 +1796,7 @@
       <button class="button quiet" type="button" data-act="close"><span>取消</span></button>`);
   }
   function confirmDraft() {
+    if (['sending', 'waiting', 'done'].includes(S.draft?.status)) return;
     if (S.draft?.errorCode === 'SOURCE_CHANGED' || S.draft?.sourceInvalidated || S.draft?.sourceBlocked) return toast('旧依据已撤回，请核对当前原话；未知创建结果只查询原操作', true);
     if (!S.draft || !draftSourceValid(S.draft.data)) { toast('原话依据尚未核验或已经变化，请重新读取后核对', true); return; }
     const d = S.draft.data;
@@ -1675,12 +1829,18 @@
     if (p.status === 'created') {
       S.draft.status = 'done';
       S.draft.result = p;
-      openSheet({ kind: 'result' });
+      if (S.draft.data.sourceItemId) {
+        const item = S.history?.session_id === S.draft.sourceSessionId && S.history.items?.find(it => it.id === S.draft.data.sourceItemId);
+        if (item) { item.task_status = 'created'; item.task_url = p.taskUrl || null; }
+        requestTasks(S.tasks.mine && canReadMyTasks(), S.tasks.status);
+        if (S.sheet?.kind === 'draft') openSheet({ kind: 'result' });
+        else { toast(p.mock ? '模拟任务已生成' : '已创建飞书任务'); render(); }
+      } else openSheet({ kind: 'result' });
     } else {
       S.draft.status = 'failed';
       S.draft.error = p.message || '后端报告创建失败；本次确认内容已冻结，可查询状态';
       if (S.sheet?.kind === 'draft') renderSheet();
-      else openSheet({ kind: 'draft' });
+      else if (!S.draft.data.sourceItemId) openSheet({ kind: 'draft' });
     }
   }
   function resultHtml() {
@@ -1844,7 +2004,7 @@
     const wasVisible = S.route.name === 'meeting' && S.route.id === sid || S.history?.session_id === sid && S.sheet?.kind === 'tools';
     S.deletedSessions.add(sid); S.pendingDelete = null;
     S.historyItems = S.historyItems?.filter(x => x.session_id !== sid) || null;
-    S.minutes.delete(sid); S.projects.items = null;
+    S.minutes.delete(sid); S.deliveries.delete(sid); S.projects.items = null;
     if (S.projects.open) S.projects.open = visibleProject(S.projects.open);
     if (S.history?.session_id === sid) S.history = null;
     if (S.meetingRequest?.sessionId === sid) { S.meetingRequest.active = false; S.pendingMeetingId = null; }
@@ -1891,6 +2051,153 @@
 
   // ---- read-only AI minutes: query stored results, never generate or send --------------------
 
+  // ---- Personal Feishu binding and explicitly confirmed minutes delivery -------------------
+  const feishuAccountKey = () => JSON.stringify(S.feishu.account ? [S.feishu.bindingRevision || S.feishu.account.binding_id || S.feishu.account.bindingId || '', S.feishu.account.open_id || S.feishu.account.openId || '', S.feishu.account.tenant_key || ''] : null);
+  const deliveryBusy = d => !!d?.busy || ['pending', 'sending', 'partial', 'unknown'].includes(d?.status);
+  const deliverySent = d => ['sent', 'completed', 'succeeded'].includes(d?.status);
+  const deliveryBlocked = d => ['source_changed', 'stale', 'unavailable', 'waiting_minutes', 'unconfigured', 'expired', 'not_found', 'forbidden', 'invalidated'].includes(d?.status) || ['source_changed', 'stale'].includes(d?.data?.reason);
+  const activeDelivery = () => S.sheet?.kind === 'minutesDelivery' ? S.deliveries.get(S.sheet.sessionId) : null;
+  const missingFeishuCapabilities = () => [['documents_write','创建纪要文档'],['sharing','设置文档权限'],['messages_send','发送纪要通知']].filter(([key]) => S.feishu.capabilities?.[key] === false).map(([,label]) => label);
+  const deliveryCanConfirm = d => !!d?.draft && !deliveryBusy(d) && !deliverySent(d) && !deliveryBlocked(d) && !d.dirty && d.accountKey === feishuAccountKey() && S.feishu.status === 'connected' && !missingFeishuCapabilities().length && d.draft.title?.trim() && d.draft.content?.trim() && d.draft.recipients?.length > 0 && d.draft.recipients.every(person => typeof person === 'object' && person.name || S.feishu.knownRecipients?.[deliveryPersonId(person)]?.name);
+  const deliveryPersonId = p => typeof p === 'string' ? p : p.open_id || p.id || '';
+  const deliveryPersonName = p => typeof p === 'string' ? S.feishu.knownRecipients?.[p]?.name || `待核对联系人（${p}）` : p.name || p.display_name || '飞书联系人';
+  function feishuRequest(type, payload = {}) {
+    const requestId = `feishu-${++S.feishuSerial}`;
+    S.feishu.requestId = requestId; S.feishu.busy = true; S.feishu.error = null;
+    send(type, {...payload, requestId});
+    setTimeout(() => { if (S.feishu.requestId === requestId && S.feishu.busy) { S.feishu.busy = false; S.feishu.error = '尚未收到授权状态，请返回后刷新确认。'; if (S.sheet?.kind === 'feishu') renderSheet(); } }, 20000);
+    return requestId;
+  }
+  function openFeishu() { openSheet({kind:'feishu'}); feishuRequest('feishu.status'); }
+  function onFeishuStatus(p) {
+    if (p.requestId && p.requestId !== S.feishu.requestId) return;
+    const before = feishuAccountKey(), wasAuthorizing = S.feishu.status === 'authorizing';
+    Object.assign(S.feishu, {bindingRevision:p.binding_revision, status:({bound:'connected',unbound:'disconnected'}[p.status] || p.status || 'disconnected'), account:p.account || null, capabilities:p.capabilities || {}, busy:false, error:p.message || null});
+    if (wasAuthorizing && S.feishu.status === 'disconnected') S.feishu.status = 'cancelled';
+    if (before !== feishuAccountKey() || S.feishu.status !== 'connected') {
+      if (usesPersonalTaskIdentity()) {
+        clearTaskIdentity();
+        if (S.route.name === 'tasks') openTasks();
+        else if (S.route.name === 'home') loadHomeTasks();
+        if (['tasks', 'home', 'memory'].includes(S.route.name)) render();
+      }
+      S.feishu.recipients = []; S.feishu.knownRecipients = {}; S.feishu.recipientSource = null; S.feishu.recipientSearched = false; S.feishu.recipientRequestId = null;
+      for (const d of S.deliveries.values()) d.confirmed = false;
+    }
+    const blocked = activeDelivery();
+    if (before !== feishuAccountKey() && S.feishu.status === 'connected' && blocked?.status === 'forbidden' && blocked.data?.code === 'MEETING_ACCOUNT_MISMATCH') {
+      blocked.status = 'loading'; blocked.data = null;
+      deliveryRequest('minutes.delivery.open', blocked.sessionId);
+    }
+    if (['feishu','minutesDelivery'].includes(S.sheet?.kind)) renderSheet();
+    if (S.route.name === 'me') render();
+  }
+  function onFeishuAuthorization(p) {
+    if (p.requestId && p.requestId !== S.feishu.requestId) return;
+    S.feishu.busy = false; S.feishu.status = p.status || 'authorizing';
+    S.feishu.error = p.message || (p.authorization_url ? '请在飞书官方授权页确认，完成后返回并刷新状态。' : '未获得可用授权页面，请刷新后重试。');
+    // The native shell validates and opens the official HTTPS URL. Never open an arbitrary URL here.
+    if (S.sheet?.kind === 'feishu') renderSheet();
+  }
+  function feishuHtml() {
+    const f = S.feishu, labels = {loading:'正在读取', disconnected:'尚未绑定', connected:'已绑定我的账号', authorizing:'等待飞书授权', cancelled:'本次授权已取消', expired:'授权已过期', unconfigured:'应用尚未配置', unavailable:'飞书应用暂不可用'};
+    return frame('我的飞书', `${S.state.backend === 'mock' ? '<p class="notice">隔离模拟，不会访问真实飞书或发送消息。</p>' : ''}<section class="card"><span class="badge ${f.status === 'connected' ? 'green' : 'gray'}">${labels[f.status] || esc(f.status)}</span><h3>${esc(f.account?.name || f.account?.display_name || '绑定你自己的飞书')}</h3><p class="meta">${esc(f.account?.tenant_name || '在手机发起飞书官方授权，确认账号和权限后返回 Oops。')}</p></section>
+      ${f.error ? `<p class="meta" role="status">${esc(f.error)}</p>` : ''}
+      ${f.status === 'connected' ? `<section class="card"><h3>已授权能力</h3>${[['documents_write','创建纪要文档'],['sharing','设置选定收件人的文档权限'],['messages_send','发送纪要通知']].map(([key,label]) => `<p class="meta">${label}：${f.capabilities?.[key] === false ? '未获授权' : f.capabilities?.[key] === true ? '已获授权' : '以服务核对结果为准'}</p>`).join('')}</section>${missingFeishuCapabilities().length ? '<button class="button secondary" data-act="feishu-connect">补充授权我的飞书</button>' : ''}<p>已绑定不代表同意自动发送。每份纪要仍需核对正文、收件人和文档权限。</p><button class="button danger" data-act="feishu-disconnect-prompt" ${f.busy ? 'disabled' : ''}>断开我的飞书</button>` : `<button class="button primary" data-act="feishu-connect" ${f.busy || ['unconfigured','unavailable'].includes(f.status) ? 'disabled' : ''}>${f.busy ? '正在读取…' : f.status === 'expired' ? '重新授权我的飞书' : '连接我的飞书'}</button>`}
+      ${['unconfigured','unavailable'].includes(f.status) ? '<p class="meta">管理员需要配置飞书应用和官方回调，当前不能发起授权。</p>' : ''}
+      <button class="button secondary" data-act="feishu-refresh" ${f.busy ? 'disabled' : ''}>返回授权后，刷新状态</button>
+      ${S.sheet.disconnectConfirm ? '<section class="card"><p>断开后停止后续访问，未发送草稿保留，原发送确认失效。已交付的文档权限需在飞书中管理。</p><button class="button danger" data-act="feishu-disconnect">确认断开</button></section>' : ''}
+      ${S.feishuReturnSession ? '<button class="button quiet" data-act="delivery-return">返回核对纪要</button>' : ''}`);
+  }
+  function openMinutesDelivery(sessionId) {
+    if (!sessionId || S.deletedSessions.has(sessionId)) return;
+    openSheet({kind:'minutesDelivery',sessionId});
+    feishuRequest('feishu.status');
+    if (!S.deliveries.has(sessionId)) deliveryRequest('minutes.delivery.open', sessionId);
+  }
+  function deliveryRequest(type, sessionId, extra = {}) {
+    const d = S.deliveries.get(sessionId) || {sessionId, status:'loading', dirty:false, confirmed:false};
+    const requestId = `delivery-${++S.feishuSerial}`;
+    d.busy = true; d.requestId = requestId; d.requestAccountKey = feishuAccountKey(); d.requestType = type; d.error = null;
+    if (type !== 'minutes.delivery.status') d.confirmed = false;
+    S.deliveries.set(sessionId, d);
+    send(type, {sessionId, requestId, ...extra});
+    if (S.sheet?.kind === 'minutesDelivery' && S.sheet.sessionId === sessionId) renderSheet();
+    setTimeout(() => { if (d.requestId === requestId && d.busy) { d.busy = false; d.error = type === 'minutes.delivery.confirm' ? '发送结果尚未确认，请查询原操作结果，勿重复发送。' : '暂未收到回执，请重试读取。'; if (type === 'minutes.delivery.confirm') d.status = 'unknown'; if (activeDelivery() === d) renderSheet(); } }, 20000);
+  }
+  const ownershipRecovery = {
+    MEETING_OWNER_UNVERIFIED: {title:'这场会议的记录人尚未核实', message:'请先核实这场会议的记录人和原始记录。重新绑定飞书不会自动认领旧会议。'},
+    MEETING_OWNER_MISMATCH: {title:'这场会议不属于当前本人', message:'请打开本人记录的会议，或由该会议的记录人核对并发送。'},
+    MEETING_ACCOUNT_MISMATCH: {title:'原会议绑定的飞书账号不同', message:'请在“我的飞书”重新连接这场会议原来绑定的账号。'},
+  };
+  function blockDeliveryOwnership(d, p) {
+    d.busy = false; d.status = 'forbidden'; d.error = p.message || null;
+    d.draft = null; d.dirty = false; d.confirmed = false; d.accountKey = null; d.opId = null;
+    d.data = {...p, status:'forbidden', draft:null, delivery:null};
+    // Retire the failed request and contact lookup so late receipts cannot revive its draft or selection.
+    d.requestId = null;
+    S.feishu.recipients = []; S.feishu.knownRecipients = {}; S.feishu.recipientRequestId = null;
+    S.feishu.recipientQuery = ''; S.feishu.recipientSearched = false; S.feishu.recipientsLoading = false;
+    S.feishu.recipientsError = null; S.feishu.recipientSource = null;
+  }
+  function onMinutesDelivery(p) {
+    const sid = p.session_id || p.sessionId, d = S.deliveries.get(sid);
+    if (!d || !p.requestId || p.requestId !== d.requestId || S.deletedSessions.has(sid)) return;
+    if (p.status === 'forbidden' || ownershipRecovery[p.code] || p.ownership?.can_send === false) {
+      blockDeliveryOwnership(d, p);
+      if (activeDelivery() === d) renderSheet();
+      return;
+    }
+    d.busy = false; d.data = p;
+    const operation = p.delivery;
+    d.status = p.status || (operation && (operation.revision === p.draft?.revision || ['unknown','sending','partial'].includes(operation.status)) ? operation.status : 'ready'); d.error = p.message || null; d.confirmed = false;
+    if (p.draft) { d.draft = {...p.draft, recipients:[...(p.draft.recipients || [])], permission:p.draft.permission || 'view'}; d.dirty = false; d.accountKey = (p.draft.account_open_id !== undefined && p.draft.account_open_id !== S.feishu.account?.open_id || p.draft.binding_revision !== undefined && p.draft.binding_revision !== S.feishu.bindingRevision) ? 'outdated-account' : p.draft.binding_revision !== undefined && p.draft.account_open_id !== undefined ? feishuAccountKey() : d.requestAccountKey; }
+    if (p.op_id || p.opId || operation?.op_id) d.opId = p.op_id || p.opId || operation.op_id;
+    if (activeDelivery() === d) renderSheet();
+  }
+  function deliveryEdit(field, value) {
+    const d = activeDelivery(); if (!d?.draft || deliveryBusy(d) || deliverySent(d) || deliveryBlocked(d)) return;
+    d.draft[field] = value; d.dirty = true; d.confirmed = false;
+    const box = $('delivery-confirmed'); if (box) box.checked = false;
+    const btn = $('delivery-send'); if (btn) btn.disabled = true;
+    const save = $('delivery-save'); if (save) save.disabled = !d.draft.title.trim() || !d.draft.content.trim() || S.feishu.status !== 'connected';
+  }
+  function deliveryRecipientsRequest() {
+    const d = activeDelivery();
+    if (!d?.draft || deliveryBusy(d) || deliverySent(d) || deliveryBlocked(d)) return;
+    const requestId = `recipient-${++S.feishuSerial}`;
+    S.feishu.recipientRequestId = requestId; S.feishu.recipientsLoading = true; S.feishu.recipientsError = null;
+    send('feishu.recipients', {query:$('delivery-search')?.value || '',requestId});
+  }
+  function minutesDeliveryHtml() {
+    const d = activeDelivery();
+    if (!d) return frame('核对并发送纪要', '<p>正在读取待发送草稿…</p>');
+    if (d.status === 'forbidden') {
+      const recovery = ownershipRecovery[d.data?.code] || {title:'当前账号不能发送这场会议', message:'请回到会议核对记录来源，或查看当前本人绑定的飞书账号。'};
+      return frame('核对并发送纪要', `<section class="card"><span class="badge gray">暂不能发送</span><h3>${esc(recovery.title)}</h3><p>${esc(d.error || '服务端尚未确认当前本人可以发送这场会议。')}</p><p class="meta">${esc(d.data?.recovery?.message || recovery.message)}</p></section><p class="meta">仍可回到会议查看原文和已保存的纪要。</p><button class="button primary" data-act="close">回到会议</button><button class="button secondary" data-act="delivery-connect">${d.data?.code === 'MEETING_ACCOUNT_MISMATCH' ? '查看并连接原飞书账号' : '查看我的飞书'}</button>`);
+    }
+    const draft = d.draft, locked = deliveryBusy(d) || deliverySent(d) || deliveryBlocked(d), f = S.feishu;
+    const selected = draft?.recipients || [], ids = selected.map(deliveryPersonId);
+    const statuses = {invalidated:'账号或来源已变化，原操作失效',pending:'发送中，等待回执',sending:'发送中，等待回执',unknown:'发送结果待确认',partial:'部分交付，先核对原操作回执',sent:'发送成功',completed:'发送成功',succeeded:'发送成功',source_changed:'来源已变化，请重新核对',stale:'来源已失效',waiting_minutes:'等待会议纪要',unavailable:'纪要暂不可用',expired:'授权已过期',unconfigured:'应用尚未配置',failed:'操作失败，先核对结果',ready:'等待你核对',draft:'等待你核对'};
+    return frame('核对并发送纪要', `${S.state.backend === 'mock' ? '<span class="badge gray">隔离发送模拟</span>' : ''}<p class="meta">发送账号：${esc(f.status === 'connected' ? f.account?.name || '我的飞书' : '尚未绑定或授权已失效')}</p>
+      ${f.status !== 'connected' ? '<button class="button secondary" data-act="delivery-connect">连接我的飞书</button>' : ''}
+      ${missingFeishuCapabilities().length ? `<p class="error-text">当前授权缺少：${missingFeishuCapabilities().map(esc).join('、')}。请到我的飞书补充授权后重新核对。</p><button class="button secondary" data-act="delivery-connect">补充飞书授权</button>` : ''}<p class="meta" role="status">${d.busy ? '正在读取或等待服务器回执…' : statuses[d.status] || esc(d.status)}</p>${d.error ? `<p class="error-text" role="alert">${esc(d.error)}</p>` : ''}
+      ${draft ? `<label class="form-field"><span>纪要标题</span><input id="delivery-title" value="${esc(draft.title)}" ${locked ? 'disabled' : ''}></label><label class="form-field"><span>核对纪要正文</span><textarea id="delivery-content" rows="10" ${locked ? 'disabled' : ''}>${esc(draft.content)}</textarea></label>
+      <h3>选择收件人 · ${selected.length}人</h3><p class="meta">参会人只是线索，不会自动勾选。已选：${selected.length ? selected.map(deliveryPersonName).map(esc).join('、') : '无，请明确选择'}</p>
+      ${!locked ? `<p class="meta">已选联系人须能核对姓名；待核对联系人请搜索确认或移除后重新选择。</p><label class="form-field"><span>搜索飞书联系人</span><input id="delivery-search" value="${esc(S.feishu.recipientQuery || '')}" placeholder="输入姓名"></label><button class="button quiet" data-act="delivery-search" ${f.status !== 'connected' || f.recipientsLoading ? 'disabled' : ''}>${f.recipientsLoading ? '正在查询…' : '查询联系人'}</button>
+      ${f.recipientSource === 'bound_accounts' ? `<p class="meta">${f.capabilities?.recipients_search ? '先显示同组织已绑定的账号；输入姓名可查询飞书联系人。收件人无需绑定 Oops。' : '当前授权未包含联系人搜索，仅列出已绑定的同组织账号。'}</p>` : ''}${f.recipientSearched && !f.recipientsLoading && !f.recipients.length && !f.recipientsError ? '<p class="meta">没有符合条件的账号，可调整姓名后重新查询。</p>' : ''}${f.recipientsError ? `<p class="error-text">${esc(f.recipientsError)}</p>` : ''}${f.recipients.map(person => `<label class="check-row"><input type="checkbox" data-delivery-recipient="${esc(deliveryPersonId(person))}" ${ids.includes(deliveryPersonId(person)) ? 'checked' : ''}><span>${esc(person.name)} · ${esc(deliveryPersonId(person).slice(-8))}${person.department ? ' · ' + esc(person.department) : ''}</span></label>`).join('')}
+      ${selected.filter(p => !f.recipients.some(x => deliveryPersonId(x) === deliveryPersonId(p))).map(p => `<label class="check-row"><input type="checkbox" data-delivery-recipient="${esc(deliveryPersonId(p))}" checked><span>${esc(deliveryPersonName(p))} · 已选</span></label>`).join('')}` : ''}
+      <label class="form-field"><span>收件人的文档权限</span><select id="delivery-permission" ${locked ? 'disabled' : ''}><option value="view" ${draft.permission === 'view' ? 'selected' : ''}>仅查看</option><option value="edit" ${draft.permission === 'edit' ? 'selected' : ''}>可编辑</option></select></label>
+      ${!locked ? `<button id="delivery-save" class="button secondary" data-act="delivery-save" ${!draft.title?.trim() || !draft.content?.trim() || f.status !== 'connected' ? 'disabled' : ''}>${d.dirty ? '保存待发送草稿' : '保存本版草稿，继续核对'}</button><label class="check-row"><input id="delivery-confirmed" type="checkbox" ${d.confirmed ? 'checked' : ''} ${deliveryCanConfirm(d) ? '' : 'disabled'}><span>我已核对正文、${selected.length}位收件人与${draft.permission === 'view' ? '查看' : '编辑'}权限，同意发送本版本</span></label><button id="delivery-send" class="button primary" data-act="delivery-confirm" ${deliveryCanConfirm(d) && d.confirmed ? '' : 'disabled'}>确认发送</button><p class="meta">修改正文、收件人、权限或绑定账号后，需保存并重新核对。</p>` : ''}` : ''}
+      ${d.opId ? `<button class="button secondary" data-act="delivery-status" ${d.busy ? 'disabled' : ''}>查询原操作结果</button><p class="meta">操作记录：${esc(d.opId)}。查询不会重新发送。</p>` : ''}
+      ${d.data?.delivery ? `<section class="card"><h3>交付回执</h3><p>${esc(d.data.delivery.message || statuses[d.data.delivery.status] || '服务器已记录本次交付结果。')}</p></section>` : ''}
+      ${d.data?.delivery?.status === 'sent' && /^https:\/\/[^/]+\.(feishu\.cn|larksuite\.com)\/docx\//i.test(d.data.delivery.doc_url || '') ? '<button class="button secondary" data-act="delivery-doc">在飞书查看已发送纪要</button>' : ''}
+      ${d.data?.receipt ? `<section class="card"><h3>交付回执</h3><p>${esc(d.data.receipt.message || '服务器已记录本次交付结果。')}</p></section>` : ''}
+      ${!d.opId || deliveryBlocked(d) ? `<button class="button quiet" data-act="delivery-reload" ${d.busy ? 'disabled' : ''}>重新读取当前草稿</button>` : ''}`);
+  }
+
+  // ---- read-only AI minutes: query stored results, never generate or send --------------------
+
   function requestMinutes(sessionId) {
     const requestId = `minutes-${++S.minutesRequest}`;
     S.minutes.set(sessionId, { loading: true, requestId });
@@ -1904,6 +2211,7 @@
   }
   function refreshMinutesAfterReview(sessionId) {
     if (S.sheet?.kind === 'minutesSource' && S.sheet.sessionId === sessionId) closeSheet();
+    const d = S.deliveries.get(sessionId); if (d) { d.confirmed = false; if (!d.opId) d.status = 'source_changed'; }
     requestMinutes(sessionId);
     if (S.route.name === 'meeting' && S.history?.session_id === sessionId) render();
   }
@@ -1933,6 +2241,7 @@
         ${itemsLead ? '' : rows('待确认问题', m.open_questions, x => x.question, x => [x.id])}
         ${rows('后续跟进建议', m.follow_ups, x => `${x.title || ''}${x.start ? ' · ' + x.start : ''}`, () => [])}
         ${m.substantive === false ? '<p class="meta">这场对话没有需要整理的实质内容。</p>' : ''}
+        <button class="button secondary" type="button" data-act="delivery-open"><span>核对并发送飞书纪要</span></button>
         ${p.doc_url ? `<button class="button secondary" type="button" data-act="minutes-doc"><span>查看飞书纪要文档</span></button>` : ''}`;
     } else if (p.status === 'pending') {
       body = `<p>${p.reason === 'in_progress' ? '会议仍在进行，AI 纪要尚未整理。' : '会后纪要正在整理，稍后可重新查询。'}</p><p class="meta">查询状态不会重新生成或发送纪要。</p>`;
@@ -1972,6 +2281,7 @@
       listRow({ act: 'ask-open', ic: 'magnifying-glass', title: '问本场' }),
       listRow({ act: 'saved-list', ic: 'bookmark-simple', title: '已保存片段' }),
     ] : [
+      listRow({ act: 'delivery-open', ic: 'share-network', title: '核对并发送飞书纪要', sub: '先核对内容、收件人与文档权限' }),
       listRow({ act: 'rename-open', ic: 'pencil-simple', title: '名称', sub: meetingName(S.history || {}) }),
       listRow({ act: 'history-project', ic: 'folder-simple', title: '所属项目', sub: S.history?.project || '未归项目' }),
       listRow({ act: 'review-start', data: `data-id="${esc(S.history?.session_id || '')}"`, ic: 'check-circle', title: '会后核对', sub: `${(S.history?.review_queue || []).length}项待核对` }),
@@ -1982,7 +2292,7 @@
       ${S.sheet.deleteConfirm ? `<p class="meta">团队成员将无法再查看这场会议，原始录音一并删除。确认删除？</p>${deletion?.error ? `<p class="error-text">${esc(deletion.error)}</p>` : ''}<button class="button danger" type="button" data-act="history-delete-confirm" ${deletion?.status === 'saving' ? 'disabled' : ''}><span>${deletion?.status === 'saving' ? '正在删除…' : '确认删除'}</span></button>` : ''}`);
   }
   function selfPickHtml() {
-    return frame('选择本人', `<p class="meta">用于"我的任务"和首页的待处理。</p>
+    return frame('选择本人', `<p class="meta">${usesPersonalTaskIdentity() ? '用于本机显示；我的任务按本人绑定的飞书账号核对，选名不会切换账号。' : '用于“我的任务”和首页的待处理。'}</p>
       <div class="inline-actions">${S.team.map((n) => `<button class="chip ${n === S.state.selfName ? 'selected' : ''}" data-act="self-set" data-name="${esc(n)}">${esc(n)}</button>`).join('')}</div>
       ${S.state.selfName ? '<button class="button quiet" type="button" data-act="self-set" data-name=""><span>不指定本人</span></button>' : ''}`);
   }
@@ -2171,7 +2481,8 @@
         <div class="inline-actions"><button class="chip" type="button" data-act="item-edit">改写</button>${others.length ? `<select id="item-merge" class="chip" aria-label="和另一件是同一件事"><option value="">和另一件重复…</option>${others.map((x) => `<option value="${esc(x.id)}">${esc(itemView(x).title.slice(0, 24))}</option>`).join('')}</select>` : ''}</div>`;
     } else if (st === 'done') {
       body = `<p class="confirmed-line"><span class="badge green">已确认</span> ${v.kind === 'task' && v.owner ? `负责人 ${esc(v.owner)}` : ''}${it.review.edited ? ' · 已改写' : ''}</p>
-        <div class="inline-actions"><button class="chip" type="button" data-act="item-edit">改写</button><button class="chip" type="button" data-act="item-reopen">撤回确认</button></div>`;
+        <div class="inline-actions"><button class="chip" type="button" data-act="item-edit">改写</button><button class="chip" type="button" data-act="item-reopen">撤回确认</button></div>
+        ${v.kind === 'task' ? it.task_status === 'created' ? '<p class="meta">已建飞书任务，可到任务页查看。</p>' : `<button class="button primary" type="button" data-act="item-task-draft" data-id="${esc(it.id)}">整理成飞书任务</button><p class="meta">使用本次已确认内容，不重新调用模型；核对后才创建。</p>` : ''}`;
     } else {
       const into = items.find((x) => x.id === it.review.into);
       body = `<p class="meta">${it.review.status === 'merged' ? `已合并到「${esc(into ? itemView(into).title : '另一件事项')}」` : '已标为不是事项'}</p><button class="chip" type="button" data-act="item-reopen">重新核对</button>`;
@@ -2184,6 +2495,41 @@
       ${sectionTitle(`依据原话 · ${(it.evidence || []).length} 句`)}${quotes}
       <div class="inline-actions review-nav"><button class="chip" data-act="item-prev" ${r.i && !saving ? '' : 'disabled'}>上一件</button><button class="chip" data-act="item-next" ${saving ? 'disabled' : ''}>${st === 'todo' ? '跳过' : '下一件'}</button></div>
       <p class="meta">AI 根据整场会整理；确认后才算数。负责人由你来选。</p>`);
+  }
+  function startItemTask(item, fromTasks = false) {
+    if (S.itemTaskRequest?.status === 'loading') return;
+    const view = item && itemView(item);
+    const sessionId = fromTasks ? candidateSession(item) : S.history?.session_id;
+    if (!item || !sessionId || S.deletedSessions.has(sessionId) || item.stale || item.task_status === 'created' || item.linked_created
+      || fromTasks && (!candidateCurrent(item) || item.source !== 'meeting_review')
+      || !fromTasks && (itemState(item) !== 'done' || view.kind !== 'task') || !item.fingerprint) return;
+    const requestId = `item-task-${++S.itemTaskSerial}`;
+    const payload = {sessionId, itemId: fromTasks ? item.item_id : item.id, fingerprint:item.fingerprint, requestId};
+    if (!payload.itemId) return;
+    S.itemTaskRequest = {payload, title:item.title || view.title, status:'loading'};
+    openSheet({kind:'itemTaskPending'});
+    sendItemTaskRequest();
+  }
+  function sendItemTaskRequest() {
+    const request = S.itemTaskRequest;
+    if (!request || request.status !== 'loading') return;
+    send('items.task.draft', request.payload);
+    setTimeout(() => {
+      if (S.itemTaskRequest !== request || request.status !== 'loading') return;
+      request.status = 'failed'; request.error = '暂未收到草稿回执，可以重新读取；尚未创建飞书任务。';
+      if (S.sheet?.kind === 'itemTaskPending') renderSheet();
+    }, 20000);
+  }
+  function itemTaskPendingHtml() {
+    const request = S.itemTaskRequest;
+    return frame('整理成飞书任务', `${request?.status === 'loading' ? spinnerHtml('正在读取已确认事项…', '复用人工确认内容，不重新调用模型') : `<p class="error-text">${esc(request?.error || '读取未完成')}</p><button class="button primary" data-act="${request?.status === 'stale' ? 'item-task-reopen' : 'item-task-retry'}">${request?.status === 'stale' ? '重新打开当前事项' : '重试读取草稿'}</button>`}<p class="meta">确认创建前不会写入飞书。</p><button class="button quiet" data-act="close">取消</button>`);
+  }
+  function onItemTaskDraft(data) {
+    const request = S.itemTaskRequest, payload = request?.payload;
+    if (!payload || data.requestId !== payload.requestId || (data.sessionId || data.session_id) !== payload.sessionId
+      || data.sourceItemId !== payload.itemId || S.sheet?.kind !== 'itemTaskPending' || S.deletedSessions.has(payload.sessionId)) return;
+    S.itemTaskRequest = null;
+    openDraft(data);
   }
   function itemCurrent() { const r = S.itemReview; return { r, it: (S.history?.items || [])[r.i] }; }
   function itemMove(step) {
@@ -2204,6 +2550,10 @@
     const r = S.itemReview;
     if (S.history?.session_id !== p.sessionId || !Array.isArray(p.items)) return;
     S.history.items = p.items; S.history.review_queue = p.review_queue || [];
+    if (S.draft?.data?.sourceItemId && S.draft.sourceSessionId === p.sessionId && !S.draft.submitted) {
+      S.draft.data.sourceError = 'source_changed';
+      if (S.sheet?.kind === 'draft') renderSheet();
+    }
     if (r?.pending && r.pending.itemId === p.itemId && r.sessionId === p.sessionId) {
       const advance = r.pending.advance;
       r.done.add(p.itemId); r.pending = null; r.editing = false; r.draft = null;
@@ -2214,7 +2564,7 @@
     loadHistory();
     S.projects.items = null;
     if (S.projects.open?.meetings?.some(x => x.session_id === p.sessionId)) S.projects.open = null;
-    requestTasks(S.tasks.mine && !!S.state.selfName, S.tasks.status);
+    requestTasks(S.tasks.mine && canReadMyTasks(), S.tasks.status);
     if (S.sheet?.kind === 'items') renderSheet();
     if (S.route.name === 'meeting') render();
   }
@@ -2261,6 +2611,36 @@
   // ---- errors -------------------------------------------------------------------------------
 
   function onError(p) {
+    if (p.scope === 'taskCandidates') {
+      const r = S.tasks.candidateRequest;
+      if (!r?.pending || p.requestId !== r.requestId) return;
+      clearTimeout(r.timer); r.pending = false;
+      if (!(p.unsupported && S.tasks.candidateCompat)) {
+        S.tasks.parsedItems = []; S.tasks.meetingItems = [];
+        S.tasks.parsedStatus = {state:p.unsupported?'unsupported':'unavailable',message:p.message,meetings:[]};
+        S.tasks.refreshedAt = null;
+      }
+      if (['tasks','home','memory'].includes(S.route.name)) render();
+      return;
+    }
+    if (p.scope === 'taskReview') {
+      const r = S.taskReview;
+      if (!r || p.requestId !== r.requestId) return;
+      clearTimeout(r.timer); r.error = p.message; r.status = p.changed ? 'changed' : r.payload ? 'unconfirmed' : 'failed';
+      if (['BAD_REQUEST','TASK_OWNER_REQUIRED'].includes(p.code) && r.data) {r.status='ready';r.payload=null;}
+      if (['TASK_ACCOUNT_REQUIRED','TASK_REVIEWER_UNVERIFIED','TASK_SOURCE_FORBIDDEN','OOPS_USER_UNAUTHORIZED'].includes(p.code)) {r.status='failed';r.data=null;r.payload=null;}
+      if (p.changed) { r.payload = null; requestTaskCandidates(true); }
+      if (S.sheet?.kind === 'taskReview') renderSheet();
+      return;
+    }
+    if (p.scope === 'items.task') {
+      const r = S.itemTaskRequest;
+      if (!r || p.requestId !== r.payload.requestId || p.sessionId !== r.payload.sessionId || p.itemId !== r.payload.itemId) return;
+      r.status = p.sourceChanged || ['SOURCE_CHANGED','ITEM_SOURCE_CHANGED','ITEM_REVIEW_CHANGED'].includes(p.code) ? 'stale' : 'failed';
+      r.error = p.message;
+      if (S.sheet?.kind === 'itemTaskPending') renderSheet();
+      return;
+    }
     if (p.scope === 'tasks' && !currentTaskReply(p)) return;
     if (p.scope === 'history' && p.requestId) {
       const expected = { 'history.list': S.historyRequestId, 'history.open': S.meetingRequest?.requestId, 'history.search': S.searchRequestId, 'history.delete': S.pendingDelete?.requestId }[p.operation];
@@ -2289,18 +2669,9 @@
       if (['memory', 'project'].includes(S.route.name)) render();
       if (S.sheet?.kind === 'projectPick') renderSheet();
     } else if (p.scope === 'tasks') {
+      clearTimeout(S.tasks.timers.get(p.requestId)); S.tasks.timers.delete(p.requestId);
       S.tasks.pending.delete(taskKey(!!p.mine, p.status || 'open'));
-      if (p.mine && p.selfName && p.selfName !== S.state.selfName) return;
-      const serial = Number(String(p.requestId || '').replace(/^tasks-/, '')) || 0;
-      if (!p.requestId || serial >= S.tasks.parsedSerial) {
-        S.tasks.parsedSerial = serial;
-        S.tasks.parsedItems = [];
-        S.tasks.meetingItems = [];
-        S.tasks.parsedStatus = { state: 'unavailable', meetings: [] };
-        for (const saved of S.tasks.cache.values()) {
-          saved.parsedItems = []; saved.meetingItems = []; saved.parsedStatus = S.tasks.parsedStatus;
-        }
-      }
+      if (p.mine && !usesPersonalTaskIdentity() && p.selfName && p.selfName !== S.state.selfName) return;
       if ((!('mine' in p) || !!p.mine === S.tasks.mine) && (!p.status || p.status === S.tasks.status)) S.requests.tasks = { error: p.message };
       if ((!('mine' in p) || p.mine) && (!p.status || p.status === 'open')) S.homeTasksState = { error: p.message };
       if (['tasks', 'home', 'memory'].includes(S.route.name)) render();
@@ -2310,6 +2681,16 @@
         pending.status=p.sourceChanged?'stale':'failed';pending.error=p.message;
         if (S.sheet?.kind==='retain') renderSheet();
       }
+    } else if (p.scope === 'feishu' || p.scope === 'minutes.delivery') {
+      const d = S.deliveries.get(p.session_id || p.sessionId);
+      const matching = d && p.requestId === d.requestId || p.requestId === S.feishu.recipientRequestId || p.requestId === S.feishu.requestId;
+      if (matching && ['FEISHU_AUTH_EXPIRED','FEISHU_NOT_CONNECTED','FEISHU_OAUTH_UNAVAILABLE','FEISHU_CREDENTIAL_LOCKED'].includes(p.code)) {
+        S.feishu.status = p.code === 'FEISHU_AUTH_EXPIRED' || p.code === 'FEISHU_CREDENTIAL_LOCKED' ? 'expired' : p.code === 'FEISHU_NOT_CONNECTED' ? 'disconnected' : 'unconfigured';
+        for (const draft of S.deliveries.values()) draft.confirmed = false;
+      }
+      if (d && p.requestId === d.requestId) { d.busy = false; d.error = p.message; d.confirmed = false; if (ownershipRecovery[p.code]) blockDeliveryOwnership(d, p); else if (d.opId) d.status = 'unknown'; else if (p.sourceChanged || ['SOURCE_CHANGED','MINUTES_SOURCE_CHANGED','FEISHU_BINDING_CHANGED','REVIEW_REVISION_CHANGED'].includes(p.code)) d.status = 'source_changed'; else d.status = 'failed'; if (activeDelivery() === d) renderSheet(); }
+      else if (p.requestId === S.feishu.recipientRequestId) { S.feishu.recipientsLoading = false; S.feishu.recipientsError = p.message; if (S.sheet?.kind === 'minutesDelivery') renderSheet(); }
+      else if (p.requestId === S.feishu.requestId) { S.feishu.busy = false; S.feishu.error = p.message; if (S.sheet?.kind === 'feishu') renderSheet(); }
     } else if (p.scope === 'minutes') {
       const entry = S.minutes.get(p.sessionId);
       if (entry && (!p.requestId || p.requestId === entry.requestId)) {
@@ -2384,10 +2765,26 @@
     close: closeSheet,
     'history-retry': () => { loadHistory(); render(); },
     'tasks-retry': () => { openTasks(); render(); },
+    'formal-tasks-retry': () => { S.requests.tasks={loading:true}; requestTasks(S.tasks.mine,S.tasks.status,true); render(); },
+    'candidates-retry': () => { requestTaskCandidates(true); render(); },
     'home-tasks-retry': () => { loadHomeTasks(); render(); },
     'projects-retry': () => { loadProjects(); render(); if (S.sheet?.kind === 'projectPick') renderSheet(); },
     'project-retry': () => { loadProject(); render(); },
     'meeting-retry': () => openMeeting(S.sheet.sessionId),
+    'feishu-open': openFeishu,
+    'feishu-connect': () => { if (!S.feishu.busy) { feishuRequest('feishu.connect'); S.feishu.status = 'authorizing'; renderSheet(); } },
+    'feishu-refresh': () => { feishuRequest('feishu.status'); renderSheet(); },
+    'feishu-disconnect-prompt': () => { S.sheet.disconnectConfirm = true; renderSheet(); },
+    'feishu-disconnect': () => { for (const d of S.deliveries.values()) d.confirmed = false; feishuRequest('feishu.disconnect'); renderSheet(); },
+    'delivery-open': () => openMinutesDelivery(S.history?.session_id),
+    'delivery-connect': () => { S.feishuReturnSession = S.sheet.sessionId; openFeishu(); },
+    'delivery-return': () => { const sid = S.feishuReturnSession; S.feishuReturnSession = null; openMinutesDelivery(sid); },
+    'delivery-search': deliveryRecipientsRequest,
+    'delivery-reload': () => { const d = activeDelivery(); if (d && !deliveryBusy(d)) deliveryRequest('minutes.delivery.open', d.sessionId); },
+    'delivery-save': () => { const d = activeDelivery(); if (!d?.draft || deliveryBusy(d) || deliverySent(d) || S.feishu.status !== 'connected') return; const a = d.draft; deliveryRequest('minutes.delivery.save', d.sessionId, {revision:a.revision, title:a.title, content:a.content, recipients:a.recipients.map(deliveryPersonId), permission:a.permission}); },
+    'delivery-confirm': () => { const d = activeDelivery(); if (!deliveryCanConfirm(d) || !d.confirmed) return; d.opId = `minutes-send-${Date.now().toString(36)}-${++S.feishuSerial}`; d.status = 'pending'; deliveryRequest('minutes.delivery.confirm', d.sessionId, {revision:d.draft.revision, opId:d.opId, confirmed:true}); },
+    'delivery-doc': () => { const d = activeDelivery(), url = d?.data?.delivery?.doc_url; if (d?.data?.delivery?.status === 'sent' && /^https:\/\/[^/]+\.(feishu\.cn|larksuite\.com)\/docx\//i.test(url || '')) send('open.url', {url}); },
+    'delivery-status': () => { const d = activeDelivery(); if (d?.opId && !d.busy) deliveryRequest('minutes.delivery.status', d.sessionId, {opId:d.opId}); },
     'minutes-refresh': () => { if (S.history) { requestMinutes(S.history.session_id); render(); } },
     'minutes-source': (el) => openSheet({ kind: 'minutesSource', sessionId: S.history.session_id, id: el.dataset.id }),
     'minutes-doc': () => { const p = S.minutes.get(S.history?.session_id)?.data; if (p?.status === 'ready' && p.doc_url) send('open.url', { url: p.doc_url }); },
@@ -2537,6 +2934,10 @@
     },
     'review-finish': () => openMeeting(S.review.sessionId),
     'items-finish': () => { closeSheet(); render(); },
+    'item-task-draft': (el) => startItemTask((S.history?.items || []).find(item => item.id === el.dataset.id)),
+    'meeting-item-task-draft': (el) => startItemTask((S.tasks.meetingItems || []).find(item => item.id === el.dataset.id), true),
+    'item-task-retry': () => { const r = S.itemTaskRequest; if (!r || r.status !== 'failed') return; r.payload = {...r.payload, requestId:`item-task-${++S.itemTaskSerial}`}; r.status='loading'; r.error=null; renderSheet(); sendItemTaskRequest(); },
+    'item-task-reopen': () => { const sid=S.itemTaskRequest?.payload.sessionId; closeSheet(); if (sid) openMeeting(sid); },
     'item-open': (el) => { if (S.history) startItemReview(S.history, el.dataset.id); },
     'item-owner': (el) => { const { r, it } = itemCurrent(); if (!it) return; if (r.editing) r.draft.owner = el.dataset.name; else r.owner[it.id] = el.dataset.name; renderSheet(); },
     'item-confirm': () => { const { r, it } = itemCurrent(); if (!it) return; if (it.kind === 'task' && !r.owner[it.id]) return toast('待办需要先选负责人', true); itemSend('confirm', it.kind === 'task' ? { owner: r.owner[it.id] } : {}); },
@@ -2560,12 +2961,11 @@
     'meeting-work-open': () => { S.tasks.scope = 'review'; S.tasks.mine = false; S.tasks.status = 'all'; S.tasks.reviewFilter = 'all'; S.tasks.query = ''; go('tasks'); },
     'parsed-review-open': (el) => {
       const item = (S.tasks.parsedItems || []).find(x => x.id === el.dataset.id);
-      if (item?.source_status !== 'current' || !/^https?:\/\//i.test(item.review_url || '')) return;
-      S.pendingReviewReturn = true; S.externalReviewHidden = false;
-      S.tasks.parsedItems = null; S.tasks.meetingItems = null; S.tasks.parsedStatus = { state: 'loading', meetings: [] };
-      for (const cached of S.tasks.cache.values()) { cached.parsedItems = null; cached.meetingItems = null; cached.parsedStatus = S.tasks.parsedStatus; }
-      send('open.url', { url: item.review_url }); render();
+      startTaskReview(item);
     },
+    'task-review-reload': () => { if (S.taskReview) startTaskReview(S.taskReview.source,true); },
+    'task-review-save': el => saveTaskReview(el.dataset.action),
+    'task-review-retry': retryTaskReview,
     'task-open': (el) => { if (el.dataset.url) send('open.url', { url: el.dataset.url }); },
     'self-pick': () => openSheet({ kind: 'selfPick' }),
     'self-set': (el) => { clearTaskIdentity(); S.state.selfName = el.dataset.name; send('settings.set', { selfName: el.dataset.name }); closeSheet(); enter(); render(); },
@@ -2575,6 +2975,7 @@
     'notice-dismiss': (el) => { send('notice.dismiss', { id: el.dataset.id }); const n = S.notices.get(el.dataset.id); if (n) n.dismissed = true; renderNoticeBanners(); },
     'commitment-open': (el) => send('digest.open', { utteranceId: el.dataset.id }),
     'draft-source-reload': () => {
+      if (S.draft?.data.sourceItemId) { const sid=S.draft.sourceSessionId; closeSheet(); if (sid) openMeeting(sid); return; }
       const sourceId = S.draft?.data?.evidence?.utteranceIds?.[0];
       if (!sourceId) { closeSheet(); go('sessions'); return; }
       closeSheet(); send('digest.open', { utteranceId: sourceId });
@@ -2598,7 +2999,7 @@
     },
     'play-evidence': () => {
       const ev = S.draft.data.evidence;
-      toggleClip(`ev-${S.draft.data.draftId}`, { startMs: ev.startMs, endMs: ev.endMs });
+      toggleClip(`ev-${S.draft.data.draftId}`, { startMs: ev.startMs, endMs: ev.endMs }, S.draft.sourceSessionId);
     },
     confirm: confirmDraft,
     'draft-source-reopen': () => {
@@ -2639,6 +3040,19 @@
     if (act) { e.stopPropagation(); act(el); }
   });
   $('sheet').addEventListener('change', (e) => {
+    if (e.target.id.startsWith('task-review-')) {
+      captureTaskReviewDraft();
+      if (e.target.id === 'task-review-kind') renderSheet();
+    }
+    if (e.target.id === 'delivery-permission') { deliveryEdit('permission', e.target.value); renderSheet(); }
+    if (e.target.dataset?.deliveryRecipient) {
+      const d = activeDelivery(); if (d?.draft && !deliveryBusy(d) && !deliverySent(d)) {
+        const id = e.target.dataset.deliveryRecipient, selected = d.draft.recipients.filter(p => deliveryPersonId(p) !== id);
+        if (e.target.checked) selected.push(S.feishu.recipients.find(p => deliveryPersonId(p) === id) || id);
+        deliveryEdit('recipients', selected); renderSheet();
+      }
+    }
+    if (e.target.id === 'delivery-confirmed') { const d = activeDelivery(); if (d) { d.confirmed = !!e.target.checked && !!deliveryCanConfirm(d); const btn = $('delivery-send'); if (btn) btn.disabled = !d.confirmed; } }
     if (e.target.id === 'vp-name') { S.voiceprintName = e.target.value; renderSheet(); }
     if (e.target.id === 'f-who') editDraftField('who', e.target.value);
     if (e.target.id === 'item-merge' && e.target.value) itemSend('merge', { into: e.target.value });
@@ -2647,6 +3061,10 @@
     }
   });
   $('sheet').addEventListener('input', (e) => {
+    if (e.target.id.startsWith('task-review-')) captureTaskReviewDraft();
+    if (e.target.id === 'delivery-title') deliveryEdit('title', e.target.value);
+    if (e.target.id === 'delivery-content') deliveryEdit('content', e.target.value);
+    if (e.target.id === 'delivery-search') S.feishu.recipientQuery = e.target.value;
     const field = { 'f-who': 'who', 'f-what': 'what', 'f-when': 'whenIso', 'f-constraint': 'constraint' }[e.target.id];
     if (field) editDraftField(field, e.target.value || (field === 'whenIso' ? null : ''));
   });

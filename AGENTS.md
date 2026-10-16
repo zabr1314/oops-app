@@ -1,5 +1,10 @@
 # Mobile Prototype Agent Guide
 
+## 任务列表稳定性与 App 内核对（2026-10-16）
+
+用户明确要求修复真实任务列表频繁请求失败，并把任务核对放在 App 内，不再跳转站外核对站。保留原核对站的逐人答案、原话指纹、核对版本与幂等请求编号；App 只以服务端核实的本人飞书身份保存自己的确认、改写、负责人、排除、合并或撤回，不覆盖他人答案，不把核对当作创建飞书任务或业务完成。候选与正式任务独立读取、失败与重试；旧候选在来源不可读时清空，正式任务的历史回执单独保留并标明读取状态。读列表不等待外部发送持有的全局授权锁，实际写入仍在当前绑定与来源校验后执行。本轮实施与部署/手机安装的实际状态见 docs/task-review-in-app-20261016.md；不能以代码或模拟预览完成代替新 APK 已接通。
+
+
 ## Prototype Instructions
 
 In ChatGPT Work Mode, run `sites-preview start "$PWD"`, open `http://terminal.local:4173/` in the cloud browser, and verify the rendered app and its primary interactions. Keep that preview open and tell the user to inspect it in the cloud browser; do not present the local URL as a user-facing chat link. In Codex Desktop, run the local server yourself, open the preview in the in-app browser, and provide the clickable local URL. Do not deploy to Sites unless the user explicitly asks to share, publish, or deploy. Do not give the user server-start instructions when you can run it.

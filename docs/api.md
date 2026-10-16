@@ -459,3 +459,13 @@ Android：H5 发 `items.review`（`sessionId,itemId,fingerprint,action,…`）�
 任务板 `tasks` 只含通过来源检查的待办及已完成/作废历史；`review_queue` 保存待核对候选，状态为 `needs_review`，含 `quality: {status, reason, ids, issues?}`。待核对内容不计入可执行待办。草稿数字含混时 `what` 留空并通过 `task_context.missing` 请求核对，不能直接预填确定任务。
 
 会后纪要与已有缓存共用质量检查：被拒动作保留在派生 `quality_rejected` 审计，含混动作转入 `undecided`；不修改原缓存、不触发模型重生成、不确认负责人。引用或来源变化继续遵循原有失效与人工核对规则。
+
+## App 内会议候选核对（2026-10-16）
+
+正式任务 `GET /v1/tasks?...&include_candidates=0` 与会议候选 `GET /v1/task-candidates` 独立读取；旧客户端省略参数保持原合同。候选失败不得覆盖已读到的正式任务，反之亦然。旧会议会后待办投影至多一个在途读取、最多等待2秒；繁忙时 `meeting_items_status:unavailable`，并在 `parsed_status.meetings` 标明“App会后已确认待办”读取失败，继续返回本次读取的核对站候选，不复用迟到的旧投影。健康接口以 `task_candidates_version:1`、`task_review_version:1` 标识本轮部署能力。
+
+`GET /v1/task-candidates/{source_meeting_id}/{item_id}` 返回 `source`、`source_meeting_id`、`item_id`、`fingerprint`、个人 `revision`、服务端核实的 `reviewer`、`item`、`evidence`、`owners`、`source_status`、`can_review`。仅允许原核对站配置明确授权的会议和事项指纹。身份来自已认证手机会话及稳定飞书 open_id 映射，客户端姓名、管理员角色、`by` 或 `reviewer` 不能授予核对身份。
+
+`POST /v1/task-candidates/review` 接收 `{source_meeting_id,item_id,fingerprint,revision,request_id,action,kind?,title?,detail?,due?,owner?,into?}`。`action` 为 `confirm/reject/merge/reopen`；待办必须显式选择服务端列出的负责人，合并只允许同场已授权有效事项。写入前复核账号绑定及来源授权，继续调用原核对站的个人答案接口，不另建答案库。成功回包含 `saved:true` 及原 `request_id`；仅收到回执才显示保存成功。版本或来源变化返回409；未取得回执返回503 `TASK_REVIEW_UNCONFIRMED`，用户可重新读取，或明确重试完全相同的请求，禁止自动重发。核对不创建飞书任务、不发送消息、不代表业务完成。
+
+Android 桥：`tasks.candidates`、`tasks.review.open`、`tasks.review.save`，分别回 `tasks.candidates`、`tasks.review.open`、`tasks.review.saved`；错误分别为 `taskCandidates/taskReview` scope 并携带原 requestId。换账号或服务后丢弃旧响应，草稿仅按账号、事项和来源指纹在当前页面内存隔离。公开预览仍只使用隔离示例。

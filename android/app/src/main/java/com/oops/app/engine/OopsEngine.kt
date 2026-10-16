@@ -1585,6 +1585,41 @@ object OopsEngine {
 
     // ---- action ----------------------------------------------------------------------------
 
+    /** Reuse a human-checked minutes item; no model extraction or external write occurs here. */
+    fun draftItemTask(payload: JSONObject) {
+        val session = payload.getString("sessionId")
+        val item = payload.getString("itemId")
+        val fingerprint = payload.getString("fingerprint")
+        require(session.isNotBlank() && item.isNotBlank() && fingerprint.isNotBlank()) { "请重新打开当前事项" }
+        val epoch = serviceEpoch
+        val client = api
+        val key = "item-draft:$session:$item"
+        val context = serviceContext(epoch).put("operation", "items.task.draft").put("sessionId", session)
+            .put("itemId", item).put("requestId", payload.optString("requestId"))
+        if (!inFlight.add(key)) {
+            fail("items.task", "这件事的草稿仍在读取，请稍后重试", context)
+            return
+        }
+        scope.launch {
+            try {
+                val result = client.draftFromItem(session, item, fingerprint)
+                if (epoch != serviceEpoch) return@launch
+                require(result != null) { "当前后端尚未支持从已核对事项创建任务，请更新服务后重试" }
+                val draft = com.oops.app.backend.ItemTaskDraft.fromResponse(result, session, item, fingerprint)
+                drafts[draft.draftId] = draft
+                emit(OopsEvent.Json("action.draft", com.oops.app.bridge.BridgeJson.draft(draft)
+                    .put("requestId", payload.optString("requestId")).put("sessionId", session).put("sourceItemId", item)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (epoch == serviceEpoch) fail("items.task", error.message ?: "任务草稿未能读取，请重试", context
+                    .put("sourceChanged", error is com.oops.app.backend.ActionSourceRejected || error is com.oops.app.backend.HttpFailure && error.status == 409)
+                    .put("code", (error as? com.oops.app.backend.ActionSourceRejected)?.code
+                        ?: (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: "ITEM_TASK_DRAFT_FAILED"))
+            } finally { inFlight.remove(key) }
+        }
+    }
+
     fun draftAction(cardId: String, utteranceIds: List<String>) {
         val card = cards[cardId] ?: return fail("action", "这张卡片已失效")
         if (!inFlight.add("draft:$cardId")) return
@@ -1668,7 +1703,7 @@ object OopsEngine {
     fun recordOwnerFeedback(payload: JSONObject) {
         val draft = drafts[payload.optString("draftId")] ?: return
         if (submitted.containsKey(draft.draftId)) return
-        val session = sessionId
+        val session = TaskSourceBinding.sessionId(draft.evidence.sourceBinding) ?: sessionId
         val selected = payload.optString("selectedOwner").ifBlank { null }
         val previous = payload.optString("previousOwner").ifBlank { null }
         val suggestion = payload.optString("modelSuggestion").ifBlank { null }
@@ -1696,21 +1731,24 @@ object OopsEngine {
                 return fail("action", "原操作的来源已变化，请重新核对当前原话并起草")
         }
         val existing = submitted[draftId]
+        val sourceSession = existing?.request?.sessionId ?: TaskSourceBinding.sessionId(base.evidence.sourceBinding) ?: sessionId
         if (existing?.result?.sourceInvalidated == true)
             return fail("action", "旧依据已撤回，请重新核对原话并生成新草稿；本次没有创建任务")
         if (ActionWorkflow.shouldSubmit(existing?.result) && !(existing?.mock ?: (api is MockOopsApi))) {
             val evidence = existing?.request?.draft?.evidence ?: base.evidence
-            val session = existing?.request?.sessionId ?: sessionId
+            val session = sourceSession
             if (!TaskSourceBinding.valid(evidence.sourceBinding, session, evidence.utteranceIds, evidence.quote))
                 return fail("action", base.sourceError ?: "原话尚未由当前服务器核对，请重新打开来源并生成草稿；不会创建飞书任务")
         }
         if (!inFlight.add("confirm:$draftId")) return // 防连点
         val opId = opIds.getOrPut(draftId) { UUID.randomUUID().toString() }
         val confirmedDraft = com.oops.app.backend.DraftPolicy.confirm(base, who, what, whenIso, whenRaw, constraint, ownerSelectionSource)
-        val draft = existing?.request?.draft ?: if (recordingPolicy.archives) confirmedDraft else confirmedDraft.copy(
+        val dailySource = base.evidence.sourceBinding?.let { runCatching { JSONObject(it).optString("scope") == "daily" }.getOrDefault(false) }
+            ?: (sourceSession == sessionId && !recordingPolicy.archives)
+        val draft = existing?.request?.draft ?: if (!dailySource) confirmedDraft else confirmedDraft.copy(
             evidence = confirmedDraft.evidence.copy(quote = confirmedDraft.evidence.quote.take(280)), context = null)
         val operation = existing ?: ActionOperationStore.Operation(
-            ConfirmRequest(opId, sessionId, draft), settings.backendBaseUrl, api.name == "mock",
+            ConfirmRequest(opId, sourceSession, draft), settings.backendBaseUrl, api.name == "mock",
             ActionResult(opId, ActionResult.PENDING, mock = api.name == "mock"),
         )
         // Persist before the network call. A retry uses this frozen request, even after a restart.
@@ -1735,7 +1773,9 @@ object OopsEngine {
         val request = operation.request
         val draftId = request.draft.draftId
         val client = if (operation.mock) api.takeIf { it.name == "mock" } ?: MockOopsApi(Settings.TEAM)
-            else HttpOopsApi(http, operation.backendUrl, settings.backendTokenFor(operation.backendUrl))
+            else HttpOopsApi(http, operation.backendUrl, settings.backendTokenFor(operation.backendUrl),
+                personalToken = { settings.feishuSessionFor(operation.backendUrl) },
+                savePersonalToken = { settings.setFeishuSessionFor(operation.backendUrl, it) }, enablePersonalIdentity = true)
         emit(OopsEvent.ActionUpdate(draftId,
             if (!submit && operation.result.sourceBlocked) ActionWorkflow.restoredPending(operation.result).copy(polling = true)
             else ActionResult(request.opId, ActionResult.PENDING, polling = true, mock = operation.mock,
@@ -2289,6 +2329,40 @@ object OopsEngine {
         }
     }
 
+    /** Only the native HTTP client owns the phone's opaque personal credential. */
+    fun feishu(action: String, request: JSONObject, openAuthorization: ((String) -> Unit)? = null) {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", action)
+            .put("sessionId", request.optString("sessionId")).put("requestId", request.optString("requestId"))
+        scope.launch {
+            try {
+                val result = client.feishuCall(action, request)
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) { fail("feishu", "当前服务尚未提供个人飞书连接", context); return@launch }
+                val event = when (action) {
+                    "feishu.connect" -> "feishu.authorization"
+                    "feishu.disconnect" -> "feishu.status"
+                    else -> if (action.startsWith("minutes.delivery.")) "minutes.delivery" else action
+                }
+                result.put("requestId", request.optString("requestId"))
+                    .put("session_id", request.optString("sessionId"))
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))
+                emit(OopsEvent.Json(event, result))
+                if (action == "feishu.connect") {
+                    val url = result.optString("authorization_url")
+                    val parsed = android.net.Uri.parse(url)
+                    require(parsed.scheme == "https" && parsed.host == "accounts.feishu.cn" && parsed.userInfo == null) { "授权地址无效，请重新连接" }
+                    openAuthorization?.invoke(url)
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (epoch == serviceEpoch) fail("feishu", error.message ?: "飞书操作未完成，请重试", context
+                    .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: "FEISHU_REQUEST_FAILED"))
+            }
+        }
+    }
+
     // ---- people's corrections, archived audio, tasks -----------------------------------------
 
     /**
@@ -2513,14 +2587,53 @@ object OopsEngine {
         val context = serviceContext(epoch).put("operation", "tasks.list").put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL).put("requestId", requestId)
         scope.launch {
             try {
-                require(!mine || self != null) { "请先在设置里选择本人" }
-                val result = client.tasks(if (mine) self else null, status)
+                require(!mine || client !is MockOopsApi || self != null) { "请先在设置里选择本人" }
+                val result = client.tasks(if (mine && client is MockOopsApi) self else null, status, mine = mine)
                 if (epoch != serviceEpoch) return@launch
                 if (result == null) fail("tasks", "当前后端不支持任务列表", context)
                 else emit(OopsEvent.Json("tasks.list", result.put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL).put("requestId", requestId)
                     .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { if (epoch == serviceEpoch) fail("tasks", "任务列表请求失败：${error.message}", context) }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("tasks", "正式任务暂未读到：${error.message}",
+                context.put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: JSONObject.NULL)) }
+        }
+    }
+
+    fun taskCandidates(requestId: String) {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "tasks.candidates").put("requestId", requestId)
+        scope.launch {
+            try {
+                val value = client.taskCandidates()
+                if (epoch != serviceEpoch) return@launch
+                if (value == null) fail("taskCandidates", "当前服务尚不支持独立读取会议候选，请更新服务", context.put("unsupported", true))
+                else emit(OopsEvent.Json("tasks.candidates", value.put("requestId", requestId)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("taskCandidates", "会议候选暂未读到：${error.message}", context
+                .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: JSONObject.NULL)) }
+        }
+    }
+
+    fun taskReview(p: JSONObject, save: Boolean) {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", if (save) "tasks.review.save" else "tasks.review.open")
+            .put("requestId", p.optString("requestId")).put("itemId", p.optString("item_id"))
+        val body = JSONObject(p.toString()).apply { remove("by"); remove("reviewer"); remove("selfName") }
+        scope.launch {
+            try {
+                val value = client.taskReview(body, save)
+                if (epoch != serviceEpoch) return@launch
+                if (value == null) fail("taskReview", "当前服务尚不支持 App 内核对，请更新服务", context)
+                else emit(OopsEvent.Json(if (save) "tasks.review.saved" else "tasks.review.open", value
+                    .put("requestId", p.optString("requestId")).put("serviceEpoch", epoch)
+                    .put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("taskReview", error.message ?: "核对回执尚未确认", context
+                .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: JSONObject.NULL)
+                .put("changed", (error as? com.oops.app.backend.HttpFailure)?.status == 409)) }
         }
     }
 
@@ -2628,7 +2741,9 @@ object OopsEngine {
             }
         }
         configuredService = nextService
-        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken, sessionMode = { sessionModes[it] })
+        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken,
+            sessionMode = { sessionModes[it] }, personalToken = { settings.feishuSessionFor(url) },
+            savePersonalToken = { settings.setFeishuSessionFor(url, it) }, enablePersonalIdentity = true)
         val previewUrl = if (com.oops.app.BuildConfig.DEBUG) settings.speakerPreviewUrl else ""
         previewApi = if (previewUrl.isBlank()) api else HttpOopsApi(http, previewUrl, settings.backendTokenFor(previewUrl), sessionMode = { sessionModes[it] })
         _state.update {

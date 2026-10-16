@@ -2215,7 +2215,7 @@ class Backend:
         values.sort(key=lambda value: value['source_meeting']['started_at'], reverse=True)
         return values
 
-    def tasks(self, assignee=None, status="all", now=None):
+    def tasks(self, assignee=None, status="all", now=None, include_meeting_items=True):
         """Created Feishu tasks with their current Feishu state; read on request, never polled."""
         if status not in ("open", "done", "all"):
             raise ApiError(400, "BAD_REQUEST", "status 只能是 open、done 或 all")
@@ -2263,7 +2263,10 @@ class Backend:
         except (OSError, ValueError):
             policy = None
         active, archived = meeting_curation.split_tasks(items, ops, policy)
-        return {"items": active, "archived_items": archived, "meeting_items": self.meeting_tasks()}
+        value = {"items": active, "archived_items": archived}
+        if include_meeting_items:
+            value['meeting_items'] = self.meeting_tasks()
+        return value
 
     def feishu_task_state(self, guid):
         cache = self._state("feishu_task_states")
@@ -2440,6 +2443,31 @@ class Handler(BaseHTTPRequestHandler):
             if not full_access and not ((method == "GET" and self.path == "/v1/voiceprints") or
                     (method == "POST" and self.path in ("/v1/voiceprints/enroll", "/v1/voiceprints/test"))):
                 raise ApiError(403, "FORBIDDEN", "此链接仅用于本人的声纹录入与测试")
+            if urlsplit(self.path).path.startswith('/v1/task-candidates'):
+                import app_task_reviews
+                path = urlsplit(self.path).path
+                try:
+                    personal = self.headers.get('X-Oops-User-Token', '')
+                    target = re.fullmatch(r'/v1/task-candidates/([0-9]{4})/(ai-[0-9a-f]{12})', path)
+                    if method == 'GET' and path == '/v1/task-candidates':
+                        value = app_task_reviews.candidates(self.backend, personal, TEAM)
+                    elif method == 'GET' and target:
+                        value = app_task_reviews.open_review(self.backend, personal, *target.groups())
+                    elif method == 'POST' and path == '/v1/task-candidates/review':
+                        size = int(self.headers.get('Content-Length') or 0)
+                        if not 0 < size <= 16384:
+                            raise ApiError(400, 'BAD_REQUEST', '核对请求为空或过大')
+                        body = json.loads(self.rfile.read(size))
+                        if not isinstance(body, dict):
+                            raise ApiError(400, 'BAD_REQUEST', '核对请求必须是对象')
+                        value = app_task_reviews.save_review(self.backend, personal, body)
+                    else:
+                        raise ApiError(404, 'NOT_FOUND', '没有这个核对接口')
+                except app_task_reviews.ReviewError as error:
+                    raise ApiError(error.status, error.code, str(error)) from None
+                self.reply(200, value)
+                log(f'{method} {path} 200 {int((time.monotonic() - started) * 1000)}ms task-candidates')
+                return
             if method == "GET" and self.path == "/healthz":
                 value = {"status": "ok", "jev": self.backend.jev is not None,
                          "jev_stats": dict(self.backend.jev.stats) if isinstance(self.backend.jev, Jev) else None,
@@ -2478,12 +2506,15 @@ class Handler(BaseHTTPRequestHandler):
                 value = self.backend.project(unquote(urlsplit(self.path).path[len("/v1/projects/"):]))
             elif method == "GET" and urlsplit(self.path).path == "/v1/tasks":
                 query = parse_qs(urlsplit(self.path).query)
-                value = self.backend.tasks(query.get("assignee", [None])[0], query.get("status", ["all"])[0])
+                include_candidates = query.get('include_candidates', ['1'])[0] != '0'
+                value = self.backend.tasks(query.get("assignee", [None])[0], query.get("status", ["all"])[0],
+                                           include_meeting_items=include_candidates)
                 # Approved review-site candidates are read separately from
                 # Feishu receipts; reading does not confirm or assign a task.
                 from label_app_tasks import read_parsed_tasks
                 state_dir = getattr(getattr(self.backend, 'args', None), 'state_dir', None)
-                value.update(read_parsed_tasks(os.path.join(state_dir, 'label-app-tasks.json') if state_dir else None, TEAM))
+                if include_candidates:
+                    value.update(read_parsed_tasks(os.path.join(state_dir, 'label-app-tasks.json') if state_dir else None, TEAM))
                 summary = f"tasks={len(value['items'])}"
             elif method == "GET" and re.fullmatch(r"/v1/recordings/[^/]+", self.path):
                 value = self.backend.recording_call("status", self.path.rsplit("/", 1)[1])

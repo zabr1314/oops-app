@@ -7,6 +7,13 @@
   const failedOnce = new Set();
   let minutesChanged = false;
   let retainedEvidence=[],retainedSummaries=[];
+  let feishuStatus = flow === 'feishu-unconfigured' ? 'unconfigured' : flow === 'feishu-expired' ? 'expired' : 'disconnected';
+  let feishuAccount = null;
+  const deliveryDrafts = new Map(), deliveryOperations = new Map();
+  const feishuPeople = [{open_id:'mock-jason',name:'Jason',department:'示例产品团队'}, {open_id:'mock-lip',name:'黄丽萍',department:'示例设计团队'}, {open_id:'mock-yue',name:'江古月',department:'示例开发团队'}];
+  const emitFeishuStatus = requestId => emit('feishu.status', {requestId, status:feishuStatus, account:feishuAccount,
+    capabilities:{recipients:feishuStatus==='connected',documents_write:feishuStatus==='connected',sharing:feishuStatus==='connected',messages_send:feishuStatus==='connected'},mock:true});
+  const deliveryReply = (p, status, extra = {}) => emit('minutes.delivery', {session_id:p.sessionId, requestId:p.requestId, status, draft:deliveryDrafts.get(p.sessionId), mock:true, ...extra});
   const team = ['Jason', '黄丽萍', '江古月', '洪玉麟', '林春源'];
   // Real device ASR observations for assets/test/dialog.wav (2026-10-06).
   const sample = [
@@ -51,6 +58,12 @@
     { op_id: 'op-mock-3', what: '确认体验版注册流程', who: '江古月', quote: '注册前应该先让用户体验一下产品', url: 'https://example.com/task/3',
       meeting: null, overdue: false, feishu: { state: 'unknown', stale: true } },
   ];
+  const mockReviewTasks = [
+    {id:'label:0235:ai-0123456789ab',item_id:'ai-0123456789ab',source:'label_review',kind:'task',title:'核对体验版注册流程',what:'核对体验版注册流程',detail:'确认首次使用的入口和返回路径。',due:'周五前',fingerprint:'a'.repeat(64),source_meeting:{id:'0235',title:'体验版方案讨论（示例）'},source_status:'current',review_contract_version:1,reviews:[],evidence:[{id:'example-1',text:'我们先把注册到返回首页的这条流程核对一遍，周五前给出结果。',start_ms:12000,end_ms:18000,speaker:'江古月'}]},
+    {id:'label:0235:ai-abcdef012345',item_id:'ai-abcdef012345',source:'label_review',kind:'task',title:'整理体验版待修问题',what:'整理体验版待修问题',detail:'保留问题的入口与原话。',due:'',fingerprint:'b'.repeat(64),source_meeting:{id:'0235',title:'体验版方案讨论（示例）'},source_status:'current',review_contract_version:1,reviews:[],evidence:[{id:'example-2',text:'发现的问题放到一起，写清楚是在哪一步遇到的。',start_ms:22000,end_ms:26000,speaker:'洪玉麟'}]}
+  ];
+  let mockReviewRevision = 0;
+  const mockReviewReceipts = new Map();
   function stopClip() {
     audio?.pause(); clearTimeout(clipTimer);
     if (playingKey) emit('clip.state', { key: playingKey, state: 'stopped' });
@@ -139,19 +152,34 @@
       ...(flow === 'task-source-changed' ? {sourceError: 'source_changed'} : {}) };
     drafts.set(d.draftId, d);emit('action.draft', d);
   }
+  async function itemTaskDraft(p) {
+    const fail = (message, sourceChanged = false) => emit('error', {...p, scope:'items.task', sourceChanged, message});
+    const it = mockItems().find(item => item.id === p.itemId);
+    if (!mockMeetings.some(m => m.session_id === p.sessionId) || !it || it.fingerprint !== p.fingerprint || minutesChanged) return fail('事项来源已变化，请重新读取', true);
+    if (it.review?.status !== 'confirmed' || it.review.kind !== 'task') return fail('先确认这件待办及负责人', true);
+    const rows = it.evidence.map(e => ({...e, startMs:e.start_ms,endMs:e.end_ms}));
+    const d = {draftId:id('d'),sessionId:p.sessionId,sourceItemId:it.id,requestId:p.requestId,
+      who:it.review.owner === '大家' ? '' : it.review.owner || '',what:it.review.title,
+      whenIso:null,whenRaw:it.review.due || null,constraint:null,tier:'C',reason:'复用会后已确认事项，不重新调用模型',
+      assigneeCandidates:team,reviewStatus:'unreviewed',itemReviewSignature:JSON.stringify(it.review),
+      evidence:{utteranceIds:it.ids,quote:rows.map(e => e.text).join(' '),startMs:rows[0].startMs,endMs:rows.at(-1).endMs,
+        sourceBinding:{...mockBinding(p.sessionId,rows),item_id:it.id,item_fingerprint:it.fingerprint}}};
+    drafts.set(d.draftId,d); await sleep(120); emit('action.draft',d);
+  }
   async function confirm(p) {
     const d = drafts.get(p.draftId);
     if (!d) throw new Error('草稿已失效');
     const opId = draftOps.get(d.draftId) || id('op');draftOps.set(d.draftId, opId);
     const previous = actions.get(opId);
     if (previous) return emit('action.result', previous);
+    if (d.sourceItemId && (minutesChanged || JSON.stringify(mockItemReviews[d.sourceItemId]) !== d.itemReviewSignature)) throw new Error('会后事项已变化，请重新读取后核对');
     if (d.sourceError || !d.evidence.sourceBinding) throw new Error('示例原话依据尚未核验或已经变化，请重新读取后核对');
     Object.assign(d, { who: p.who, what: p.what, whenIso: p.whenIso, constraint: p.constraint });
     emit('action.result', { draftId: d.draftId, opId, status: 'pending', polling: true, mock: true });
     await sleep(600);
     const r = { draftId: d.draftId, opId, status: 'created', taskGuid: `mock-${opId}`, taskUrl: null,
       message: '浏览器模拟：没有实际写入飞书', readBackConfirmed: true, mock: true, polling: false };
-    actions.set(opId, r);emit('action.result', r);
+    actions.set(opId, r); if (d.sourceItemId) mockItemTasks.add(d.sourceItemId); emit('action.result', r);
   }
   let mockMeetings = [{session_id: 'demo', started_at: '2026-10-06T09:00:00+08:00', ended_at: '2026-10-06T10:00:00+08:00', project: 'Oops 首版', goal: '上线方案评审（模拟）', utterance_count: 3}];
   const historicalRows = [{id: 'u1', text: '预算不能超过10万。', start_ms: 0, end_ms: 4482, tag: 'constraint', speaker: null},
@@ -164,12 +192,12 @@
     ...rows.filter((u) => u.tag === 'decision' && !u.review?.verdict).map((u) => ({kind: 'decision', id: u.id})),
     ...rows.filter((u) => !u.speaker && !u.review?.speaker && u.text.replace(/[^\p{L}\p{N}]/gu, '').length >= 4).map((u) => ({kind: 'speaker', id: u.id}))];
   // Items the server builds from the meeting's minutes (minutes_items.py); reviews kept apart from sentences.
-  const mockItemReviews = {};
+  const mockItemReviews = {}, mockItemTasks = new Set();
   const mockItems = () => [
     {id: 'mi-t1', kind: 'task', title: '核对并提交新方案', due: '周五前', owner_hint: '洪玉麟', priority: 'main', ids: ['u2']},
     {id: 'mi-d1', kind: 'decision', title: '预算上限为10万', ids: ['u1']},
     {id: 'mi-o1', kind: 'open', title: '13万的方案A如何压到10万以内？', detail: '方案A报价约13万，超出预算，会上没有结论', ids: ['u3']},
-  ].map((it) => ({...it, fingerprint: 'mock-' + it.id, stale: false, stale_review: false, task_status: null, task_url: null,
+  ].map((it) => ({...it, fingerprint: 'mock-' + it.id, stale: false, stale_review: false, task_status: mockItemTasks.has(it.id) ? 'created' : null, task_url: null,
     review: mockItemReviews[it.id] || null,
     evidence: it.ids.map((id) => { const u = historicalRows.find((r) => r.id === id); return {id, text: u.text, start_ms: u.start_ms, end_ms: u.end_ms, speaker: u.review?.speaker || u.speaker}; })}));
   const itemQueue = (items) => items.filter((i) => !i.review).map((i) => ({kind: 'item', id: i.id, item_kind: i.kind}));
@@ -185,6 +213,43 @@
       return;
     }
     switch (type) {
+      case 'feishu.status': emitFeishuStatus(p.requestId); break;
+      case 'feishu.connect':
+        if (feishuStatus === 'unconfigured') { emitFeishuStatus(p.requestId); break; }
+        emit('feishu.authorization', {requestId:p.requestId,status:'authorizing',message:'隔离模拟：正在体验官方授权返回。不会访问真实飞书。'});
+        setTimeout(() => {
+          feishuStatus = flow === 'feishu-cancelled' ? 'cancelled' : 'connected';
+          feishuAccount = feishuStatus === 'connected' ? {open_id:'mock-self',name:'我的飞书（模拟）',tenant_name:'Oops 示例组织',binding_id:id('mock-binding')} : null;
+          emitFeishuStatus(p.requestId);
+        }, 250); break;
+      case 'feishu.disconnect': feishuStatus = 'disconnected'; feishuAccount = null; emitFeishuStatus(p.requestId); break;
+      case 'feishu.recipients':
+        emit('feishu.recipients', {requestId:p.requestId, items:feishuStatus === 'connected' ? feishuPeople.filter(person => person.name.toLowerCase().includes(String(p.query || '').toLowerCase())) : [], message:feishuStatus === 'connected' ? null : '请先绑定自己的飞书账号',mock:true}); break;
+      case 'minutes.delivery.open':
+        if (!deliveryDrafts.has(p.sessionId)) deliveryDrafts.set(p.sessionId, {revision:1,source_fingerprint:'mock-source-'+p.sessionId,title:'首版上线方案与预算',content:'会议结论（模拟）\n预算上限为10万。\n待办：核对并提交新方案，负责人和期限待人工核对。\n未决：13万方案如何满足预算？',recipients:[],permission:'view'});
+        deliveryReply(p, flow === 'minutes-source-changed' ? 'source_changed' : 'ready'); break;
+      case 'minutes.delivery.save': {
+        const draft = deliveryDrafts.get(p.sessionId);
+        if (feishuStatus !== 'connected') { deliveryReply(p,'expired',{message:'请先绑定自己的飞书账号'}); break; }
+        if (!draft || p.revision !== draft.revision || flow === 'minutes-source-changed') {deliveryReply(p,'source_changed',{message:'来源或草稿版本已变化，请重新读取后核对'});break;}
+        if (!p.title?.trim() || !p.content?.trim() || !Array.isArray(p.recipients) || p.recipients.some(id => !feishuPeople.some(person => person.open_id === id))) {deliveryReply(p,'failed',{message:'请核对正文和可访问的收件人'});break;}
+        deliveryDrafts.set(p.sessionId,{...draft,title:p.title.trim(),content:p.content.trim(),recipients:p.recipients.map(id => feishuPeople.find(person => person.open_id === id)),permission:p.permission === 'edit' ? 'edit' : 'view',revision:draft.revision+1});
+        deliveryReply(p,'ready'); break;
+      }
+      case 'minutes.delivery.confirm': {
+        const draft = deliveryDrafts.get(p.sessionId), old = deliveryOperations.get(p.opId);
+        if (old) {deliveryReply(p,old.status,{op_id:p.opId,receipt:old.receipt});break;}
+        if (feishuStatus !== 'connected' || !draft || p.revision !== draft.revision || !draft.recipients.length || !p.confirmed || !p.opId) {deliveryReply(p,'failed',{message:'账号、草稿版本、收件人或确认无效'});break;}
+        const op = {sessionId:p.sessionId,status:flow === 'minutes-delivery-partial' ? 'partial' : 'pending',receipt:null};deliveryOperations.set(p.opId,op);
+        if (flow === 'minutes-delivery-timeout') break;
+        deliveryReply(p,op.status,{op_id:p.opId});break;
+      }
+      case 'minutes.delivery.status': {
+        const op = deliveryOperations.get(p.opId);
+        if (!op || op.sessionId !== p.sessionId) {deliveryReply(p,'not_found',{message:'没有找到这次操作，请人工核对，不自动重发'});break;}
+        if (op.status === 'pending') {op.status='sent';op.receipt={message:'模拟回执：文档已按本次所选收件人与权限交付，未向真实飞书发送。'};}
+        deliveryReply(p,op.status,{op_id:p.opId,receipt:op.receipt});break;
+      }
       case 'hello': queueMicrotask(() => emit('snapshot', { state, transcript, summary: summary(), team, insets: { top: 0, bottom: 0 } }));break;
       case 'capture.meeting':
         if (!state.capturing || state.recordingMode !== 'daily') throw new Error('请先开始日常聆听，再切换正式会议');
@@ -336,12 +401,29 @@
         if (p.mine && !state.selfName) throw new Error('请先在设置里选择本人');
         const selfName = state.selfName || '';
         const all = mockTasks.filter((t) => (!p.mine || t.who === state.selfName) && (p.status === 'all' || t.feishu.state === p.status || (p.status === 'open' && t.feishu.state === 'unknown')));
-        setTimeout(() => emit('tasks.list', { items: all, parsed_items: [], meeting_items: [], parsed_status: {state: 'disabled', meetings: [], counts: {total: 0}}, requestId: p.requestId || '', mine: p.mine, status: p.status, selfName }), 300); break;
+        setTimeout(() => emit('tasks.list', { items: all, requestId: p.requestId || '', mine: p.mine, status: p.status, selfName }), 300); break;
+      }
+      case 'tasks.candidates':
+        setTimeout(()=>emit('tasks.candidates',{requestId:p.requestId,parsed_items:mockReviewTasks,meeting_items:[],reviewer:state.selfName,parsed_status:{state:'ready',meetings:[{id:'0235',status:'ready',count:2}]},mock:true}),200); break;
+      case 'tasks.review.open':
+      case 'tasks.review.save': {
+        const item=mockReviewTasks.find(x=>x.item_id===p.item_id&&x.source_meeting.id===p.source_meeting_id);
+        const reviewer=state.selfName;
+        if (!item || !reviewer) {emit('error',{scope:'taskReview',requestId:p.requestId,message:'示例事项或本人未选择'});break;}
+        if (type==='tasks.review.save'&&!mockReviewReceipts.has(p.request_id)) {
+          if(p.revision!==mockReviewRevision||p.fingerprint!==item.fingerprint){emit('error',{scope:'taskReview',requestId:p.requestId,changed:true,message:'示例核对版本已变化'});break;}
+          item.reviews=item.reviews.filter(x=>x.by!==reviewer);
+          if(p.action!=='reopen')item.reviews.push({by:reviewer,verdict:{confirm:'confirmed',reject:'rejected',merge:'merged'}[p.action],kind:p.kind,title:p.title,detail:p.detail,due:p.due,owner:p.owner,into:p.into,updated_at:new Date().toISOString()});
+          mockReviewRevision++;mockReviewReceipts.set(p.request_id,true);
+        }
+        const own=item.reviews.find(x=>x.by===reviewer);
+        setTimeout(()=>emit(type==='tasks.review.save'?'tasks.review.saved':'tasks.review.open',{requestId:p.requestId,request_id:p.request_id,source_meeting_id:p.source_meeting_id,item_id:item.item_id,fingerprint:item.fingerprint,revision:mockReviewRevision,reviewer,item:{...item,review:own?{...own,status:own.verdict}:null},evidence:item.evidence,owners:[...team,'collective','unknown'],can_review:true,source_status:'current',mock:true}),180);break;
       }
       case 'recall.dismiss': cards.delete(p.cardId);break;
       case 'recall.save': {
         const c = cards.get(p.cardId);if (!c) throw new Error('卡片已失效');
-        const item = { id: c.id, saved_at: new Date().toISOString(), utterances: c.pool.filter((u) => p.utteranceIds.includes(u.id)), audio_expired: false };
+        const item = { id: c.id, session_id:state.sessionId, recording_mode:state.recordingMode,
+          saved_at: new Date().toISOString(), utterances: c.pool.filter((u) => p.utteranceIds.includes(u.id)), audio_expired: false };
         saved = saved.filter((x) => x.id !== c.id);saved.unshift(item);if (!preview) localStorage.setItem(key, JSON.stringify(saved));
         state.savedCount = saved.length;emit('recall.saved', { cardId: c.id, savedCount: saved.length });break;
       }
@@ -359,6 +441,7 @@
         emit('recall.saved',{cardId:savedId,savedCount:saved.length});break;
       }
       case 'saved.list': emit('saved.items', { items: saved });break;
+      case 'items.task.draft': void itemTaskDraft(p).catch(e => emit('error', {...p, scope:'items.task',message:e.message}));break;
       case 'action.draft': void draft(p).catch((e) => emit('error', { scope: 'action', message: e.message }));break;
       case 'action.confirm': void confirm(p).catch((e) => emit('error', { scope: 'action', message: e.message }));break;
       case 'action.status': {

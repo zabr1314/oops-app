@@ -12,7 +12,7 @@ class ActionSourceRejected(val code: String, message: String) : IOException(mess
             val code = error.getString("code")
             val noWrite = error.opt("no_external_write") == true || error.optJSONObject("extra")?.opt("no_external_write") == true ||
                 json.optJSONObject("extra")?.opt("no_external_write") == true
-            if (status == 409 && noWrite && (code == "SOURCE_BINDING_REQUIRED" || code == "SOURCE_CHANGED" || code.startsWith("ACTION_SOURCE_")))
+            if (status == 409 && noWrite && (code in setOf("SOURCE_BINDING_REQUIRED", "SOURCE_CHANGED", "ITEM_CHANGED", "ITEM_OWNER_REQUIRED") || code.startsWith("ACTION_SOURCE_")))
                 ActionSourceRejected(code, error.optString("message", "来源已变化").take(160)) else null
         }.getOrNull()
     }

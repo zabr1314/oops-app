@@ -6,6 +6,8 @@ import com.oops.app.buffer.SpeakerSegment
 
 /** App ↔ backend contract; the wire format is documented in docs/api.md. */
 interface OopsApi {
+    /** Phone-scoped personal Feishu connection; no shared-account fallback. */
+    suspend fun feishuCall(action: String, request: org.json.JSONObject): org.json.JSONObject? = null
     val name: String
     suspend fun notice(request: org.json.JSONObject): org.json.JSONObject? = null
     suspend fun syncMeeting(request: org.json.JSONObject): org.json.JSONObject? = null
@@ -31,13 +33,20 @@ interface OopsApi {
     /** One archived sentence as 16 kHz mono PCM, cut on the server; null when it has no recording. */
     suspend fun recordingClip(sessionId: String, startMs: Long, endMs: Long): ByteArray? = null
     /** Created Feishu tasks with their current Feishu state; null when unsupported. */
-    suspend fun tasks(assignee: String?, status: String): org.json.JSONObject? = null
+    suspend fun tasks(assignee: String?, status: String, mine: Boolean = false): org.json.JSONObject? = null
+    /** Independent, read-only meeting candidates; a Feishu list failure does not hide them. */
+    suspend fun taskCandidates(): org.json.JSONObject? = null
+    /** Read/save the existing per-person review; no external task creation. */
+    suspend fun taskReview(request: org.json.JSONObject, save: Boolean): org.json.JSONObject? = null
 
     /** Evidence selection: the backend may only pick candidate ids (Jev, LLM fallback). */
     suspend fun recall(request: RecallRequest): RecallResponse
 
     /** LLM extraction of Who / What / When / Constraint. Only a draft — nothing is written. */
     suspend fun draftAction(request: DraftRequest): DraftResponse
+
+    /** Use an already human-reviewed minutes item; returns its server-bound evidence without a model call. */
+    suspend fun draftFromItem(sessionId: String, itemId: String, fingerprint: String): org.json.JSONObject? = null
 
     /** Writes to Feishu after the user confirmed. Must be idempotent per [ConfirmRequest.opId]. */
     suspend fun confirmAction(request: ConfirmRequest): ActionResult
