@@ -279,7 +279,7 @@
   function setState(s) {
     // A new capture session starts an empty timeline; old lines and cards no longer apply.
     if (s.sessionId && s.sessionId !== S.state.sessionId) resetTranscript();
-    const before = { capturing: S.state.capturing, sessionId: S.state.sessionId, selfName: S.state.selfName, recordingMode: S.state.recordingMode, transcriptExpired: S.state.transcriptExpired, voiceprint: JSON.stringify(S.state.voiceprint),
+    const before = { capturing: S.state.capturing, sessionId: S.state.sessionId, selfName: S.state.selfName, recordingMode: S.state.recordingMode, transcriptExpired: S.state.transcriptExpired, voiceprint: voiceprintViewKey(S.state.voiceprint),
       preview: S.state.speakerPreviewEnabled, ready: S.state.sourceReady, boardSourceRevision: S.state.boardSourceRevision,
       recordingArchiveMessage: S.state.recordingArchiveMessage, recordingsBlocked: S.state.recordingsBlocked };
     const serverChanged = ('backend' in s && S.state.backend !== undefined && s.backend !== S.state.backend)
@@ -298,11 +298,12 @@
     }
     if (s.notices) { S.notices = new Map(s.notices.map(n => [n.id,n])); S.activeNotices = S.activeNotices.filter(id => S.notices.has(id)); renderNoticeBanners(); }
     if (before.preview !== S.state.speakerPreviewEnabled) S.records.forEach((_, id) => renderLine(id));
-    if (S.sheet?.kind === 'voiceprint' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) renderSheet();
-    if (S.route.name === 'memory' && S.memoryTab === 'people' && before.voiceprint !== JSON.stringify(S.state.voiceprint)) render();
+    if (S.sheet?.kind === 'voiceprint' && before.voiceprint !== voiceprintViewKey(S.state.voiceprint)) renderSheet();
+    if (S.route.name === 'memory' && S.memoryTab === 'people' && before.voiceprint !== voiceprintViewKey(S.state.voiceprint)) render();
     // Starting or stopping changes which controls a page shows; level and time only update text in place.
     if (serverChanged || before.recordingMode !== S.state.recordingMode || before.transcriptExpired !== S.state.transcriptExpired || before.capturing !== S.state.capturing || before.sessionId !== S.state.sessionId || before.ready !== S.state.sourceReady || before.selfName !== S.state.selfName || before.boardSourceRevision !== S.state.boardSourceRevision || S.route.name === 'settings' && (before.recordingArchiveMessage !== S.state.recordingArchiveMessage || before.recordingsBlocked !== S.state.recordingsBlocked)) {
-      if (S.state.capturing && !before.capturing && S.route.name !== 'live') go('live');
+      // Starting voice enrollment must not navigate away and cancel its sheet.
+      if (S.state.capturing && !before.capturing && S.route.name !== 'live' && S.sheet?.kind !== 'voiceprint') go('live');
       else render();
     } else renderStatus();
   }
@@ -331,6 +332,7 @@
   function renderStatus() {
     const s = S.state;
     const set = (id, text) => { const el = $(id); if (el && el.textContent !== text) el.textContent = text; };
+    updateVoiceprintProgress();
     set('rc-time', mmss(s.sessionMs));
     set('live-elapsed', mmss(s.sessionMs));
     const [text] = liveStatus();
@@ -1696,6 +1698,21 @@
   const ENROLL_TEXT = '现在录入我的声纹，这段话只用于声音测试。早晨的阳光照进房间，窗外有人散步，远处传来汽车的声音。桌上放着一本书、一杯水和一支笔。我用平时说话的声音朗读，保持自然的语速和音量。读完后稍作停顿，再从头朗读一次。';
   const TEST_TEXT = '午后的公园很安静，树叶随着微风轻轻摇动。小路旁有几朵花，远处的孩子正在玩耍。我现在用另一段文字测试声音匹配。';
 
+  // Audio arrives many times a second. Only phase/content changes rebuild the form.
+  function voiceprintViewKey(voiceprint) {
+    const { elapsedMs, ...content } = voiceprint || {};
+    return JSON.stringify(content);
+  }
+  function updateVoiceprintProgress() {
+    if (S.sheet?.kind !== 'voiceprint' || S.state.voiceprint?.phase !== 'recording') return;
+    const v = S.state.voiceprint;
+    const limit = v.mode === 'test' ? 10 : 30;
+    const time = $('vp-time'), progress = $('vp-progress'), audio = $('vp-audio');
+    if (time) time.textContent = `已录 ${clock(v.elapsedMs)} / 0:${limit}`;
+    if (progress) progress.value = Math.min(limit, Math.max(0, Number(v.elapsedMs) / 1000 || 0));
+    if (audio) audio.textContent = S.state.sourceReady ? '正在收到音频' : '等待麦克风连接';
+  }
+
   function voiceprintHtml() {
     const v = S.state.voiceprint || { phase: 'idle' };
     const busy = ['loading', 'saving', 'testing', 'checking'].includes(v.phase);
@@ -1715,8 +1732,11 @@
       <p class="meta">${recording ? '正在使用' : '录入音源'}：${esc(SOURCE_TEXT[v.source || (S.state.capturing ? S.state.source : 'mic')] || '手机麦克风')}。请仅由本人朗读，避免旁人讲话或播放录音。</p>
       ${sectionTitle(v.mode === 'test' ? '测试朗读文字（约 10 秒）' : '录入朗读文字（约 30 秒）')}
       <section class="card"><p class="read-aloud">${v.mode === 'test' ? TEST_TEXT : `我是${esc(name || '（请先选姓名）')}。${ENROLL_TEXT}`}</p></section>
-      ${recording ? `${sectionTitle(`已录 ${clock(v.elapsedMs)} / 0:${limit}`)}<p class="meta">${S.state.sourceReady ? '正在收到音频' : '等待麦克风连接'}</p>
-        <button class="button secondary" type="button" data-act="vp-stop"><span>结束这段录音</span></button>` : ''}
+      ${recording ? `<h3 class="section-title" id="vp-time">已录 ${clock(v.elapsedMs)} / 0:${limit}</h3>
+        <progress id="vp-progress" aria-label="声纹录音进度" max="${limit}" value="${Math.min(limit, Math.max(0, Number(v.elapsedMs) / 1000 || 0))}" style="width:100%;accent-color:var(--primary, #7853db)"></progress>
+        <p class="meta" id="vp-audio">${S.state.sourceReady ? '正在收到音频' : '等待麦克风连接'}</p>
+        <button class="button secondary" type="button" data-act="vp-stop"><span>结束这段录音</span></button>
+        <button class="button quiet" type="button" data-act="vp-cancel"><span>放弃这段录音</span></button>` : ''}
       ${v.phase === 'review' ? `<p class="meta">已录 ${clock(v.elapsedMs)}。${v.mode === 'test' ? '测试只比较声音，不会更新声纹。' : `保存后替换 ${esc(name)} 的现有声纹，其他成员保留。`}</p>
         <div class="action-grid"><button class="button secondary" type="button" data-act="vp-cancel"><span>放弃并重录</span></button>
           <button class="button primary" type="button" data-act="vp-save" ${(v.mode === 'test' ? v.elapsedMs < 1000 : !v.qualityPassed) ? 'disabled' : ''}><span>${v.mode === 'test' ? '重试匹配' : '保存声纹'}</span></button></div>` : ''}
