@@ -41,7 +41,7 @@ class PersonalContextApiTest {
                 .put("account", "must-not-be-trusted").put("sessionId", "not-a-meeting"))
             assertEquals(listOf("GET /v1/personal/context", "POST /v1/personal/context/profile"), seen.map { it.first })
             assertTrue(seen.all { it.second == opaque })
-            assertEquals(setOf("op_id", "expected_revision", "confirmed", "value"), seen.last().third.keySet())
+            assertEquals(setOf("op_id", "expected_revision", "confirmed", "value"), seen.last().third.keys().asSequence().toSet())
             assertEquals("original-context-op", seen.last().third.getString("op_id"))
             assertEquals("会议", seen.last().third.getJSONObject("value").getJSONArray("scenarios").getString(0))
             assertFalse(seen.last().third.toString().contains(opaque))

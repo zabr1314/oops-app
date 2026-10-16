@@ -11,6 +11,8 @@ data class AsrGap(val fromMs: Long, val toMs: Long)
 data class EngineState(
     val voiceprint: VoiceprintState = VoiceprintState(),
     val capturing: Boolean = false,
+    val capturePaused: Boolean = false,
+    val capturePauseDraining: Boolean = false,
     val source: String = "mic",
     val sessionId: String = "",
     val sessionMs: Long = 0,

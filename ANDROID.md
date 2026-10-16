@@ -15,6 +15,23 @@ Android 原生音频、5 分钟环形缓冲、豆包流式 ASR 和前台服务�
 
 环境：JDK 21、Android SDK（platform-tools、platform 37.2，许可已接受），Gradle Wrapper 9.8 / AGP 9.4.1。App compileSdk 37.2、targetSdk 36、minSdk 26。
 
+### 共享 React 界面安装包（2026-10-16）
+
+统一版还需要 Node 22.12 或更新版本，并先在仓库根安装 npm 依赖。以下命令只构建、不安装手机：
+
+```sh
+cd android
+./gradlew assembleDebug -PoopsUnifiedWeb=true -PoopsAppIdSuffix=.unified -PoopsVersionCode=2026101601 -PoopsVersionName=0.2.0-unified
+```
+
+`oopsUnifiedWeb=true` 让原生构建先执行 `scripts/build-native.mjs`，只打包完整的 `app/build/generated/unifiedWebAssets`：`web/` 是共享 React 界面，`native-tools/` 保留原生工具页，其他原生素材一并保留。普通构建不传这些参数时仍沿用原界面、包名和版本。
+
+`.unified` 对应包名 `com.oops.app.unified`、名称“Oops 新版”，可与旧版共存；两者的本机数据不会自动迁移。调试签名应放在单独且私有的 `ANDROID_USER_HOME` 中并保留，后续升级新版时复用，不能提交 keystore。没有旧安装包的同一签名，不能声称支持覆盖升级。两版共存时固定 `oops://feishu/complete` 授权回跳可能弹出应用选择，需选“Oops 新版”。
+
+真实服务地址及令牌沿用原生配置入口；不能把浏览器的显式模拟预览当作生产接入。未提供私有 Anker AAR 时沿用仓库的手机麦克风及模拟源能力，不能声明含真实录音豆 SDK。
+
+2026-10-16 已在本机 ARM64、Temurin JDK 21.0.12.1、Gradle 9.8.0 / AGP 9.4.1 与官方 SDK 37.2 / build-tools 36.0.0 完成统一版 `assembleDebug`。指定原生测试 12/12 通过（暂停 4、活动会话配置保护 3、个人上下文接口 5）。最终 APK 的 v2 签名、zipalign、包名、版本、名称和 1,621 个生成资产逐字节检查通过；正式包所有 HTML 入口均无 `bridge-mock` 引用，也不含该文件。调试签名保留在本次工作目录的隔离 Android 用户目录中。ADB 列表为空，未安装手机或做真机验收。
+
 在 `android/local.properties` 设置本机参数，该文件被 Git 忽略：
 ```properties
 sdk.dir=/Users/你的用户名/Library/Android/sdk

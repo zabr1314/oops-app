@@ -8,6 +8,33 @@
   const native = window.OopsNative;
   const send = (type, payload = {}) => native.postMessage(JSON.stringify({ type, payload }));
   const params = new URLSearchParams(location.search);
+  const unifiedTool = ['connection','account','personal','voice','recall','tasks','memory','meeting','privacy'].includes(params.get('unified-tools')) ? params.get('unified-tools') : null;
+  let unifiedToolOpened = false;
+  function returnToUnified() {
+    const target = new URL('../web/index.html', location.href);
+    const value = params.get('return') || '#home';
+    target.hash = /^#[a-zA-Z0-9%_/-]{1,600}$/.test(value) ? value : '#home';
+    if (params.get('preview') === '1') target.searchParams.set('native-preview','1');
+    location.assign(target.href);
+  }
+  function launchUnifiedTool() {
+    if (!unifiedTool || unifiedToolOpened) return;
+    unifiedToolOpened = true;
+    if (unifiedTool === 'connection') go('settings');
+    else if (unifiedTool === 'account') { go('me');openFeishu(); }
+    else if (unifiedTool === 'personal') { go('me');openSheet({kind:'personalAssistant'});personalAssistant?.open();feishuRequest('feishu.status'); }
+    else if (unifiedTool === 'privacy') { go('me');openSheet({kind:'privacy'}); }
+    else if (unifiedTool === 'voice') { go('me');openSheet({kind:'voiceprint'});send('voiceprint.list'); }
+    else if (unifiedTool === 'recall') { go('live');send('recall.trigger'); }
+    else if (unifiedTool === 'tasks') go('tasks');
+    else if (unifiedTool === 'memory') go('memory');
+    else if (unifiedTool === 'meeting') { go('sessions');const id=params.get('session');if(id&&/^[a-zA-Z0-9_-]{1,200}$/.test(id))openMeeting(id); }
+  }
+  if (unifiedTool) {
+    document.documentElement.dataset.unifiedTools='true';
+    const style=document.createElement('style');style.textContent='#nav{display:none!important}#root:not(.has-recording-controls) .oops-scroll{bottom:0!important}.app-header .unified-return{font-size:12px;gap:4px;display:flex;align-items:center;max-width:110px}.native-tools-caption{padding:8px 20px;font-size:12px}';document.head.append(style);
+  }
+
   const deviceDemo = window.OopsDeviceListeningDemo;
   let deviceState = deviceDemo?.create();
   // The live transcript nodes live in index.html and move between pages. Keep handles to them: a page re-render
@@ -189,6 +216,7 @@
         }
         enter();
         render();
+        launchUnifiedTool();
         break;
       case 'state': setState(p); break;
       case 'capture.assetsExpired': {
@@ -611,6 +639,10 @@
     root.className = `oops-root ${r === 'home' ? 'is-home' : ''} ${tabs ? 'has-session-tabs' : ''} ${S.state.capturing ? 'has-recording-controls' : ''} ${S.enterClasses || ''}`;
     $('hdr').className = `app-header ${r === 'home' ? 'home-header' : ''}`;
     $('hdr').innerHTML = headerHtml(r);
+    if (unifiedTool) {
+      const first=$('hdr').querySelector('button');
+      if(first){first.dataset.act='unified-return';first.classList.add('unified-return');first.setAttribute('aria-label','返回 Oops');first.innerHTML=icon('caret-left',18)+'<span>返回 Oops</span>';}
+    }
     $('tabs').hidden = !tabs;
     if (tabs) $('tabs').innerHTML = tabsHtml(r);
     const html = ({ home: homeHtml, sessions: sessionsHtml, live: liveHtml, meeting: meetingHtml, tasks: tasksHtml,
@@ -2730,6 +2762,7 @@
   }
 
   const ACTIONS = {
+    'unified-return': returnToUnified,
     go: (el) => go(el.dataset.route),
     back,
     'rc-expand': () => { const key = rcContext(); S.rcExpanded = S.rcExpanded === key ? null : key; renderRecordingControls(); renderStatus(); },
@@ -3084,6 +3117,7 @@
     if (S.sheet) { closeSheet(); return true; }
     if (!$('sheet').hidden) { closeSheet(); return true; }
     const r = S.route.name;
+    if (unifiedTool) { returnToUnified();return true; }
     if (['live', 'meeting', 'project', 'settings', 'device'].includes(r)) { back(); return true; }
     if (r !== 'home') { go('home'); return true; }
     return false;

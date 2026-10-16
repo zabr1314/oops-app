@@ -143,6 +143,9 @@ object OopsEngine {
     private val pipeline = Any()
     private var source: AudioSource? = null
     private var captureStopping = false
+    private var pausedCapture: CapturePauseGuard? = null
+    private var pausedAsr: VolcAsrClient? = null
+    private var pauseTicket = 0L
     private var voiceprintCapture: VoiceprintCapture? = null
     private var voiceprintPcm: ByteArray? = null
     private var voiceprintClient: HttpOopsApi? = null
@@ -424,6 +427,10 @@ object OopsEngine {
     fun startCapture(kind: String, policy: com.oops.app.store.RecordingPolicy = com.oops.app.store.RecordingPolicy()) {
         synchronized(pipeline) {
             if (source != null) return
+            if (pausedCapture != null) {
+                emit(OopsEvent.Toast("当前记录已暂停，请恢复或结束本次记录"))
+                return
+            }
             if (kind == Settings.SOURCE_BEAN) requireBeanSource(policy)
             if (captureStopping || asr?.isFinishing == true) {
                 emit(OopsEvent.Toast("正在接收上一场的最后转写，请稍候"))
@@ -467,7 +474,7 @@ object OopsEngine {
             var src: AudioSource? = null
             _state.update {
                 it.copy(
-                    capturing = true, source = kind, sessionId = sessionId, sessionMs = 0, bufferedMs = 0,
+                    capturing = true, capturePaused = false, capturePauseDraining = false, source = kind, sessionId = sessionId, sessionMs = 0, bufferedMs = 0,
                     recordingMode = policy.mode, cloudSaveConfirmed = policy.archives,
                     audioRetentionDays = policy.audioDays, transcriptRetentionDays = policy.transcriptDays,
                     audioExpired = false, transcriptExpired = false,
@@ -512,8 +519,76 @@ object OopsEngine {
 
     fun isCaptureStopping(): Boolean = synchronized(pipeline) { captureStopping }
 
+    /** Stops the physical mic and drains only the existing ASR tail. No end marker, clear or new ID. */
+    fun pauseCapture() {
+        val active: AudioSource
+        val client: VolcAsrClient?
+        val guard: CapturePauseGuard
+        synchronized(pipeline) {
+            if (pausedCapture != null) return
+            active = source ?: error("当前没有正在收音的记录")
+            check(!captureStopping) { "正在结束当前记录，请稍候" }
+            guard = CapturePauseGuard(sessionId, serviceEpoch, active.kind, recordingPolicy, ++pauseTicket)
+            pausedCapture = guard
+            source = null // Invalidate callbacks before releasing AudioRecord.
+            client = asr
+            pausedAsr = client
+            reconnectJob?.cancel(); reconnectJob = null
+            if (voiceprintCapture != null) cancelVoiceprintRecording()
+            _state.update { it.copy(capturePaused = true, capturePauseDraining = client != null,
+                sourceReady = false, sourceDetail = "已暂停，手机麦克风已关闭", level = 0f) }
+        }
+        runCatching { active.stop() }.onFailure {
+            _state.update { state -> state.copy(sourceDetail = "音源释放未确认，请结束记录并检查系统麦克风状态") }
+            fail("capture", "暂停时释放麦克风失败，请结束记录并检查系统麦克风状态")
+        }
+        tickJob?.cancel(); tickJob = null
+        player.stop(); level = 0f
+        resetSpeakerPreview()
+        client?.finish()
+        if (client == null) return
+        scope.launch {
+            val terminated = withContext(Dispatchers.IO) { client.awaitTermination() }
+            if (!terminated) client.cancel()
+            synchronized(pipeline) {
+                if (pausedCapture?.ticket == guard.ticket) {
+                    if (asr === client) asr = null
+                    _state.update { it.copy(capturePauseDraining = false, asr = if (terminated && client.closure?.acknowledged == true) "off" else "error",
+                        asrDetail = if (terminated && client.closure?.acknowledged == true) null else "暂停前的最后转写未完整确认，已收到的内容保留") }
+                }
+            }
+        }
+    }
+
+    /** Explicit user action only. Samples continue at the previous ring end, under the same contract. */
+    fun resumeCapture() {
+        synchronized(pipeline) {
+            val guard = pausedCapture ?: error("当前记录没有暂停")
+            guard.verifyResume(sessionId, serviceEpoch, recordingPolicy, _state.value.capturePauseDraining)
+            check(!captureStopping) { "正在结束当前记录，请稍候" }
+            val next = createAudioSource(guard.source)
+            try {
+                source = next
+                openAsrLocked()
+                next.start(audioListenerFor(next))
+                pausedCapture = null; pausedAsr = null; pauseTicket++
+                _state.update { it.copy(capturing = true, capturePaused = false, capturePauseDraining = false,
+                    source = guard.source, sourceReady = false, sourceDetail = null, level = 0f) }
+            } catch (error: Throwable) {
+                source = null
+                runCatching { next.stop() }
+                asr?.cancel(); asr = null
+                _state.update { it.copy(capturePaused = true, capturePauseDraining = false, sourceReady = false,
+                    sourceDetail = "恢复失败，麦克风保持关闭", asr = "off", level = 0f) }
+                throw error
+            }
+        }
+        tickJob?.cancel()
+        tickJob = scope.launch { while (isActive) { delay(500); tick() } }
+    }
+
     fun stopCapture() {
-        val src: AudioSource
+        val src: AudioSource?
         val client: VolcAsrClient?
         val archives: Boolean
         val stoppedSession: String
@@ -521,11 +596,13 @@ object OopsEngine {
         val stoppedSync: SyncContext?
         val stoppedRecorder: com.oops.app.store.SessionRecorder?
         synchronized(pipeline) {
-            src = source ?: return
+            if (source == null && pausedCapture == null) return
+            src = source
             captureStopping = true
             source = null
             if (voiceprintCapture != null) cancelVoiceprintRecording()
-            client = asr
+            client = asr ?: pausedAsr
+            pausedCapture = null; pausedAsr = null; pauseTicket++
             archives = recordingPolicy.archives
             stoppedSession = sessionId
             stoppedTracker = tracker
@@ -533,7 +610,7 @@ object OopsEngine {
             stoppedRecorder = recorder
             reconnectJob?.cancel()
         }
-        runCatching { src.stop() }.onFailure {
+        runCatching { src?.stop() }.onFailure {
             fail("capture", "音源关闭或录音豆临时副本清理失败：${it.message ?: "请检查设备后重试"}")
         }
         stoppedRecorder?.closeAudio() // finals that flush after stop are still appended
@@ -544,7 +621,7 @@ object OopsEngine {
         tickJob?.cancel()
         player.stop()
         level = 0f
-        _state.update { it.copy(capturing = false, level = 0f, sourceDetail = null, sourceReady = false, asr = if (client != null) it.asr else "off") }
+        _state.update { it.copy(capturing = false, capturePaused = false, capturePauseDraining = false, level = 0f, sourceDetail = null, sourceReady = false, asr = if (client != null) it.asr else "off") }
         resetSpeakerPreview()
         if (!archives) {
             synchronized(pipeline) {
@@ -887,7 +964,7 @@ object OopsEngine {
             reconnectAttempt = 0
         }
         _state.update {
-            if (captureStopping && source == null) it.copy(asr = "finishing", asrDetail = "正在等待最后转写与结束确认")
+            if ((captureStopping || it.capturePaused) && source == null) it.copy(asr = "finishing", asrDetail = "正在等待最后转写与结束确认")
             else it.copy(asr = "live", asrDetail = null)
         }
         Log.i(TAG, "ASR connected")
@@ -897,7 +974,7 @@ object OopsEngine {
         val u = synchronized(pipeline) {
             if (session != sessionId || _state.value.transcriptExpired) return
             val shifted = raw.shift(baseMs)
-            if (!recordingPolicy.archives && (source == null || shifted.endMs < nowMs - RETENTION_MS)) return
+            if (!recordingPolicy.archives && ((source == null && pausedCapture == null) || shifted.endMs < nowMs - RETENTION_MS)) return
             transcript.add(shifted.startMs, shifted.endMs, shifted.text, null, shifted.words)
                 .let { added -> if (api is MockOopsApi) added else
                     transcript.setSpeaker(added.id, added.speaker, speakerState = "pending")!! }
@@ -2575,12 +2652,14 @@ object OopsEngine {
     // ---- settings --------------------------------------------------------------------------
 
     fun applySettings(json: JSONObject) {
-        val nextOrigin = com.oops.app.store.RecordingOrigin.from(
-            if (json.has("backendBaseUrl")) json.getString("backendBaseUrl") else settings.backendBaseUrl,
-            if (json.has("mockBackend")) json.getBoolean("mockBackend") else settings.mockBackend)
-        require(!(_state.value.capturing || isCaptureStopping()) || nextOrigin == currentOrigin()) {
-            "请先结束当前记录并等待转写收尾，再切换服务"
-        }
+        // Check the whole service tuple before even unrelated fields in this request are saved.
+        val nextUrl = if (json.has("backendBaseUrl")) json.getString("backendBaseUrl").trim() else settings.backendBaseUrl
+        val nextMock = if (json.has("mockBackend")) json.getBoolean("mockBackend") else settings.mockBackend
+        val nextToken = if (json.has("backendToken")) json.getString("backendToken").trim() else settings.backendTokenFor(nextUrl)
+        CaptureSettingsGuard.verify(_state.value.capturing, pausedCapture != null,
+            isCaptureStopping() || _state.value.asr == "finishing",
+            nextUrl != settings.backendBaseUrl || nextMock != settings.mockBackend || nextToken != settings.backendToken,
+            pausedCapture?.let { json.has("source") && json.getString("source") != it.source } ?: false)
         if (json.has("voiceTrigger")) settings.voiceTrigger = json.getBoolean("voiceTrigger")
         if (json.has("noticeVibrate")) settings.noticeVibrate = json.getBoolean("noticeVibrate")
         if (json.has("memorySync")) {
@@ -2700,6 +2779,8 @@ object OopsEngine {
             scheduleUpload()
         }
     }
+
+    fun bridgeServiceEpoch(): Long = serviceEpoch
 
     private fun serviceContext(epoch: Long) = JSONObject().put("serviceEpoch", epoch).put("backendUrl", _state.value.backendUrl)
 

@@ -218,6 +218,11 @@ class MainActivity : ComponentActivity() {
                 "capture.start" -> requestCapture(p.optString("source").ifBlank { OopsEngine.settings.source }, com.oops.app.store.RecordingPolicy.fromBridge(p))
                 "capture.meeting" -> recordingRequest(com.oops.app.store.RecordingPolicy.fromBridge(p)) { OopsEngine.startMeeting(it) }
                 "capture.stop" -> CaptureService.stop(this)
+                "capture.pause" -> { OopsEngine.pauseCapture(); CaptureService.refreshNotification(this) }
+                "capture.resume" -> {
+                    require(hasPermission(Manifest.permission.RECORD_AUDIO)) { "麦克风权限已关闭，请在系统设置中允许后再恢复" }
+                    OopsEngine.resumeCapture(); CaptureService.refreshNotification(this)
+                }
                 "recall.trigger" -> OopsEngine.triggerRecall("button", p.optString("query").ifBlank { null })
                 "ask.session" -> OopsEngine.askSession(p.getString("query"))
                 "agenda.set" -> OopsEngine.setAgenda(p)

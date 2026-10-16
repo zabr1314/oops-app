@@ -51,3 +51,6 @@ models/
 # Anker hackathon toolkit: SDK binaries and contest credentials, never committed
 【黑客松智能录音赛道】工具资料包/
 android/app/libs/soundcore/
+
+# Built shared React Android preview (generated, no user data)
+/public/unified-preview/

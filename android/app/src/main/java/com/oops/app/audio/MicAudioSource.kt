@@ -18,6 +18,7 @@ class MicAudioSource : AudioSource {
 
     @Volatile private var running = false
     private var worker: Thread? = null
+    @Volatile private var activeRecord: AudioRecord? = null
 
     @SuppressLint("MissingPermission") // CaptureService is only started after RECORD_AUDIO is granted
     private fun open(): AudioRecord {
@@ -40,6 +41,7 @@ class MicAudioSource : AudioSource {
 
     override fun start(listener: AudioSource.Listener) {
         val first = open()
+        activeRecord = first
         running = true
         worker = thread(name = "oops-mic") {
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
@@ -47,7 +49,7 @@ class MicAudioSource : AudioSource {
             var lostAtNanos = 0L
             try {
                 while (running) {
-                    val record = current ?: reopen(listener)?.also { current = it } ?: return@thread
+                    val record = current ?: reopen(listener)?.also { current = it; activeRecord = it } ?: return@thread
                     if (lostAtNanos != 0L) {
                         val missingMs = (System.nanoTime() - lostAtNanos) / 1_000_000
                         lostAtNanos = 0L
@@ -68,11 +70,12 @@ class MicAudioSource : AudioSource {
                         lostAtNanos = System.nanoTime()
                         runCatching { record.stop() }
                         record.release()
+                        if (activeRecord === record) activeRecord = null
                         current = null
                     }
                 }
             } finally {
-                current?.let { runCatching { it.stop() }; it.release() }
+                current?.let { runCatching { it.stop() }; runCatching { it.release() }; if (activeRecord === it) activeRecord = null }
             }
         }
     }
@@ -123,7 +126,13 @@ class MicAudioSource : AudioSource {
 
     override fun stop() {
         running = false
-        worker?.join(500)
+        // AudioRecord.read can block: actively stop/release it so pause releases the physical mic.
+        val record = activeRecord
+        runCatching { record?.stop() }
+        worker?.interrupt()
+        if (worker !== Thread.currentThread()) worker?.join(1_000)
+        runCatching { record?.release() }
+        if (activeRecord === record) activeRecord = null
         worker = null
     }
 
