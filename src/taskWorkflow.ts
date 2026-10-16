@@ -2,6 +2,7 @@ import type { AppData, SourceReference, Task, TaskArtifact, TaskCompletion, Task
 import { generationConfigurationFingerprint, generationMaterialFingerprint, makeSourceReference, PERSONAL_SPACE, provenanceAvailable, selectedTaskMaterials, sourceAvailable, taskSourceAvailable, taskVisible } from './sourceAccess';
 import { taskAttentionReason, taskClosed, taskInquiries } from './taskAttention';
 import { normalizeMoment, parseLocalMoment } from './dateLogic';
+import { buildPersonalContext, type PersonalScenario } from './personalAssistant';
 export { taskAttentionReason, taskClosed, taskInquiries, selectedTaskMaterials };
 
 const stamp = () => new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date());
@@ -35,6 +36,19 @@ export function taskOutputMode(task: Task): TaskOutputMode {
   if (['资料整理', '回复草稿', '行动清单', '文档', '文档与PPT'].includes(task.outputMode || '')) return task.outputMode as TaskOutputMode;
   if (taskWorkKind(task) === '交付') return task.id === 'TASK-021' || /PPT|汇报/.test(task.title + task.description) ? '文档与PPT' : '文档';
   return /回复|消息|邮件|沟通/.test(task.title) ? '回复草稿' : /核实|查|资料|库存/.test(task.title) ? '资料整理' : '行动清单';
+}
+/** A personal view of a team task does not grant it private assistant context. */
+export function taskPersonalContext(data: AppData, task: Task, scenario?: PersonalScenario) {
+  const mode = taskOutputMode(task);
+  const space = [data.settings.space, task.scope?.space, data.settings.retention['task-space:' + task.id]]
+    .find(value => value && value !== PERSONAL_SPACE) || PERSONAL_SPACE;
+  return buildPersonalContext(data, {
+    space,
+    scenario: scenario || (mode === '回复草稿' ? '写作' : mode === '资料整理' ? '研究' : mode === '文档' || mode === '文档与PPT' ? '汇报' : '通用'),
+    query: [task.title, task.description].filter(Boolean).join('\n'),
+    excludeIds: task.scope?.personalContextExcludedIds,
+    personId: task.scope?.personId,
+  });
 }
 export function outputCost(mode: TaskOutputMode | string): number {
   return mode === '文档与PPT' || mode === '完整框架与PPT' ? 16 : mode === '行动清单' ? 4 : 6;
@@ -190,7 +204,7 @@ export function authorizeTask(data: AppData, id: string, scope: TaskScope, mode?
   const task = data.tasks.find(current => current.id === id); const error = workError(data, task);
   if (error || !task) return { data, error };
   if (!['已承接', '进行中', '待验收'].includes(task.status) || !scope.sources.trim() || !scope.destination.trim()) return { data, error: '先承接并明确这次允许的范围' };
-  const next: Task = withCurrentSelectedMaterials(data, { ...task, scope: { ...scope, materialIds: scope.materialIds?.slice(), space: scope.space || data.settings.space }, outputMode: mode || taskOutputMode(task) });
+  const next: Task = withCurrentSelectedMaterials(data, { ...task, scope: { ...scope, materialIds: scope.materialIds?.slice(), personalContextExcludedIds: scope.personalContextExcludedIds?.slice(), space: scope.space || data.settings.space }, outputMode: mode || taskOutputMode(task) });
   const actorData = { ...data, settings: { ...data.settings, space: next.scope!.space! } };
   if (scope.materialIds?.some(materialId => !task.materialRefs?.some(material => material.id === materialId)) || !taskSourceAvailable(actorData, next, new Set(), true)) return { data, error: '所选资料或任务来源已失效' };
   return { data: changeTask(data, task, { scope: next.scope, materialRefs: next.materialRefs, outputMode: next.outputMode, authorized: true, generationToken: undefined, generationSnapshot: undefined, aiStatus: '未启动' }, '本人允许已勾选的资料与本次草稿范围') };
@@ -208,8 +222,9 @@ export function beginGeneration(data: AppData, id: string, input: { token?: stri
   if ((task.budget ?? 40) - (task.used ?? 0) < cost) return { data, error: '当前额度不足以覆盖这次准备' };
   const token = input.token || uid(), all = taskArtifacts(task), version = all.length ? Math.max(task.version, ...all.map(artifact => artifact.version)) + 1 : Math.max(task.version, 1);
   const materials = selectedTaskMaterials(task).map(material => ({ ...material }));
-  const sourceRefs = [...(task.sources || []), ...(task.scope.includeSource !== false && task.sourceSession ? [{ kind: 'session' as const, id: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime }] : []), ...materials.flatMap<SourceReference>(material => material.memoryId ? [{ kind: 'memory' as const, id: material.memoryId }] : material.sourceSession && (material.sourceId !== undefined || material.sourceTime) ? [{ kind: 'session' as const, id: material.sourceSession, sourceId: material.sourceId, sourceTime: material.sourceTime }] : [])].map(ref => makeSourceReference(actorData, ref));
+  const personalContext = taskPersonalContext(data, task);
+  const sourceRefs = [...(task.sources || []), ...(task.scope.includeSource !== false && task.sourceSession ? [{ kind: 'session' as const, id: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime }] : []), ...materials.flatMap<SourceReference>(material => material.memoryId ? [{ kind: 'memory' as const, id: material.memoryId }] : material.sourceSession && (material.sourceId !== undefined || material.sourceTime) ? [{ kind: 'session' as const, id: material.sourceSession, sourceId: material.sourceId, sourceTime: material.sourceTime }] : []), ...personalContext.sources].map(ref => makeSourceReference(actorData, ref));
   const started: Task = { ...task, workKind: taskWorkKind(task), outputMode: mode, version, generationToken: token, generationSources: sourceRefs, generationSpace: actorData.settings.space, aiStatus: '准备中', retryMissing: !!input.retry, failure: undefined };
-  started.generationSnapshot = { token, mode, cost, version, space: actorData.settings.space, scope: { ...task.scope, materialIds: task.scope.materialIds?.slice() }, fingerprint: generationConfigurationFingerprint(started), materialFingerprint: generationMaterialFingerprint(materials), materials, sourceRefs, businessStatus: task.status === '进行中' ? '进行中' : '已承接', task: { id: task.id, title: task.title, description: task.description, owner: task.owner, due: task.due, workKind: started.workKind!, criteria: [...(task.criteria || [])], questions: taskInquiries(task).filter(inquiry => inquiry.status !== '已解决').map(inquiry => inquiry.question), ...(task.scope.includeSource !== false ? { sourceSession: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime } : {}) } };
+  started.generationSnapshot = { token, mode, cost, version, space: actorData.settings.space, scope: { ...task.scope, materialIds: task.scope.materialIds?.slice(), personalContextExcludedIds: task.scope.personalContextExcludedIds?.slice() }, fingerprint: generationConfigurationFingerprint(started), materialFingerprint: generationMaterialFingerprint(materials), materials, sourceRefs, personalContext, businessStatus: task.status === '进行中' ? '进行中' : '已承接', task: { id: task.id, title: task.title, description: task.description, owner: task.owner, due: task.due, workKind: started.workKind!, criteria: [...(task.criteria || [])], questions: taskInquiries(task).filter(inquiry => inquiry.status !== '已解决').map(inquiry => inquiry.question), ...(task.scope.includeSource !== false ? { sourceSession: task.sourceSession, sourceId: task.sourceId, sourceTime: task.sourceTime } : {}) } };
   return { data: changeTask(data, task, started, input.retry ? '固定本次补充后的准备范围，旧成果保留' : '固定已允许的资料、产出与额度，开始准备草稿'), token, cost };
 }

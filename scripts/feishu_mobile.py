@@ -5,12 +5,15 @@ opaque mobile session may own a new meeting or approve its delivery.
 """
 import contextlib
 import copy
+import fcntl
 import hashlib
 import json
 import os
 import re
 import sqlite3
+import stat
 import time
+import uuid
 from urllib.parse import parse_qs, urlsplit, unquote
 
 from calendar_delivery import CalendarDelivery, CalendarError
@@ -19,6 +22,7 @@ from agent_delivery import AgentDelivery
 from feishu_accounts import Accounts, AccountError
 from minutes_delivery import MinutesDelivery
 from action_sources import has_source
+from personal_context import PersonalContext, PersonalContextError
 
 
 class PersonalArtifact(bytes):
@@ -131,6 +135,10 @@ class MeetingOwners:
 
 class MobileFeishu:
     def __init__(self, backend, directory, accounts=None):
+        if os.path.islink(directory):
+            raise MobileError(503, 'PERSONAL_CONTEXT_STORAGE_UNAVAILABLE', '个人服务目录不可用')
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
         self.backend = backend
         self.accounts = accounts or Accounts(directory)
         self.owners = MeetingOwners(directory)
@@ -141,6 +149,158 @@ class MobileFeishu:
         bot = getattr(self.backend, 'feishu', None)
         self.assistant = (AgentDelivery(os.path.join(directory, 'assistant-deliveries'), self.accounts,
             bot.jobs, self.check_job_owner, self.check_job_source) if bot and hasattr(bot, 'jobs') else None)
+        self.context_service_id = self.context_service_identity(directory)
+        self.personal_context = PersonalContext(directory, principal_guard=self.context_identity,
+            source_guard=self.context_source, commit_guard=self.context_commit_guard,
+            source_lock=getattr(getattr(self.backend, 'meetings', None), 'lock', None))
+
+    @staticmethod
+    def context_service_identity(directory):
+        path = os.path.join(directory, 'personal-context-service-id')
+        if os.path.islink(directory) or os.path.islink(path):
+            raise MobileError(503, 'PERSONAL_CONTEXT_STORAGE_UNAVAILABLE', '个人上下文服务标识不可用')
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        except FileExistsError:
+            fd = None
+        if fd is not None:
+            with os.fdopen(fd, 'w', encoding='ascii') as stream:
+                stream.write(uuid.uuid4().hex)
+                stream.flush()
+                os.fsync(stream.fileno())
+            directory_fd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+        with os.fdopen(fd, 'r', encoding='ascii') as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise MobileError(503, 'PERSONAL_CONTEXT_STORAGE_UNAVAILABLE', '个人上下文服务标识不是普通文件')
+            os.fchmod(stream.fileno(), 0o600)
+            value = stream.read(100)
+        if not re.fullmatch(r'[a-f0-9]{32}', value):
+            raise MobileError(503, 'PERSONAL_CONTEXT_STORAGE_UNAVAILABLE', '个人上下文服务标识无效')
+        return value
+
+    @contextlib.contextmanager
+    def context_commit_guard(self, identity):
+        # Account writes use this same thread/file lock. Nonblocking acquisition
+        # keeps a provider send from holding the settings screen hostage.
+        if not self.accounts.lock.acquire(blocking=False):
+            raise MobileError(409, 'PERSONAL_CONTEXT_IDENTITY_BUSY', '账号操作正在进行，请稍后重试同一操作')
+        fd = None
+        try:
+            fd = os.open(self.accounts.lock_path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+            os.fchmod(fd, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise MobileError(409, 'PERSONAL_CONTEXT_IDENTITY_BUSY', '账号操作正在进行，请稍后重试同一操作') from None
+            yield
+        finally:
+            if fd is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+            self.accounts.lock.release()
+
+    def context_identity(self, principal):
+        # Use one atomic, read-only account snapshot: no send/network lock, and
+        # no cached binding survives a disconnect, account swap or revocation.
+        data = self.accounts._readonly_snapshot()
+        status = self.accounts._status(self.accounts._entry_for_principal(data, principal))
+        account = status.get('account') or {}
+        if (status.get('status') != 'bound' or not account.get('tenant_key') or not account.get('open_id')):
+            raise MobileError(401, 'PERSONAL_CONTEXT_BINDING_REQUIRED', '请先连接本人的飞书，再同步私人助理资料')
+        return dict(principal_id=principal, account_key=self.account_key(status),
+                    binding_revision=status['binding_revision'])
+
+    def context_source(self, principal, source, phase):
+        """Only current-service, live original lines visible to this phone.
+
+        Sharing the same account's profile does not grant the other phone access
+        to a meeting. A second phone's missing grant only hides this memory; it
+        must not erase the first phone's valid evidence.
+        """
+        from action_sources import binding_for, ActionSourceError
+        from archive_policy import expired
+        sid = source['session_id']
+        if source.get('service_id', self.context_service_id) != self.context_service_id:
+            return False
+        identity = self.context_identity(principal)
+        owned = self.owners.owned_ids(principal)
+        shared = self.owners.readable_ids('meeting', principal)
+        if sid not in owned | shared:
+            if source.get('origin_principal_id') == principal:
+                return False
+            raise MobileError(403, 'PERSONAL_CONTEXT_SOURCE_FORBIDDEN', '这台设备无权查看该记忆的会议来源')
+        meetings = self.backend.meetings
+        with meetings.lock:
+            try:
+                row = meetings.load(sid)
+            except FileNotFoundError:
+                return False
+            if sid in owned:
+                with self.owners.connect() as db:
+                    owner = db.execute('SELECT account FROM owners WHERE sid=? AND principal=?', (sid, principal)).fetchone()
+                if not owner or owner[0] != identity['account_key']:
+                    raise MobileError(403, 'PERSONAL_CONTEXT_SOURCE_FORBIDDEN', '会议尚未核实为当前飞书账号所有')
+            elif row.get('private') or row.get('review_export_scope') in ('private', 'none', 'revoked'):
+                if source.get('origin_principal_id') == principal:
+                    return False
+                raise MobileError(403, 'PERSONAL_CONTEXT_SOURCE_FORBIDDEN', '这台设备无权查看该记忆的会议来源')
+            policy = row.get('storage_policy') or {}
+            if (row.get('transcript_status') == 'expired' or
+                    policy.get('transcript_expires_at') and expired(policy, 'transcript') or
+                    policy.get('recording_mode', row.get('recording_mode')) == 'daily' or
+                    policy.get('mode') in ('daily', 'daily_temporary')):
+                return False
+            originals = {u['id']: u for u in row.get('utterances', [])}
+            if any(uid not in originals or originals[uid].get('deleted') or
+                   sid not in owned and originals[uid].get('private') for uid in source['utterance_ids']):
+                return False
+            try:
+                binding = binding_for(row, source['utterance_ids'])
+            except ActionSourceError:
+                return False
+            shape = dict(binding=binding, private=bool(row.get('private')),
+                         scope=row.get('review_export_scope'), expires_at=policy.get('transcript_expires_at'))
+            fingerprint = hashlib.sha256(json.dumps(shape, ensure_ascii=False, sort_keys=True,
+                separators=(',', ':')).encode('utf-8')).hexdigest()
+            if phase == 'write' and source.get('fingerprint') not in (None, fingerprint):
+                return False
+            return dict(kind='meeting', session_id=sid, utterance_ids=source['utterance_ids'],
+                service_id=self.context_service_id, fingerprint=fingerprint,
+                origin_principal_id=principal if phase == 'write' else source.get('origin_principal_id', principal))
+
+    def dispatch_personal_context(self, method, path, token, body):
+        principal = self.accounts.principal_readonly_snapshot(token)
+        identity = self.context_identity(principal)
+        route = path.removeprefix('/v1/personal/context')
+        try:
+            # Hold the existing local source lock through construction and the
+            # final identity check; no provider or external write is performed.
+            meetings = getattr(self.backend, 'meetings', None)
+            with meetings.lock if meetings else contextlib.nullcontext():
+                if route == '' and method == 'GET':
+                    result = self.personal_context.read(principal)
+                elif method == 'POST' and route in ('/profile', '/preferences', '/memories', '/memories/delete'):
+                    action = {'/profile': self.personal_context.save_profile,
+                              '/preferences': self.personal_context.save_preferences,
+                              '/memories': self.personal_context.save_memory,
+                              '/memories/delete': self.personal_context.delete_memory}[route]
+                    result = action(principal, body)
+                elif route == '/snapshot' and method == 'POST':
+                    if set(body) - {'memory_ids', 'scenario', 'person_id'}:
+                        raise MobileError(400, 'BAD_REQUEST', '上下文快照只接受所选私人记忆编号')
+                    result = self.personal_context.snapshot(principal, body.get('memory_ids'), body.get('scenario', '通用'), body.get('person_id'))
+                else:
+                    raise MobileError(405, 'METHOD_NOT_ALLOWED', '个人上下文请求方式或路径无效')
+                if self.context_identity(principal) != identity or self.accounts.principal_readonly_snapshot(token) != principal:
+                    raise MobileError(409, 'PERSONAL_CONTEXT_IDENTITY_CHANGED', '个人账号已变化，请重新读取')
+                return result
+        except PersonalContextError as error:
+            raise MobileError(error.status, error.code, str(error)) from None
 
     @staticmethod
     def require_external_source(row):
@@ -400,6 +560,7 @@ class MobileFeishu:
         return dict(items=values, state='ready')
 
     def invalidate_sources(self, sid, reason='source_changed', purge_content=False):
+        self.personal_context.invalidate_sources(sid)
         self.delivery.invalidate(sid, reason, purge_content=purge_content)
         self.calendar.invalidate(sid, reason, purge_content=purge_content)
         if self.assistant:
@@ -410,11 +571,16 @@ class MobileFeishu:
     @staticmethod
     def matches(path):
         return (path.startswith('/v1/feishu/') or path.startswith('/v1/assistant/jobs') or
+                path == '/v1/personal/context' or path.startswith('/v1/personal/context/') or
                 bool(re.fullmatch(r'/v1/meetings/[^/]+/(?:delivery|calendar)(?:/(?:save|confirm|status))?', path)))
 
     def dispatch(self, method, raw_path, token, body=None):
         parsed = urlsplit(raw_path)
         path, query = parsed.path, parse_qs(parsed.query)
+        if path == '/v1/personal/context' or path.startswith('/v1/personal/context/'):
+            if (method == 'POST' and not isinstance(body, dict)) or parsed.query:
+                raise MobileError(400, 'BAD_REQUEST', '个人上下文请求格式无效')
+            return self.dispatch_personal_context(method, path, token, body)
         body = body or {}
         if method == 'POST' and path == '/v1/feishu/session':
             return self.accounts.create_session()

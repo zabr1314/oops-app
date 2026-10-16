@@ -13,6 +13,7 @@ import { boardPreviewData } from './boardPreview';
 import { ListeningScreen } from './features/Listening';
 import { archiveSafeData, applyStorageDeadlines, isTemporaryDaily, pinExplicitDerivations, reconcileSavedEvidence } from './storagePolicy';
 import { setVolatileObjects, clearObjectViewState } from './viewState';
+import { collectPersonalHabitCandidates, reconcilePersonalAssistantState } from './personalAssistant';
 import { reconcileDeviceStartupHolds } from './deviceStartupLogic';
 
 
@@ -39,7 +40,10 @@ export default function Prototype() {
   const temporaryTurnIds = useRef(new Map<string, string[]>());
   const update = useCallback((change: Partial<AppData> | ((current: AppData) => AppData)) => setData(d => {
     const next = typeof change === 'function' ? change(d) : { ...d, ...change };
-    return next === d ? d : reconcileDeviceStartupHolds(d, pinExplicitDerivations(d, reconcileSavedEvidence(d, next)));
+    if (next === d) return d;
+    const reconciled = reconcileDeviceStartupHolds(d, pinExplicitDerivations(d, reconcileSavedEvidence(d, next)));
+    const learned = next.sessions !== d.sessions || next.settings.toggles !== d.settings.toggles ? collectPersonalHabitCandidates(reconciled) : reconciled;
+    return reconcilePersonalAssistantState(learned);
   }), []);
   const navigate = (next: Route) => {
     keyboard.hide();

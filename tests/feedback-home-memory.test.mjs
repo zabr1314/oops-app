@@ -102,7 +102,7 @@ test('quick preference draft preserves the user description and leaves identity 
 test('custom answer preferences use current profile evidence and cannot silently survive later changes', async () => {
   const home = readFileSync(new URL('../src/features/Home.tsx', import.meta.url), 'utf8');
   const url = path => new URL(path, import.meta.url).href;
-  const imports = `import { sharedMemoryEligible } from '${url('../src/memoryAccess.ts')}';import { makeSourceReference, materialVisible, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '${url('../src/sourceAccess.ts')}';import { taskIsMyAttention, taskBelongsToMe } from '${url('../src/taskWorkflow.ts')}';`;
+  const imports = `import { buildPersonalContext } from '${url('../src/personalAssistant.ts')}';import { sharedMemoryEligible } from '${url('../src/memoryAccess.ts')}';import { makeSourceReference, materialVisible, provenanceAvailable, sourceAvailable, taskSourceAvailable, taskVisible as scopedTaskVisible, sessionVisible as scopedSessionVisible } from '${url('../src/sourceAccess.ts')}';import { taskIsMyAttention, taskBelongsToMe } from '${url('../src/taskWorkflow.ts')}';`;
   const code = imports + home.slice(home.indexOf('export function homeTitle'), home.indexOf('export function Home()')) + home.slice(home.indexOf('type LocalAnswer'), home.indexOf('function referenceRoute'));
   const { buildLocalAnswer } = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(code, { mode: 'strip' })).toString('base64'));
   const { provenanceAvailable } = await import('../src/sourceAccess.ts');

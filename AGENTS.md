@@ -1,5 +1,17 @@
 # Mobile Prototype Agent Guide
 
+## 个性化个人助理（2026-10-16）
+
+用户已批准实施个人上下文、确认式习惯学习、按场景影响问答/个人草稿及本人账号同步。入口放设置与记忆，保留主导航。信息须明确来源、适用场景，可纠正、停用或删除；学习默认关闭，确认前不影响建议，拒绝不重复提出。本次范围所见即所用，生成冻结快照，来源和授权改变撤回旧准备；团队流程不带私人上下文，个性化不扩大执行或发送权限。
+
+沿用PR #14个人身份基础，真实同步按服务端验证的账号隔离，保留版本与原操作恢复，不迁移浏览器示例或未知归属数据。公开React继续本地隔离示例，Android走原生个人会话；部署、APK及真实Agent新任务入口的依赖如实标明。详见 `docs/personal-assistant-20261016.md`。
+
+## 人物记忆（2026-10-16）
+
+用户已授权加入对人的记忆，并同步安卓对应入口。复用记忆→人物，以稳定personId区分同名人物；四类为身份/关系、沟通偏好、交流背景、约定跟进。私人手写记录与已核对的对方原话明确区分，候选确认后才使用；可改、停用、拒绝或删除。问答/草稿明确选人并可逐条排除，未选人不全局注入，团队不带私人人物记忆；身份卡共享不扩大这些内容。来源修订、撤回、人物删除使旧派生失效，不能自动恢复或执行约定。
+
+React预览与Android打包H5为两套实现；同时修改源码不代表手机已安装更新。真实后端没有逐句稳定人物身份，本轮安卓人物记忆限本人手写确认并通过个人账号同步，不从同名目录自动造关联或冒充原话证明。真实问答/Agent新任务执行继续按已有接入边界说明。详见docs/personal-assistant-20261016.md。
+
 ## Prototype Instructions
 
 In ChatGPT Work Mode, run `sites-preview start "$PWD"`, open `http://terminal.local:4173/` in the cloud browser, and verify the rendered app and its primary interactions. Keep that preview open and tell the user to inspect it in the cloud browser; do not present the local URL as a user-facing chat link. In Codex Desktop, run the local server yourself, open the preview in the in-app browser, and provide the clickable local URL. Do not deploy to Sites unless the user explicitly asks to share, publish, or deploy. Do not give the user server-start instructions when you can run it.

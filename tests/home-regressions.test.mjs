@@ -8,8 +8,9 @@ async function load(code){return import('data:text/javascript;base64,'+Buffer.fr
 const store=readFileSync(new URL('../src/store.tsx',import.meta.url),'utf8');
 const {initialData}=await load(store.slice(store.indexOf('export function initialData')));
 const home=readFileSync(new URL('../src/features/Home.tsx',import.meta.url),'utf8');
-const imports=`import {sharedMemoryEligible} from '${url('../src/memoryAccess.ts')}';import {makeSourceReference,materialVisible,provenanceAvailable,sourceAvailable,taskSourceAvailable,taskVisible as scopedTaskVisible,sessionVisible as scopedSessionVisible} from '${url('../src/sourceAccess.ts')}';import {taskIsMyAttention,taskBelongsToMe} from '${url('../src/taskWorkflow.ts')}';`;
+const imports=`import { buildPersonalContext } from '${url('../src/personalAssistant.ts')}';import {sharedMemoryEligible} from '${url('../src/memoryAccess.ts')}';import {makeSourceReference,materialVisible,provenanceAvailable,sourceAvailable,taskSourceAvailable,taskVisible as scopedTaskVisible,sessionVisible as scopedSessionVisible} from '${url('../src/sourceAccess.ts')}';import {taskIsMyAttention,taskBelongsToMe} from '${url('../src/taskWorkflow.ts')}';`;
 const model=await load(imports+home.slice(home.indexOf('export function homeTitle'),home.indexOf('export function Home()'))+home.slice(home.indexOf('type LocalAnswer'),home.indexOf('function referenceRoute'))+home.slice(home.indexOf('export function notificationVisible'),home.indexOf('export function Notifications')));
+const {provenanceAvailable:awaitableProvenance}=await import('../src/sourceAccess.ts');
 const {migrateStoredData}=await import('../src/stateMigrations.ts');
 function stock(){const d=initialData(),t=d.tasks.find(t=>t.id==='TASK-032');t.needsReview=false;t.sourceNeedsReview=false;t.results=['旧库存999件'];t.artifacts=[{id:'old',kind:'资料',title:'旧库存',version:1,created:'昨天',body:['旧库存999件'],reviewedAt:'昨天',needsReview:false,sourceNeedsReview:true},{id:'new',kind:'资料',title:'已核对库存',version:2,created:'今天',body:['新库存18件'],reviewedAt:'今天',needsReview:false}];return d;}
 test('revalidated task cannot reuse invalid retained artifact or legacy result',()=>{const d=stock();d.tasks.find(t=>t.id==='TASK-032').artifacts=d.tasks.find(t=>t.id==='TASK-032').artifacts.slice(0,1);assert.doesNotMatch(model.buildLocalAnswer('椅子库存',d,true).text,/999/);assert.equal(model.buildLocalAnswer('椅子库存',d,true).sources.length,0);});
@@ -26,4 +27,44 @@ test('my todo answers exclude other owners and namesakes while project queries r
  const other={...data.tasks[0],id:'other',title:'另一位同名联系人的工作',owner:data.settings.name,ownerPersonId:'namesake',sourceId:undefined,sources:[]};data.tasks.push(other);
  const personal=model.buildLocalAnswer('我的待办有哪些？',data,true);assert.equal(personal.sources.length,1);assert.doesNotMatch(personal.text,/另一位同名联系人的工作/);
  assert.equal(model.buildLocalAnswer('项目所有人的任务有哪些？',data,true).sources.length,2);
+});
+
+
+test('request-specific exclusions and disabling personalization stop applying private style', async()=>{
+ const {setPersonalizationEnabled}=await import('../src/personalAssistant.ts');
+ const data=initialData();data.settings.tone='逐步说明操作';
+ assert.match(model.buildLocalAnswer('项目预算是多少？',data,true).text,/^1\./);
+ assert.doesNotMatch(model.buildLocalAnswer('项目预算是多少？',data,true,{excludeIds:['my-profile:preferences']}).text,/^1\./);
+ assert.doesNotMatch(model.buildLocalAnswer('项目预算是多少？',setPersonalizationEnabled(data,false),true).text,/^1\./);
+ assert.equal(model.buildLocalAnswer('我是谁？',setPersonalizationEnabled(data,false),true).sources.length,0);
+});
+
+test('preference scenarios and changed boundaries are part of answer provenance',()=>{
+ const data=initialData();data.settings.tone='逐步说明操作';data.settings.retention.preferenceContext='汇报';
+ assert.doesNotMatch(model.buildLocalAnswer('项目预算是多少？',data,true,{scenario:'研究'}).text,/^1\./);
+ const answer=model.buildLocalAnswer('项目预算是多少？',data,true,{scenario:'汇报'});
+ assert.match(answer.text,/^1\./);
+ data.settings.retention.avoid='不要引用未确认的数据';
+ assert.equal(model.buildLocalAnswer('项目预算是多少？',data,true,{scenario:'汇报'}).sources.some(ref=>ref.kind==='profile'),true);
+ assert.equal((awaitableProvenance(data,answer.sources)),false);
+});
+
+
+test('explicit person selection uses only their confirmed memories and keeps namesakes separate', async()=>{
+ const {savePersonMemory,reviewPersonMemory,deletePersonMemory}=await import('../src/personMemory.ts');
+ let data=initialData();
+ data.people.push({id:'same-name',name:'王宁',role:'另一组织',company:'另一组织',note:'',voice:false,shared:false});
+ const save=(personId,text)=>{const saved=savePersonMemory(data,{personId,kind:'commitment',text});assert.equal(saved.error,undefined);data=reviewPersonMemory(saved.data,saved.id,'confirm').data;return saved.id;};
+ const ownId=save('p1','我答应周四发送预算明细。');save('same-name','另一位人物的秘密暗号。');
+ const answer=model.buildLocalAnswer('帮我准备沟通',data,true,{personId:'p1'});
+ const taskAnswer=model.buildLocalAnswer('今天需要跟进哪些待办？',data,true,{personId:'p1'});
+ assert.ok(taskAnswer.sources.some(ref=>ref.kind==='task'));
+ assert.match(answer.text,/周四发送预算/);assert.doesNotMatch(answer.text,/秘密暗号/);
+ assert.doesNotMatch(model.buildLocalAnswer('帮我准备沟通',data,true).text,/周四发送预算/);
+ assert.doesNotMatch(model.buildLocalAnswer('帮我准备沟通',data,true,{personId:'p1',excludeIds:[ownId]}).text,/周四发送预算/);
+ assert.equal(awaitableProvenance(data,answer.sources),true);
+ const removed=deletePersonMemory(data,ownId).data;
+ assert.equal(awaitableProvenance(removed,answer.sources),false);
+ data.settings.space='Oops 产品团队';
+ assert.doesNotMatch(model.buildLocalAnswer('帮我准备沟通',data,true,{personId:'p1'}).text,/周四发送预算/);
 });

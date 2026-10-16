@@ -2312,6 +2312,7 @@ object OopsEngine {
                         action.startsWith("minutes.delivery.") -> "minutes.delivery"
                         action.startsWith("assistant.delivery.") -> "assistant.delivery"
                         action.startsWith("calendar.") -> "calendar.delivery"
+                        action.startsWith("personal.context.") -> "personal.context"
                         else -> action
                     }
                 }
@@ -2329,7 +2330,8 @@ object OopsEngine {
                 }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                if (epoch == serviceEpoch) fail("feishu", error.message ?: "飞书操作未完成，请重试", context
+                if (epoch == serviceEpoch) fail(if (action.startsWith("personal.context.")) "personalContext" else "feishu", error.message ?: "个人操作未完成，请核对原请求", context
+                    .put("httpStatus", (error as? com.oops.app.backend.HttpFailure)?.status ?: 0)
                     .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: "FEISHU_REQUEST_FAILED"))
             }
         }

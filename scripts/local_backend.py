@@ -2591,7 +2591,7 @@ class Handler(BaseHTTPRequestHandler):
                          "self_owner_enabled": getattr(self.backend, "self_owner_enabled", False),
                          "named_owner_enabled": getattr(self.backend, "named_owner_enabled", False),
                          "notices": True, "meetings": True, "recordings": True, "archive_policy_version": 1, "action_source_binding_version": 1,
-                         "feishu_mobile_version": 1, "personal_object_permissions_version": 1, "minutes_delivery_confirmation_required": True,
+                         "feishu_mobile_version": 1, "personal_context_version": 1, "personal_object_permissions_version": 1, "minutes_delivery_confirmation_required": True,
                          "calendar_confirmation_required": True, "agent_delivery_confirmation_required": True, "minutes_topic_sources_version": 1,
                          "item_quality_version": 1, "asr_closure_version": 1, "content_curation_version": 1,
                          "feishu_bot": getattr(self.backend, "feishu", None) is not None,

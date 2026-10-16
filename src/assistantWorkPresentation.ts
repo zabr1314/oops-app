@@ -1,6 +1,7 @@
 import type { AppData, SourceReference, Task } from './store';
 import { generationConfigurationFingerprint, generationMaterialFingerprint, makeSourceReference, provenanceAvailable, selectedTaskMaterials, sourceTurn, taskSourceAvailable, taskVisible } from './sourceAccess';
-import { taskBelongsToMe, taskClosed } from './taskWorkflow';
+import { taskBelongsToMe, taskClosed, taskPersonalContext } from './taskWorkflow';
+import { personalContextCurrent, type PersonalContextSnapshot } from './personalAssistant';
 
 /** These are existing worker capabilities, separate from the local draft's output mode. */
 export const ASSISTANT_WORK_CHOICES = [
@@ -20,6 +21,7 @@ export type AssistantWorkPreview = {
   space?: string;
   fingerprint?: string;
   sources?: SourceReference[];
+  personalContext?: PersonalContextSnapshot;
   authorized: boolean;
   message?: string;
 };
@@ -53,7 +55,7 @@ function sourceReferences(data: AppData, task: Task): SourceReference[] {
   ].map(ref => makeSourceReference(data, ref));
 }
 export function assistantWorkConsentKey(data: AppData, task: Task, kind: AssistantWorkKind, scenario: AssistantWorkScenario): string {
-  return JSON.stringify([data.settings.space, kind, scenario, assistantWorkFingerprint(task), sourceReferences(data, task)]);
+  return JSON.stringify([data.settings.space, kind, scenario, assistantWorkFingerprint(task), sourceReferences(data, task), taskPersonalContext(data, task, kind === 'research' ? '研究' : '汇报').fingerprint]);
 }
 function workError(data: AppData, task: Task | undefined): string | undefined {
   if (!task || !taskVisible(data, task)) return '这项任务当前不可见。';
@@ -68,8 +70,9 @@ function workError(data: AppData, task: Task | undefined): string | undefined {
 export function validateAssistantWorkPreview(data: AppData, state: AssistantWorkPreview): AssistantWorkPreview {
   if (!state.requestId || !state.authorized) return state;
   const task = data.tasks.find(item => item.id === state.taskId);
-  if (data.settings.space === state.space && !workError(data, task) && task && state.fingerprint === assistantWorkFingerprint(task) && provenanceAvailable(data, state.sources)) return state;
-  return { ...state, stage: 'revoked', authorized: false, message: '任务、空间或所选资料已变化，本次允许已撤回。已有草稿保留，请重新核对范围。' };
+  const contextCurrent = !state.personalContext || personalContextCurrent(data, state.personalContext) && !!task && state.personalContext.fingerprint === taskPersonalContext(data, task, state.kind === 'research' ? '研究' : '汇报').fingerprint;
+  if (data.settings.space === state.space && !workError(data, task) && task && state.fingerprint === assistantWorkFingerprint(task) && provenanceAvailable(data, state.sources) && contextCurrent) return state;
+  return { ...state, stage: 'revoked', authorized: false, message: '任务、空间、个人上下文或所选资料已变化，本次允许已撤回。已有草稿保留，请重新核对范围。' };
 }
 export function startAssistantWorkPreview(data: AppData, taskId: string, previous: AssistantWorkPreview, permissions: { read: boolean; draft: boolean }, requestId: string): { state: AssistantWorkPreview; error?: string } {
   const state = validateAssistantWorkPreview(data, previous);
@@ -79,7 +82,8 @@ export function startAssistantWorkPreview(data: AppData, taskId: string, previou
   if (error || !task) return { state, error };
   if (!permissions.read || !permissions.draft) return { state, error: '请分别核对读取范围与个人草稿允许。' };
   if (!requestId.trim()) return { state, error: '缺少本次示例编号，请重试。' };
-  return { state: { kind: state.kind, scenario: state.scenario, stage: state.scenario === 'offline' ? 'queued' : 'preparing', requestId, taskId, space: data.settings.space, fingerprint: assistantWorkFingerprint(task), sources: sourceReferences(data, task), authorized: true } };
+  const personalContext = taskPersonalContext(data, task, state.kind === 'research' ? '研究' : '汇报');
+  return { state: { kind: state.kind, scenario: state.scenario, stage: state.scenario === 'offline' ? 'queued' : 'preparing', requestId, taskId, space: data.settings.space, fingerprint: assistantWorkFingerprint(task), sources: [...sourceReferences(data, task), ...personalContext.sources], personalContext, authorized: true } };
 }
 export function advanceAssistantWorkPreview(data: AppData, state: AssistantWorkPreview, event: 'online' | 'result' | 'recover-result', requestId: string): AssistantWorkPreview {
   const current = validateAssistantWorkPreview(data, state);

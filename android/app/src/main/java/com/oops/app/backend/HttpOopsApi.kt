@@ -74,7 +74,12 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
         if (action == "assistant.jobs" && id.isNotBlank()) require(id.matches(Regex("[A-Za-z0-9_-]{1,100}")))
         val followup = request.optString("followupId", "manual")
         if (action.startsWith("calendar.")) require(followup.matches(Regex("[A-Za-z0-9_-]{1,100}")))
-        val body = JSONObject(request.toString())
+        val body = if (action.startsWith("personal.context.")) JSONObject().apply {
+            val fields = if (action == "personal.context.snapshot") setOf("memory_ids", "scenario", "person_id")
+                else if (action == "personal.context.delete") setOf("op_id", "expected_revision", "memory_id")
+                else setOf("op_id", "expected_revision", "confirmed", "value", "memory_id", "source")
+            for (key in fields) if (request.has(key)) put(key, request.get(key))
+        } else JSONObject(request.toString())
         if (body.has("opId")) body.put("op_id", body.getString("opId"))
         if (body.has("followupId")) body.put("followup_id", followup)
         val path = when (action) {
@@ -82,6 +87,12 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
             "feishu.connect" -> "/v1/feishu/connect"
             "feishu.disconnect" -> "/v1/feishu/disconnect"
             "feishu.recipients" -> "/v1/feishu/recipients?q=" + java.net.URLEncoder.encode(request.optString("query"), "UTF-8")
+            "personal.context.read" -> "/v1/personal/context"
+            "personal.context.profile" -> "/v1/personal/context/profile"
+            "personal.context.preferences" -> "/v1/personal/context/preferences"
+            "personal.context.memory" -> "/v1/personal/context/memories"
+            "personal.context.delete" -> "/v1/personal/context/memories/delete"
+            "personal.context.snapshot" -> "/v1/personal/context/snapshot"
             "minutes.delivery.open" -> "/v1/meetings/$id/delivery"
             "minutes.delivery.save" -> "/v1/meetings/$id/delivery/save"
             "minutes.delivery.confirm" -> "/v1/meetings/$id/delivery/confirm"
@@ -98,7 +109,7 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
             else -> throw IllegalArgumentException("未知的飞书操作")
         }
         val result = if (action in setOf("feishu.status", "feishu.recipients", "minutes.delivery.open", "minutes.delivery.status",
-                "assistant.jobs", "assistant.delivery.open", "assistant.delivery.status", "calendar.open", "calendar.status"))
+                "assistant.jobs", "assistant.delivery.open", "assistant.delivery.status", "calendar.open", "calendar.status", "personal.context.read"))
             blocking(this@HttpOopsApi.request(path).get().build())
         else blocking(this@HttpOopsApi.request(path).post(body.toString().toRequestBody(JSON)).build())
         validatePersonalReply(action, request, result)
@@ -322,6 +333,50 @@ class HttpOopsApi(private val http: OkHttpClient, baseUrl: String, private val t
                 val value = row.opt("revision")
                 require((value is Int || value is Long) && (value as Number).toLong() > 0) { "服务回包缺少有效核对版本" }
                 return (value as Number).toLong()
+            }
+            if (action.startsWith("personal.context.")) {
+                fun nonnegative(key: String) {
+                    val value = result.opt(key)
+                    require((value is Int || value is Long) && (value as Number).toLong() >= 0) { "个人上下文回包缺少有效版本" }
+                }
+                nonnegative("context_revision"); nonnegative("identity_revision")
+                fun item(row: JSONObject, kind: String, id: String) {
+                    field(row, "kind", kind, true); field(row, "id", id, true); revision(row)
+                    require(row.optString("status") in setOf("current", "deleted", "needs_review", "source_unavailable")) { "个人上下文状态无效" }
+                    if (row.optString("status") == "current") {
+                        require(row.optBoolean("confirmed") && row.opt("value") is JSONObject) { "个人上下文尚未确认" }
+                        if (kind == "memory") {
+                            val value = row.getJSONObject("value")
+                            if (value.optString("category") == "person") {
+                                require(value.optString("person_id").matches(Regex("[A-Za-z0-9_-]{1,100}")) &&
+                                    value.opt("person_name") is String && value.getString("person_name").length <= 80 &&
+                                    value.optString("person_kind") in setOf("fact", "preference", "background", "commitment") &&
+                                    row.optJSONObject("source")?.optString("kind") == "manual") { "人物记忆缺少明确档案或本人记录来源" }
+                            } else require(listOf("person_id", "person_name", "person_kind").none { value.has(it) }) { "普通记忆不得混入人物关联" }
+                        }
+                    } else require(row.isNull("value")) { "失效个人上下文不得返回旧正文" }
+                }
+                if (action == "personal.context.read") {
+                    objectOrNull(result, "profile")?.let { item(it, "profile", "current") }
+                    objectOrNull(result, "preferences")?.let { item(it, "preferences", "current") }
+                    val memories = result.optJSONArray("memories") ?: throw IllegalArgumentException("服务未返回个人记忆清单")
+                    require(memories.length() <= 200) { "个人记忆清单过大" }
+                    for (index in 0 until memories.length()) {
+                        val row = memories.optJSONObject(index) ?: throw IllegalArgumentException("个人记忆格式无效")
+                        require(row.optString("id").matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "个人记忆编号无效" }
+                        item(row, "memory", row.getString("id"))
+                    }
+                } else if (action == "personal.context.snapshot") {
+                    field(result, "scenario", request.optString("scenario", "通用"), true)
+                    if (request.has("person_id")) field(result, "person_id", request.getString("person_id"), true)
+                    else require(result.isNull("person_id")) { "未选择人物时不得使用人物记忆" }
+                } else {
+                    val kind = when (action) { "personal.context.profile" -> "profile"; "personal.context.preferences" -> "preferences"; else -> "memory" }
+                    val row = result.optJSONObject("item") ?: throw IllegalArgumentException("个人修改未返回当前版本")
+                    item(row, kind, if (kind == "memory") request.getString("memory_id") else "current")
+                    require(result.optLong("operation_revision", -1) == request.getLong("expected_revision") + 1) { "个人修改回包版本不一致，请核对原操作" }
+                }
+                return result
             }
             fun operation(row: JSONObject, expectedSession: String, job: String? = null,
                           source: String? = null, followup: String? = null) {

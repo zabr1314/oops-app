@@ -47,7 +47,7 @@ export function understandingEvidence(data: AppData): { backgrounds: Memory[]; g
   if (data.settings.space !== PERSONAL_SPACE) return { backgrounds: [], goals: [] };
   const eligible = data.memories.filter(memory => !memory.deleted && memory.confirmed && !memory.needsReview && !memory.tags.some(tag => ['修订历史', '待复核', '待确认', '已停用'].includes(tag)) && sourceAvailable(data, memory) && provenanceAvailable(data, memory.sources));
   return {
-    backgrounds: eligible.filter(memory => memory.category !== '目标' && memory.tags.some(tag => ['身份', '偏好', '沟通习惯', '角色背景'].includes(tag))),
+    backgrounds: eligible.filter(memory => memory.category !== '目标' && memory.tags.some(tag => ['身份', '角色', '偏好', '沟通习惯', '角色背景'].includes(tag))),
     goals: eligible.filter(memory => memory.category === '目标'),
   };
 }

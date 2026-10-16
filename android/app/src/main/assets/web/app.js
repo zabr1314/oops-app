@@ -53,6 +53,11 @@
     historySerial: 0, historyRequestId: null, searchRequestId: null, pendingDelete: null, deletedSessions: new Set(), pendingReviewReturn: false, externalReviewHidden: false, settingsSave: null,
   };
 
+  let personalStorage;
+  try { personalStorage = window.localStorage; } catch { /* writes fail closed when a recovery journal cannot be stored */ }
+  const personalAssistant = window.OopsPersonalAssistant?.create({send,storage:personalStorage,
+    persistent:()=>S.state.backend !== 'mock',render:()=>{if(S.sheet?.kind==='personalAssistant')renderSheet();}});
+
   // ---- helpers --------------------------------------------------------------------------
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -159,14 +164,15 @@
   };
 
   function handle(type, p) {
-    const remote = ['feishu.status', 'feishu.authorization', 'feishu.recipients', 'minutes.delivery', 'assistant.jobs', 'assistant.delivery', 'calendar.delivery', 'history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'items.saved', 'tasks.list', 'tasks.board'].includes(type)
-      || type === 'error' && ['history', 'minutes', 'projects', 'review', 'items', 'tasks', 'retention'].includes(p.scope);
+    const remote = ['personal.context','feishu.status', 'feishu.authorization', 'feishu.recipients', 'minutes.delivery', 'assistant.jobs', 'assistant.delivery', 'calendar.delivery', 'history.list', 'history.open', 'history.minutes', 'history.delete', 'history.search', 'history.renamed', 'projects.list', 'project.open', 'meeting.project', 'meeting.retained', 'speaker.corrected', 'review.saved', 'items.saved', 'tasks.list', 'tasks.board'].includes(type)
+      || type === 'error' && ['personalContext','history', 'minutes', 'projects', 'review', 'items', 'tasks', 'retention'].includes(p.scope);
     if (remote) {
       if ('backendUrl' in p && S.state.backendUrl !== undefined && p.backendUrl !== S.state.backendUrl) return;
       if (p.serviceEpoch !== undefined && S.remoteEpoch !== null && p.serviceEpoch !== S.remoteEpoch) return;
       if (p.serviceEpoch !== undefined && S.remoteEpoch === null) S.remoteEpoch = p.serviceEpoch;
       if (type !== 'history.delete' && S.deletedSessions.has(p.sessionId || p.session_id)) return;
     }
+    if ((type === 'personal.context' || type === 'error') && personalAssistant?.receive(type,p)) return;
     switch (type) {
       case 'snapshot':
         if (params.get('frame') !== 'ios') applyInsets(p.insets);
@@ -1106,6 +1112,7 @@
     S.homeTasksState = {}; S.requests.tasks = {};
   }
   function clearRemoteState() {
+    personalAssistant?.reset();
     const remoteCard = !!S.card?.data?.readOnly;
     if (S.playingKey || S.loadingKey) send('clip.stop');
     S.playingKey = null; S.loadingKey = null;
@@ -1119,7 +1126,7 @@
     S.meetingRequest = { active: false };
     S.draft = null;
     if (remoteCard) S.card = null;
-    if (['feishu', 'minutesDelivery', 'assistantJobs', 'calendar', 'pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result', 'retain'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
+    if (['personalAssistant','feishu', 'minutesDelivery', 'assistantJobs', 'calendar', 'pending', 'requestError', 'review', 'minutesSource', 'projectPick', 'rename', 'draft', 'draftPending', 'result', 'retain'].includes(S.sheet?.kind) || S.sheet?.kind === 'tools' && !S.sheet.live || remoteCard && S.sheet?.kind === 'card') closeSheet();
     if (S.route.name === 'meeting') S.route = { name: 'sessions' };
     if (S.route.name === 'project') S.route = { name: 'memory' };
     renderNav();
@@ -1302,7 +1309,7 @@
 
   function memoryHtml() {
     const tab = S.memoryTab;
-    const seg = `<div class="segmented" role="tablist">${[['people', '人物'], ['projects', '项目']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
+    const seg = `<button class="button secondary" data-act="personal-open" data-tab="memory">个人助理与记忆</button><div class="segmented" role="tablist">${[['people', '人物'], ['projects', '项目']].map(([k, label]) => `<button role="tab" aria-selected="${k === tab}" data-act="memory-tab" data-value="${k}">${label}</button>`).join('')}</div>`;
     if (tab === 'people') {
       const v = S.state.voiceprint || {};
       const people = v.catalog?.people || [];
@@ -1310,8 +1317,9 @@
         <button class="card clickable ms-pending" data-act="vp-open"><span class="badge purple">声音身份</span><h3>声纹录入与匹配测试</h3><p class="meta">由本人朗读 30 秒；会议里据此判断谁在说话。</p></button>
         ${sectionTitle('团队成员')}
         ${people.length ? people.map((p) => `<section class="card"><div class="ms-person-head"><span class="avatar">${esc(initial(p.name))}</span><div><h3>${esc(p.name)}</h3>
-          <p class="meta">${p.registered ? `已录入声纹 · ${esc(SOURCE_TEXT[p.source] || p.source || '')} · ${p.seconds} 秒` : '还没有录入声纹'}</p></div></div></section>`).join('')
-          : `<p class="meta">${v.phase === 'loading' ? '正在读取…' : '还没有读到成员名单。打开声纹录入可以刷新。'}</p>`}
+          <p class="meta">${p.registered ? `已录入声纹 · ${esc(SOURCE_TEXT[p.source] || p.source || '')} · ${p.seconds} 秒` : '还没有录入声纹'}</p></div></div><button class="button secondary" data-act="person-memory-open" data-person-id="${/^[A-Za-z0-9_-]{1,100}$/.test(p.id || '')?esc(p.id):''}" data-person-label="${esc(p.name)}">关于此人的私人记忆</button></section>`).join('')
+          : `<p class="meta">${v.phase === 'loading' ? '正在读取…' : '还没有读到成员名单。仍可新建手工人物档案并记录私人记忆。'}</p>`}
+        <button class="button secondary" data-act="person-memory-open">手工人物档案与私人记忆</button>
       </div>`;
     }
     const items = S.projects.items;
@@ -1359,6 +1367,7 @@
         <button class="ms-space" data-act="self-pick">${esc(s.selfName ? '切换本人' : '选择本人')}${icon('caret-down', 13)}</button></section>
       ${group('账户与身份', [
         listRow({ act: 'self-pick', ic: 'user-circle', title: '当前身份', sub: s.selfName || '未选择' }),
+        listRow({ act: 'personal-open', ic: 'sparkle', title: '个人助理与记忆', sub: '本人档案、回答偏好与确认记忆 · 同账号刷新同步' }),
         listRow({ act: 'vp-open', ic: 'waveform', title: '声音身份与许可', sub: '单独同意录入，姓名核对不代表声纹授权' })])}
       ${group('聆听与设备', [
         listRow({ act: 'go', data: 'data-route="device"', ic: 'bluetooth', title: '设备与开机自动聆听', sub: '首配独立选择 · 暂停与停止优先 · 设备示例' }),
@@ -1510,6 +1519,7 @@
   // ---- sheets -----------------------------------------------------------------------------
 
   function openSheet(sheet) {
+    if (S.sheet?.kind === 'personalAssistant' && sheet.kind !== 'personalAssistant') personalAssistant?.close();
     if (S.sheet?.kind === 'voiceprint' && sheet.kind !== 'voiceprint') {
       if (['saving', 'testing'].includes(S.state.voiceprint?.phase)) return toast('请等待当前请求结束');
       send('voiceprint.cancel');
@@ -1521,6 +1531,7 @@
   }
 
   function closeSheet() {
+    if (S.sheet?.kind === 'personalAssistant') personalAssistant?.close();
     if (S.sheet?.kind === 'voiceprint') {
       if (['saving', 'testing'].includes(S.state.voiceprint?.phase)) return toast('请等待当前请求结束');
       send('voiceprint.cancel');
@@ -1568,6 +1579,7 @@
       feishu: feishuHtml,
       minutesDelivery: minutesDeliveryHtml,
       assistantJobs: assistantJobsHtml,
+      personalAssistant: () => frame('个人助理与记忆',personalAssistant?.html() || '<p>请更新应用后使用个人助理。</p>'),
       calendar: calendarHtml,
       requestError: () => frame('暂时无法读取', `<p class="error-text">${esc(S.sheet.error)}</p><button class="button primary" type="button" data-act="meeting-retry"><span>重新打开会议</span></button>`),
       projectPick: projectPickHtml,
@@ -2056,6 +2068,7 @@
     const before = feishuAccountKey(), wasAuthorizing = S.feishu.status === 'authorizing';
     Object.assign(S.feishu, {bindingRevision:p.binding_revision, status:({bound:'connected',unbound:'disconnected'}[p.status] || p.status || 'disconnected'), account:p.account || null, capabilities:p.capabilities || {}, busy:false, error:p.message || null});
     if (wasAuthorizing && S.feishu.status === 'disconnected') S.feishu.status = 'cancelled';
+    personalAssistant?.identity(feishuAccountKey(),p.binding_revision,S.feishu.status === 'connected' && Number.isSafeInteger(p.binding_revision),S.state.backend + ':' + (S.state.backendUrl || ''));
     if (before !== feishuAccountKey() || S.feishu.status !== 'connected') {
       S.feishu.recipients = []; S.feishu.knownRecipients = {}; S.feishu.recipientSource = null; S.feishu.recipientSearched = false; S.feishu.recipientRequestId = null;
       for (const d of S.deliveries.values()) d.confirmed = false;
@@ -2066,6 +2079,7 @@
   }
   function onFeishuAuthorization(p) {
     if (p.requestId && p.requestId !== S.feishu.requestId) return;
+    personalAssistant?.reset();
     S.feishu.busy = false; S.feishu.status = p.status || 'authorizing';
     S.feishu.error = p.message || (p.authorization_url ? '请在飞书官方授权页确认，完成后返回并刷新状态。' : '未获得可用授权页面，请刷新后重试。');
     // The native shell validates and opens the official HTTPS URL. Never open an arbitrary URL here.
@@ -2735,10 +2749,18 @@
     'project-retry': () => { loadProject(); render(); },
     'meeting-retry': () => openMeeting(S.sheet.sessionId),
     'feishu-open': openFeishu,
+    'personal-open': el => { openSheet({kind:'personalAssistant'});personalAssistant?.open({memory:el?.dataset.tab==='memory'});feishuRequest('feishu.status'); },
+    'person-memory-open': el => {
+      const people=S.state.voiceprint?.catalog?.people || [];
+      const person=el.dataset.personId?people.find(person=>person.id===el.dataset.personId):el.dataset.personLabel?{name:el.dataset.personLabel}:undefined;
+      if(el.dataset.personId&&!person)return toast('人物目录已变化，请刷新后再选择',true);
+      openSheet({kind:'personalAssistant'});personalAssistant?.open({memory:true,person,people});feishuRequest('feishu.status');
+    },
+    'personal-context': el => personalAssistant?.action(el.dataset.paAction,el.dataset.id),
     'feishu-connect': () => { if (!S.feishu.busy) { feishuRequest('feishu.connect'); S.feishu.status = 'authorizing'; renderSheet(); } },
     'feishu-refresh': () => { feishuRequest('feishu.status'); renderSheet(); },
     'feishu-disconnect-prompt': () => { S.sheet.disconnectConfirm = true; renderSheet(); },
-    'feishu-disconnect': () => { for (const d of S.deliveries.values()) d.confirmed = false; feishuRequest('feishu.disconnect'); renderSheet(); },
+    'feishu-disconnect': () => { personalAssistant?.reset();for (const d of S.deliveries.values()) d.confirmed = false; feishuRequest('feishu.disconnect'); renderSheet(); },
     'delivery-open': () => openMinutesDelivery(S.history?.session_id),
     'delivery-connect': () => { S.feishuReturnSession = S.sheet.sessionId;S.feishuReturnJob=S.sheet.jobId;S.feishuReturnCalendar=null;openFeishu(); },
     'delivery-return': () => { const sid=S.feishuReturnSession,job=S.feishuReturnJob,calendar=S.feishuReturnCalendar;S.feishuReturnSession=null;S.feishuReturnJob=null;S.feishuReturnCalendar=null;if(calendar)openCalendar(sid,calendar);else openMinutesDelivery(sid,job); },
@@ -3013,6 +3035,7 @@
     if (act) { e.stopPropagation(); act(el); }
   });
   $('sheet').addEventListener('change', (e) => {
+    if (e.target.dataset?.paField) personalAssistant?.input(e.target.dataset.paField,e.target.type === 'checkbox' ? !!e.target.checked : e.target.value);
     if (e.target.id === 'delivery-permission') { deliveryEdit('permission', e.target.value); renderSheet(); }
     if (e.target.dataset?.deliveryRecipient) {
       const d = activeDelivery(); if (d?.draft && !deliveryBusy(d) && !deliverySent(d)) {
@@ -3040,6 +3063,7 @@
     }
   });
   $('sheet').addEventListener('input', (e) => {
+    if (e.target.dataset?.paField && e.target.type !== 'checkbox') { personalAssistant?.input(e.target.dataset.paField,e.target.value);const confirm=$('pa-confirm'),save=$('pa-save');if(confirm)confirm.checked=false;if(save)save.disabled=true; }
     if (e.target.id === 'delivery-title') deliveryEdit('title', e.target.value);
     if (e.target.id === 'delivery-content') deliveryEdit('content', e.target.value);
     if (e.target.id === 'delivery-search') S.feishu.recipientQuery = e.target.value;

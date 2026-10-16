@@ -1,0 +1,14 @@
+.personal-assistant-screen { padding-bottom: 24px; }
+.personal-assistant-hero { background: #f0ecff; border: 1px solid #ded5ff; }
+.personal-assistant-hero h2 { margin: 16px 0 12px; color: #30205f; font-size: 29px; line-height: 1.35; letter-spacing: -.8px; }
+.personal-assistant-hero p { color: #564674; }
+.personal-assistant-counts { display: flex; gap: 32px; margin-top: 22px; font-size: 12px; color: #564674; }
+.personal-assistant-counts strong { display: block; color: #30205f; font-size: 24px; margin-bottom: 4px; }
+.personal-assistant-copy { white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0; line-height: 1.7; }
+.personal-context-picker { padding: 14px 16px; border: 1px solid #e1daed; border-radius: 16px; background: #faf8ff; }
+.personal-context-picker > summary { cursor: pointer; color: #403451; font-size: 14px; font-weight: 600; }
+.personal-context-picker > summary > span { float: right; font-weight: 400; color: #64576f; }
+.personal-context-picker > .stack { margin-top: 16px; }
+.personal-context-entry { border-top: 1px solid #e8e1f0; padding-top: 12px; }
+.personal-context-entry .check-row { align-items: flex-start; line-height: 1.6; }
+.personal-context-entry .check-row span { overflow-wrap: anywhere; white-space: pre-wrap; }

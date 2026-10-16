@@ -2515,5 +2515,87 @@
         "exact": true
       }
     ]
+  },
+  {
+    "key": "f24-personal-assistant",
+    "title": "个性化助理 · 场景背景与学习开关",
+    "group": "设置",
+    "route": {
+      "view": "settings-personal-assistant"
+    },
+    "scene": "personal-assistant"
+  },
+  {
+    "key": "f25-personal-habit-review",
+    "title": "个人习惯 · 原话核对、修改与忽略",
+    "group": "记忆",
+    "route": {
+      "view": "settings-personal-assistant",
+      "mode": "pending"
+    },
+    "scene": "personal-assistant"
+  },
+  {
+    "key": "f26-personal-context",
+    "title": "问答 · 本次个人背景选择",
+    "group": "首页",
+    "route": {
+      "view": "assistant"
+    },
+    "scene": "personal-assistant",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "本次使用的背景 4 项",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "pa04-person-memory",
+    "title": "人物记忆 · 正在使用",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory"
+  },
+  {
+    "key": "pa05-person-memory-review",
+    "title": "人物记忆 · 新信息核对",
+    "group": "记忆",
+    "route": {
+      "view": "memory-person",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "tab",
+        "name": "待确认",
+        "exact": true
+      }
+    ]
+  },
+  {
+    "key": "pa06-person-memory-context",
+    "title": "问答 · 指定人物与记忆选择",
+    "group": "首页",
+    "route": {
+      "view": "assistant",
+      "id": "person-example-ning"
+    },
+    "scene": "person-memory",
+    "actions": [
+      {
+        "kind": "click",
+        "role": "button",
+        "name": "本次使用的背景 6 项",
+        "exact": true
+      }
+    ]
   }
 ]

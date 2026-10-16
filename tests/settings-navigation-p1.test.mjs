@@ -7,7 +7,7 @@ import { transformWithOxc } from 'vite';
 
 const prototype = readFileSync(new URL('../src/Prototype.tsx', import.meta.url), 'utf8');
 const settings = readFileSync(new URL('../src/features/MemorySettings.tsx', import.meta.url), 'utf8');
-const expectedRoutes = ['settings-account', 'settings-usage', 'settings-identity', 'settings-preferences', 'settings-voice', 'settings-devices', 'settings-listening', 'settings-tools', 'settings-notifications', 'settings-privacy', 'settings-spaces'];
+const expectedRoutes = ['settings-account', 'settings-usage', 'settings-personal-assistant', 'settings-identity', 'settings-preferences', 'settings-voice', 'settings-devices', 'settings-listening', 'settings-tools', 'settings-notifications', 'settings-privacy', 'settings-spaces'];
 
 async function load(code, names, bindings = {}) {
   const plainCode = code.replace(/\bexport (?=function)/g, '').replace(/\bexport \{[^}]+\};/g, '');

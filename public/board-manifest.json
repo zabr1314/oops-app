@@ -1,32 +1,22 @@
 {
   "metadata": {
-    "revision": "p1-device-settings-20261012",
-    "logicReviewedAt": "2026-10-13",
+    "revision": "personal-people-memory-20261016",
+    "logicReviewedAt": "2026-10-16",
     "browserVerified": true,
     "screenshotRefreshPending": false,
     "changedViews": [
-      "home",
-      "memory-project",
-      "session-create",
-      "session-detail",
-      "session-listening",
-      "session-mode",
+      "settings-personal-assistant",
+      "assistant",
+      "task-plan",
+      "memory",
       "settings",
-      "settings-deskpet",
-      "settings-device",
-      "settings-devices",
-      "settings-listening",
-      "settings-members",
-      "settings-pair",
-      "settings-retention",
-      "settings-sharing",
-      "settings-spaces"
+      "memory-person"
     ],
-    "capturedAt": "2026-10-13T02:26:14.920Z",
+    "capturedAt": "2026-10-16T10:55:16.847823+00:00",
     "capturedFrom": "2026-10-12T13:54:13.404Z",
     "app": "https://oops-app-demo-hyl-20261008.giftedprofessor516.chatgpt.site/",
-    "screenshots": 194,
-    "coverage": 217
+    "screenshots": 200,
+    "coverage": 223
   },
   "pages": [
     {
@@ -2542,6 +2532,88 @@
           "kind": "click",
           "role": "switch",
           "name": "开机自动聆听",
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "f24-personal-assistant",
+      "title": "个性化助理 · 场景背景与学习开关",
+      "group": "设置",
+      "route": {
+        "view": "settings-personal-assistant"
+      },
+      "scene": "personal-assistant"
+    },
+    {
+      "key": "f25-personal-habit-review",
+      "title": "个人习惯 · 原话核对、修改与忽略",
+      "group": "记忆",
+      "route": {
+        "view": "settings-personal-assistant",
+        "mode": "pending"
+      },
+      "scene": "personal-assistant"
+    },
+    {
+      "key": "f26-personal-context",
+      "title": "问答 · 本次个人背景选择",
+      "group": "首页",
+      "route": {
+        "view": "assistant"
+      },
+      "scene": "personal-assistant",
+      "actions": [
+        {
+          "kind": "click",
+          "role": "button",
+          "name": "本次使用的背景 4 项",
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "pa04-person-memory",
+      "title": "人物记忆 · 正在使用",
+      "group": "记忆",
+      "route": {
+        "view": "memory-person",
+        "id": "person-example-ning"
+      },
+      "scene": "person-memory"
+    },
+    {
+      "key": "pa05-person-memory-review",
+      "title": "人物记忆 · 新信息核对",
+      "group": "记忆",
+      "route": {
+        "view": "memory-person",
+        "id": "person-example-ning"
+      },
+      "scene": "person-memory",
+      "actions": [
+        {
+          "kind": "click",
+          "role": "tab",
+          "name": "待确认",
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "pa06-person-memory-context",
+      "title": "问答 · 指定人物与记忆选择",
+      "group": "首页",
+      "route": {
+        "view": "assistant",
+        "id": "person-example-ning"
+      },
+      "scene": "person-memory",
+      "actions": [
+        {
+          "kind": "click",
+          "role": "button",
+          "name": "本次使用的背景 6 项",
           "exact": true
         }
       ]
@@ -5913,6 +5985,104 @@
       ],
       "key": "D12",
       "group": "设置"
+    },
+    {
+      "id": "PA01",
+      "title": "个性化助理 · 场景背景与学习开关",
+      "module": "设置",
+      "route": {
+        "view": "settings-personal-assistant"
+      },
+      "scene": "personal-assistant",
+      "shot": "f24-personal-assistant",
+      "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。",
+      "key": "PA01",
+      "group": "设置"
+    },
+    {
+      "id": "PA02",
+      "title": "个人习惯 · 原话核对、修改与忽略",
+      "module": "记忆",
+      "route": {
+        "view": "settings-personal-assistant",
+        "mode": "pending"
+      },
+      "scene": "personal-assistant",
+      "shot": "f25-personal-habit-review",
+      "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。",
+      "key": "PA02",
+      "group": "记忆"
+    },
+    {
+      "id": "PA03",
+      "title": "问答 · 本次个人背景选择",
+      "module": "首页",
+      "route": {
+        "view": "assistant"
+      },
+      "scene": "personal-assistant",
+      "shot": "f26-personal-context",
+      "note": "本地隔离示例：本人确认、场景使用和来源可追溯。真实账号同步由Android个人会话接入；示例不访问真实服务。",
+      "key": "PA03",
+      "group": "首页"
+    },
+    {
+      "key": "PA04",
+      "title": "人物记忆 · 正在使用",
+      "group": "记忆",
+      "route": {
+        "view": "memory-person",
+        "id": "person-example-ning"
+      },
+      "scene": "person-memory",
+      "id": "PA04",
+      "module": "记忆",
+      "shot": "pa04-person-memory",
+      "note": "私人确认的人物信息；按稳定人物档案选择，网页隔离示例，安卓手工记忆同步需更新服务与安装包。"
+    },
+    {
+      "key": "PA05",
+      "title": "人物记忆 · 新信息核对",
+      "group": "记忆",
+      "route": {
+        "view": "memory-person",
+        "id": "person-example-ning"
+      },
+      "scene": "person-memory",
+      "actions": [
+        {
+          "kind": "click",
+          "role": "tab",
+          "name": "待确认",
+          "exact": true
+        }
+      ],
+      "id": "PA05",
+      "module": "记忆",
+      "shot": "pa05-person-memory-review",
+      "note": "私人确认的人物信息；按稳定人物档案选择，网页隔离示例，安卓手工记忆同步需更新服务与安装包。"
+    },
+    {
+      "key": "PA06",
+      "title": "问答 · 指定人物与记忆选择",
+      "group": "首页",
+      "route": {
+        "view": "assistant",
+        "id": "person-example-ning"
+      },
+      "scene": "person-memory",
+      "actions": [
+        {
+          "kind": "click",
+          "role": "button",
+          "name": "本次使用的背景 6 项",
+          "exact": true
+        }
+      ],
+      "id": "PA06",
+      "module": "首页",
+      "shot": "pa06-person-memory-context",
+      "note": "私人确认的人物信息；按稳定人物档案选择，网页隔离示例，安卓手工记忆同步需更新服务与安装包。"
     }
   ]
 }
