@@ -6,6 +6,7 @@ The bot (feishu_actions.FeishuActions.analyse) calls `vote` on the cleaned resul
 Topics are free text, so they are not voted item by item: the run whose topics agree most with the others is used.
 """
 import re
+import datetime as dt
 
 RUNS = 3
 
@@ -17,11 +18,50 @@ def _chars(text):
 
 def same_item(a, b, text_key):
     """Two items from different runs are one when they cite overlapping sentences, or say nearly the same thing."""
-    ids_a, ids_b = set(a.get("ids") or ([a["id"]] if a.get("id") else [])), set(b.get("ids") or ([b["id"]] if b.get("id") else []))
+    if text_key == 'title' and ('start' in a or 'start' in b):
+        if schedule_key(a) != schedule_key(b):
+            return False
+    ids_a, ids_b = source_ids(a), source_ids(b)
     if ids_a & ids_b:
         return True
     x, y = _chars(a.get(text_key)), _chars(b.get(text_key))
     return bool(x and y) and len(x & y) / len(x | y) >= 0.5
+
+
+def source_ids(item):
+    return set(item.get('ids') or ([item['id']] if item.get('id') else []))
+
+
+def schedule_key(item):
+    try:
+        start = dt.datetime.fromisoformat(str(item.get('start')).replace('Z', '+00:00'))
+        if start.tzinfo is None:
+            return None
+        return start.astimezone(dt.timezone.utc).isoformat(), item.get('minutes')
+    except (ValueError, TypeError):
+        return None
+
+
+def vote_follow_ups(runs, quorum):
+    """Vote source-bound schedules; conflicting times remain human-review questions."""
+    candidates = [(r, f) for r, run in enumerate(runs) for f in run.get('follow_ups', [])]
+    conflicts = []
+    for n, (r, a) in enumerate(candidates):
+        for s, b in candidates[:n]:
+            if r == s or not source_ids(a) & source_ids(b):
+                continue
+            if schedule_key(a) != schedule_key(b):
+                ids = sorted(source_ids(a) | source_ids(b))
+                if not any(set(c['ids']) == set(ids) for c in conflicts):
+                    conflicts.append(dict(topic='日程时间或时长需核对',
+                        views=f"{a.get('title', '安排')}：{a.get('start')} / {a.get('minutes')}分钟；"
+                              f"{b.get('title', '安排')}：{b.get('start')} / {b.get('minutes')}分钟",
+                        ids=ids))
+    # One conflict applies to all copies of this source-bound event, including a third agreeing run.
+    conflict_ids = set().union(*(set(c['ids']) for c in conflicts)) if conflicts else set()
+    allowed = [[f for f in run.get('follow_ups', []) if schedule_key(f) is not None
+                and not source_ids(f) & conflict_ids] for run in runs]
+    return vote_items(allowed, 'title', quorum), conflicts
 
 
 def vote_items(runs, text_key, quorum):
@@ -75,7 +115,8 @@ def vote(runs):
     out["actions"] = vote_items([r["actions"] for r in runs], "task", quorum)
     out["undecided"] = vote_items([r.get("undecided") or [] for r in runs], "topic", quorum)
     out["open_questions"] = vote_items([r["open_questions"] for r in runs], "question", quorum)
-    out["follow_ups"] = vote_items([r["follow_ups"] for r in runs], "title", quorum)
+    out["follow_ups"], conflicts = vote_follow_ups(runs, quorum)
+    out["undecided"].extend(conflicts)
     substantive = sum(1 for r in runs if r["substantive"]) >= quorum
     useful = out["decisions"] or out["actions"] or out["topics"] or out["undecided"] or out["open_questions"] or out["follow_ups"]
     out["substantive"] = bool(useful) and substantive

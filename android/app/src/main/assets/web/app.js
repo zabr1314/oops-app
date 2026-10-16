@@ -134,6 +134,7 @@
       if (p.serviceEpoch !== undefined && S.remoteEpoch === null) S.remoteEpoch = p.serviceEpoch;
       if (type !== 'history.delete' && S.deletedSessions.has(p.sessionId || p.session_id)) return;
     }
+    if (minutesSync?.receive(type, p)) return;
     switch (type) {
       case 'snapshot':
         if (params.get('frame') !== 'ios') applyInsets(p.insets);
@@ -150,6 +151,7 @@
         }
         enter();
         render();
+        resumeMinutesSync();
         break;
       case 'state': setState(p); break;
       case 'capture.assetsExpired': {
@@ -167,6 +169,7 @@
         setState({ backend: p.backend, backendUrl: p.backendUrl });
         S.remoteEpoch = p.serviceEpoch;
         if (changed && !urlChanged) { clearRemoteState(); enter(); render(); }
+        resumeMinutesSync();
         break;
       }
       case 'notice': showNotice(p); break;
@@ -665,7 +668,7 @@
     const counts = m.digest_counts || {};
     const preview = [counts.decision ? `决定 ${counts.decision}` : '', counts.commitment ? `待办 ${counts.commitment}` : '', counts.constraint ? `约束 ${counts.constraint}` : ''].filter(Boolean).join(' · ') || `${m.utterance_count} 句原话`;
     return `<div class="session-list-item"><button class="card clickable" data-act="meeting-open" data-id="${esc(m.session_id)}">
-      <div class="session-card-top"><span class="session-kind">${icon('users-three')}</span>${pending ? `<span class="badge amber">待核对 ${pending}</span>` : '<span class="badge gray">已保存</span>'}</div>
+      <div class="session-card-top"><span class="session-kind">${icon('users-three')}</span>${pending ? `<span class="badge amber">待核对 ${pending}</span>` : '<span class="badge gray">已保存</span>'}${minutesBadge(m)}</div>
       <h3>${esc(meetingName(m))}</h3>
       <p class="meta">${formatDate(m.started_at)}${duration(m) ? ` · ${duration(m)}` : ''} · 会议</p>
       <p class="session-preview">${esc(preview)}</p>
@@ -967,6 +970,8 @@
     S.homeTasksState = {}; S.requests.tasks = {};
   }
   function clearRemoteState() {
+    minutesSync?.reset();
+    clearTimeout(minutesReadyTimer); minutesReadyCount = 0;
     const remoteCard = !!S.card?.data?.readOnly;
     if (S.playingKey || S.loadingKey) send('clip.stop');
     S.playingKey = null; S.loadingKey = null;
@@ -1825,6 +1830,7 @@
     S.deletedSessions.add(sid); S.pendingDelete = null;
     S.historyItems = S.historyItems?.filter(x => x.session_id !== sid) || null;
     S.minutes.delete(sid); S.projects.items = null;
+    minutesSync?.remove(sid);
     if (S.projects.open) S.projects.open = visibleProject(S.projects.open);
     if (S.history?.session_id === sid) S.history = null;
     if (S.meetingRequest?.sessionId === sid) { S.meetingRequest.active = false; S.pendingMeetingId = null; }
@@ -1855,6 +1861,7 @@
     if (S.meetingRequest) S.meetingRequest.active = false;
     S.pendingMeetingId = null;
     S.history = p;
+    minutesSync?.select(p);
     requestMinutes(p.session_id);
     if (S.pendingReview === p.session_id) { S.pendingReview = null; return startReview(p); }
     if (S.sheet?.kind === 'pending') closeSheet();
@@ -1871,16 +1878,85 @@
 
   // ---- read-only AI minutes: query stored results, never generate or send --------------------
 
+  let minutesReadyTimer = null, minutesReadyCount = 0, minutesReadyLastAt = 0;
+  const minutesSync = window.OopsMinutesSync?.create({
+    send,
+    isBusy: sid => S.minutes.get(sid)?.loading && Date.now() - (S.minutes.get(sid).startedAt || 0) < 25000,
+    onStart(sid, requestId) {
+      const old = S.minutes.get(sid);
+      S.minutes.set(sid, { ...old, requestId, automatic: true, loading: !old?.data, startedAt: Date.now() });
+    },
+    onList(p) {
+      const next = p.items.filter(r => !S.deletedSessions.has(r.session_id));
+      const changed = JSON.stringify(next) !== JSON.stringify(S.historyItems);
+      S.historyItems = next;
+      if (changed && !S.sheet && ['home', 'sessions'].includes(S.route.name)
+          && !document.activeElement?.matches('input,textarea')) {
+        const top = $('scroll').scrollTop; render(); $('scroll').scrollTop = top;
+      } else patchMinutesUi();
+    },
+    onResult: p => onMinutes(p),
+    onListFailure() {
+      for (const sid of S.minutes.keys()) S.minutes.set(sid, { error: '暂未同步成功，将自动重试。', automatic: true });
+      patchMinutesUi();
+    },
+    onFailure(sid, message) {
+      S.minutes.set(sid, { error: message, automatic: true });
+      patchMinutesUi(sid);
+    },
+    onRemove(sid) { S.minutes.delete(sid); patchMinutesUi(sid); },
+    onInvalidate(sid) { S.minutes.delete(sid); patchMinutesUi(sid); },
+    onReady() {
+      minutesReadyCount++;
+      clearTimeout(minutesReadyTimer);
+      minutesReadyTimer = setTimeout(() => {
+        if (!document.hidden && Date.now() - minutesReadyLastAt > 30000) {
+          toast(`${minutesReadyCount}份会后结果已同步，可在会话中查看`);
+          minutesReadyLastAt = Date.now();
+        }
+        minutesReadyCount = 0;
+      }, 1500);
+    },
+  });
+  function resumeMinutesSync() {
+    if (!document.hidden && navigator.onLine !== false && S.state.backend && S.state.backend !== 'mock') minutesSync?.start();
+    else minutesSync?.pause();
+  }
+  function pauseMinutesSync() {
+    minutesSync?.pause(); S.minutes.clear();
+    clearTimeout(minutesReadyTimer); minutesReadyCount = 0;
+    patchMinutesUi();
+  }
+  function minutesBadge(m) {
+    if (!m.ended_at || Number(m.utterance_count) < 5 || m.transcript_status === 'expired') return '';
+    const p = S.minutes.get(m.session_id), status = p?.data?.status;
+    const label = status === 'ready' ? '纪要已同步' : status === 'pending' ? '整理中' : p?.error ? '同步待重试' : status === 'unavailable' ? '暂无当前纪要' : '纪要自动同步';
+    return `<span class="badge gray" data-minutes-status="${esc(m.session_id)}">${label}</span>`;
+  }
+  function patchMinutesUi(sid) {
+    document.querySelectorAll('[data-minutes-status]').forEach(el => {
+      const row = S.historyItems?.find(r => r.session_id === el.dataset.minutesStatus);
+      if (row) el.outerHTML = minutesBadge(row);
+    });
+    if (S.route.name === 'meeting' && S.history && (!sid || S.history.session_id === sid)) {
+      const box = document.querySelector('.native-minutes');
+      if (box) box.outerHTML = minutesHtml(S.history.session_id);
+      if (S.sheet?.kind === 'minutesSource' && S.minutes.get(S.history.session_id)?.data?.status !== 'ready') closeSheet();
+    }
+  }
+
   function requestMinutes(sessionId) {
     const requestId = `minutes-${++S.minutesRequest}`;
-    S.minutes.set(sessionId, { loading: true, requestId });
+    S.minutes.set(sessionId, { loading: true, requestId, startedAt: Date.now() });
     send('history.minutes', { sessionId, requestId });
   }
   function onMinutes(p) {
     const current = S.minutes.get(p.session_id);
-    if (!current || p.requestId !== current.requestId) return;
+    if (!current || p.requestId !== current.requestId) return false;
     S.minutes.set(p.session_id, { requestId: current.requestId, data: p });
-    if (S.route.name === 'meeting' && S.history?.session_id === p.session_id) render();
+    minutesSync?.observe(p);
+    patchMinutesUi(p.session_id);
+    return true;
   }
   function refreshMinutesAfterReview(sessionId) {
     if (S.sheet?.kind === 'minutesSource' && S.sheet.sessionId === sessionId) closeSheet();
@@ -1915,7 +1991,7 @@
         ${m.substantive === false ? '<p class="meta">这场对话没有需要整理的实质内容。</p>' : ''}
         ${p.doc_url ? `<button class="button secondary" type="button" data-act="minutes-doc"><span>查看飞书纪要文档</span></button>` : ''}`;
     } else if (p.status === 'pending') {
-      body = `<p>${p.reason === 'in_progress' ? '会议仍在进行，AI 纪要尚未整理。' : '会后纪要正在整理，稍后可重新查询。'}</p><p class="meta">查询状态不会重新生成或发送纪要。</p>`;
+      body = `<p>${p.reason === 'in_progress' ? '会议仍在进行，AI 纪要尚未整理。' : '会后纪要正在整理，完成后会自动同步到这里。'}</p><p class="meta">也可继续使用App，稍后会提示结果已同步。</p>`;
     } else {
       const messages = { source_changed: '来源已经变化，旧版纪要不能作为当前结果继续使用。', bot_off: '服务器尚未启用纪要机器人。', before_bot: '这场会议早于纪要机器人启用，暂无 AI 纪要。', no_end: '会议结束状态尚不明确，暂无 AI 纪要。', failed: '服务暂时没有生成可用纪要。', unsupported: '当前服务尚未提供 AI 纪要。', mock: '浏览器仅展示流程，不生成真实 AI 纪要。' };
       body = `<p>${esc(p.message || messages[p.reason] || '当前没有可用的 AI 纪要。')}</p>${p.reason === 'source_changed' ? '<p class="meta">请以最新原文和人工核对结果为准；旧文档仅供查看历史。</p>' : ''}
@@ -2666,12 +2742,16 @@
     if (e.target.id === 'meeting-search') { S.transcriptFilter.query = e.target.value; const pos = e.target.selectionStart; render(); const i = $('meeting-search'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }
   });
 
-  window.OopsResume = () => resumeReviewReturn(true);
+  window.OopsResume = () => { resumeReviewReturn(true); resumeMinutesSync(); };
   document.addEventListener('visibilitychange', () => {
+    if (document.hidden) pauseMinutesSync();
+    else resumeMinutesSync();
     if (document.hidden && S.pendingReviewReturn) S.externalReviewHidden = true;
     else resumeReviewReturn();
   });
   window.addEventListener('focus', () => resumeReviewReturn());
+  window.addEventListener('online', resumeMinutesSync);
+  window.addEventListener('offline', pauseMinutesSync);
   $('root').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.isComposing) return;
     if (e.target.id === 'live-ask') { e.preventDefault(); askSubmit(e.target.value.trim(), false); }
