@@ -1,0 +1,19 @@
+/* After the meeting: same three columns, items instead of sentences. Shared layout lives in funnel-studio.css. */
+.after-studio-items { display: grid; gap: 4px; padding: 6px; overflow-y: auto; flex: 1; }
+.after-item-button { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; width: 100%; text-align: left; border: 0; border-radius: 10px; padding: 9px 10px; background: transparent; color: var(--text); cursor: pointer; font-size: 13px; line-height: 1.5; }
+.after-item-button:hover { background: var(--panel-2); }
+.after-item-button.is-selected { background: #2a2242; box-shadow: inset 3px 0 0 #fff; }
+.after-item-button small { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--accent); white-space: nowrap; }
+.after-item-button em { display: block; font-style: normal; font-size: 11px; color: var(--faint); }
+.after-item-empty { padding: 12px; color: var(--muted); font-size: 12px; }
+.after-detail-status { display: inline-block; margin: 0 0 8px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--accent); font-size: 12px; }
+.after-detail-copy { font-size: 14px; }
+.after-detail-evidence { margin: 6px 0; padding: 8px 12px; border-radius: 10px; background: #110f1a; border-left: 3px solid #8fd8ff; }
+.after-detail-evidence small { color: var(--muted); font-size: 11px; }
+.after-detail-evidence p { margin: 2px 0 0; }
+.after-detail-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 10px 0; }
+.after-detail-stats > div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 11px; color: var(--muted); }
+.after-detail-stats b { display: block; font-size: 16px; color: var(--text); }
+.after-detail-list { margin: 4px 0; padding-left: 18px; }
+.after-detail-link { border: 0; background: none; color: #d9ceff; padding: 3px 0; text-align: left; cursor: pointer; font-size: 13px; }
+.after-detail-link:hover { text-decoration: underline; }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Enforce source retention on Oops reanalysis copies
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+AccuracySec=1s
+Unit=oops-reanalysis-cleanup.service
+
+[Install]
+WantedBy=timers.target

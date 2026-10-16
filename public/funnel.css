@@ -283,3 +283,27 @@ body.mode-after .counters, body.mode-after .status { display: none; }
   .card, .doc li, .seg, .pipeline li::after { transition: none; animation: none; }
   .queue li { animation: none; }
 }
+
+/* Historical processing evidence stays readable beside the existing replay controls. */
+.history-panel { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.history-panel[hidden] { display: none; }
+.history-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.history-controls label { color: var(--jev); }
+.history-controls select { flex: 1; min-width: 220px; max-width: 720px; }
+.history-panel .source-note { margin: 8px 0 0; }
+.source-note a { color: var(--jev); margin-left: 8px; }
+.evidence-origin { font-size: 10px; color: var(--muted); }
+.trace-details { color: var(--muted); font-size: 11px; }
+.trace-details summary { cursor: pointer; }
+.trace-details span { white-space: normal; overflow-wrap: anywhere; }
+.dotgrid .unknown { background: var(--muted); }
+.l-unknown { color: var(--muted); }
+
+.stream .call-detail { grid-column: 1 / -1; padding: 6px 8px; white-space: normal; border: 1px solid var(--line); background: var(--bg); min-width: 0; }
+.call-detail summary { color: var(--jev); cursor: pointer; }
+.call-detail p { margin: 8px 0; overflow-wrap: anywhere; }
+.call-detail pre { overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); max-height: 280px; }
+.probabilities { width: 100%; border-collapse: collapse; font-size: 11px; }
+.probabilities th, .probabilities td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 5px; overflow-wrap: anywhere; }
+.probabilities .chosen { color: var(--code); }
+.probabilities td:last-child { font-variant-numeric: tabular-nums; }

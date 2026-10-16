@@ -396,7 +396,7 @@ class Meetings:
                     row['utterances'], row['notices'] = [], []
                     row['transcript_status'] = 'expired'
                     row['transcript_expired_at'] = policy['transcript_expires_at']
-                    for key in (*MEETING_DERIVED, 'last_sync_at', 'asr_error'):
+                    for key in (*MEETING_DERIVED, 'last_sync_at', 'asr_error', 'processing_trace'):
                         row.pop(key, None)
                     self.write(row['session_id'], row)
                     count += 1
@@ -584,6 +584,9 @@ class Meetings:
             return True
 
     def write(self, sid, row):
+        if row.get('processing_trace'):
+            from processing_trace import sanitize_for_storage
+            sanitize_for_storage(row)
         previous = read_json(self.path(sid)) if os.path.isfile(self.path(sid)) else None
         refresh_versions(row, previous)
         row['updated_at'] = dt.datetime.now(dt.timezone.utc).isoformat()

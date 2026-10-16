@@ -45,6 +45,7 @@ import minutes_items
 from action_sources import DailyReceipts, SourceChanged, fingerprint
 import meeting_curation
 from item_quality import assess_item
+from processing_trace import ProcessingTrace
 from voiceprint_registry import VoiceprintRegistry, audio_quality, person_profiles
 from voiceprint_invites import invite_person
 from recordings import RecordingError, Recordings
@@ -1209,6 +1210,7 @@ class Backend:
         # Context-resolved task wording (DeepSeek); every quote is re-verified, never an owner by itself.
         self.resolver = None if getattr(args, "no_deepseek", False) else load_deepseek(ROOT)
         self.task_cache, self.trial_evidence, self.session_names = {}, {}, {}
+        self.processing_trace = ProcessingTrace()
         self.lark = lark_cli_path(args.lark_cli)
         state = args.state_dir
         self.people = People(os.path.join(state, "people.json"))
@@ -1420,6 +1422,8 @@ class Backend:
         for name in ('tags', 'speaker_cache', 'split_jobs'):
             cache = getattr(self, name, None)
             if cache: cache.prune(now)
+        trace = getattr(self, 'processing_trace', None)
+        if trace: trace.prune(now)
 
     def recording_call(self, action, sid, body=None, name=None, offset=None, data=None, sha=None, start=None, end=None):
         try:
@@ -1451,6 +1455,11 @@ class Backend:
         try:
             if action == 'sync':
                 result = self.meetings.sync(body)
+                trace = getattr(self, 'processing_trace', None)
+                if trace:
+                    try: trace.attach(self.meetings, result['session_id'])
+                    except (OSError, ValueError, KeyError, TypeError):
+                        log('处理观察记录暂未保存；会议同步回执不受影响')
                 if result.get('source_changed_ids'):
                     with self.speaker_state_lock:
                         manual = self._state('manual_speakers')
@@ -1555,6 +1564,8 @@ class Backend:
         self.remember_names(body['session_id'], [body['speaker']])
 
     def tag(self, req):
+        computed = False
+        trace_stages = []
         for key in ("session_id", "utterance_id", "text"):
             if not isinstance(req.get(key), str) or not req[key].strip() or len(req[key]) > 10000:
                 raise ApiError(400, "BAD_REQUEST", f"缺少或无效 {key}")
@@ -1565,35 +1576,51 @@ class Backend:
             raise ApiError(400, "BAD_REQUEST", "无效时间或 context（最多 4 句）")
 
         def compute():
+            nonlocal computed
+            computed = True
             timing = {}
             started = time.monotonic()
             if self.jev:
                 try:
                     result = jev_tag(self.jev, req)
+                    trace_stages.append(dict(kind='whole_tag', layer='jev', status='ok', result=dict(result),
+                                             latency_ms=int((time.monotonic() - started) * 1000)))
                 except Exception as exc:
+                    trace_stages.append(dict(kind='whole_tag', layer='jev', status='failed', error_type=type(exc).__name__,
+                                             latency_ms=int((time.monotonic() - started) * 1000)))
                     log(f"Jev tag failed, using rules: {type(exc).__name__}")
                     if isinstance(self.jev, Jev):
                         self.jev.count("tag_fallbacks")
                     result = rules_tag(req["text"])
+                    trace_stages.append(dict(kind='rules_fallback', layer='code', status='ok', result=dict(result)))
                 timing["jev_ms"] = int((time.monotonic() - started) * 1000)
                 # The phone gives up after 10 s, so the clause check only gets what is left of that budget.
                 budget = 9.0 - (time.monotonic() - started)
                 if result["tag"] in ("idea", "uncertain", "chitchat", "decision") and len(req["text"]) >= 6 and budget >= 1.5:
                     clause_started = time.monotonic()
                     try:
-                        found = pick_task_clause(jev_task_clauses(self.jev, req, min(8, budget)), result["tag"])
+                        clauses = jev_task_clauses(self.jev, req, min(8, budget))
+                        found = pick_task_clause(clauses, result["tag"])
+                        trace_stages.append(dict(kind='task_clauses', layer='jev', status='ok',
+                            clauses=[dict(text=clause, yes_prob=prob) for clause, prob in clauses],
+                            selected=found[0] if found else None, threshold=.9 if result['tag'] == 'decision' else .7,
+                            latency_ms=int((time.monotonic() - clause_started) * 1000)))
                         if found:
                             clause, prob = found
                             result = dict(result, tag="commitment", prob=prob, engine=f"{result['engine']}+clauses",
                                           task_clause=clause.strip())
                     except Exception as exc:
+                        trace_stages.append(dict(kind='task_clauses', layer='jev', status='failed', error_type=type(exc).__name__,
+                                                 latency_ms=int((time.monotonic() - clause_started) * 1000)))
                         log(f"Jev clause check failed: {type(exc).__name__}")
                     timing["clause_ms"] = int((time.monotonic() - clause_started) * 1000)
             else:
                 result = rules_tag(req["text"])
+                trace_stages.append(dict(kind='rules_tag', layer='code', status='ok', result=dict(result)))
             return {"utterance_id": req["utterance_id"], **result, "timing_ms": timing}
         result = self.tags.get_or_compute((req["session_id"], req["utterance_id"]), compute)
         if result.get('tag') == 'commitment':
+            quality_started = time.monotonic()
             rows = [dict(id=f'context-{i}', text=t if isinstance(t, str) else t.get('text', ''))
                     for i, t in enumerate(req.get('context', [])) if isinstance(t, (str, dict))]
             evidence = [dict(id=req['utterance_id'], text=req['text'])]
@@ -1601,6 +1628,13 @@ class Backend:
             result = dict(result, task_quality=quality)
             if quality['status'] != 'accepted':
                 result = dict(result, tag='uncertain', original_tag='commitment')
+            if computed:
+                trace_stages.append(dict(kind='task_quality', layer='code', status='ok', result=dict(quality),
+                    final_tag=result['tag'], latency_ms=int((time.monotonic() - quality_started) * 1000)))
+        trace = getattr(self, 'processing_trace', None)
+        if trace and computed:
+            # Memory only: the next meeting sync attaches it, keeping disk writes off the phone's 10 s path.
+            trace.record_tag(req, result, trace_stages)
         return result
 
     def _shared(self, name, factory):

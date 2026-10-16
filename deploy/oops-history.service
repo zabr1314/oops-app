@@ -1,0 +1,25 @@
+[Unit]
+Description=Oops read-only meeting processing history
+After=network.target
+
+[Service]
+User=oops
+Group=oops
+WorkingDirectory=/opt/oops/history
+Environment=PYTHONPATH=/opt/oops/app/scripts
+ExecStart=/opt/oops/venv/bin/python -B -u /opt/oops/history/scripts/replay_history.py serve --state-dir /var/lib/oops/backend --access-db /var/lib/oops-history/access.sqlite3 --public-dir /opt/oops/history/public --backend-source-dir /opt/oops/app/scripts --port 8797 --url-prefix /oops-meeting/history/
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/oops/backend
+ReadWritePaths=/var/lib/oops-history
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

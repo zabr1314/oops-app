@@ -7,6 +7,7 @@
   <meta name="description" content="一场会议逐句回放：每句话变成几个带类型的问题，由规则、Jev、DeepSeek 或你来定。">
   <title>Oops · 实时漏斗</title>
   <link rel="stylesheet" href="./funnel.css">
+  <script src="./funnel-spider.js" defer></script>
   <script src="./funnel.js" defer></script>
   <script src="./funnel-after.js" defer></script>
 </head>
@@ -16,7 +17,7 @@
       <div class="title">
         <a class="back" href="./showcase.html?view=app#home">← 体验中心</a>
         <h1><span>OOPS 漏斗</span> <span class="slash">// 每句话，几个岔口</span></h1>
-        <p class="sub">每句话变成几个带类型的问题 · 规则答能确定的，Jev 答拿得准的，DeepSeek 答难的，你只管要拍板的。</p>
+        <p class="sub">沿着原话查看已保存的判断、当前规则比较与会后事项 · 动画只用于回放，不发起模型调用。</p>
       </div>
       <dl class="counters" aria-label="本场计数">
         <div><dt>句子</dt><dd id="c-sent">0</dd></div>
@@ -28,8 +29,23 @@
       </dl>
     </header>
 
+    <section id="history-panel" class="history-panel" aria-label="后端历史会议" hidden>
+      <div class="history-controls">
+        <label for="history-meeting">后端历史库</label>
+        <select id="history-meeting" aria-label="选择历史会议" disabled><option value="">载入会议…</option></select>
+        <label for="reanalysis-run">重新分析</label>
+        <select id="reanalysis-run" aria-label="选择已完成的重新分析" disabled><option value="">尚未载入</option></select>
+        <button id="history-refresh" type="button" class="btn">刷新列表</button>
+        <button id="history-example" type="button" class="btn">看示例</button>
+        <button id="history-disconnect" type="button" class="btn">退出历史库</button>
+      </div>
+      <p id="history-status" class="source-note" role="status">只读已有数据，不重跑 Jev 或纪要。</p>
+    </section>
+    <p id="history-entry" class="source-note">公开页仅含示例；可打开本机回放文件。<a id="history-private-link" href="https://giftedprofessor.xyz/oops-meeting/history/">查看私有历史库 →</a></p>
+    <p id="pipeline-note" class="source-note"></p>
+
     <nav class="modes" role="tablist" aria-label="看哪一段">
-      <button id="tab-live" role="tab" type="button" aria-selected="true" aria-controls="mode-live" data-mode="live">会中 · 实时漏斗</button>
+      <button id="tab-live" role="tab" type="button" aria-selected="true" aria-controls="mode-live" data-mode="live">逐句 · 判断回放</button>
       <button id="tab-after" role="tab" type="button" aria-selected="false" aria-controls="mode-after" data-mode="after" tabindex="-1">会后 · 整理</button>
     </nav>
 
@@ -59,13 +75,13 @@
       </div>
       <div id="fan" class="fan" aria-hidden="true"></div>
       <div class="routes" aria-label="四层去向">
-        <article class="route r-code" data-layer="code"><header><span>第 1 层 · 能确定</span><span>→ 规则</span></header>
+        <article class="route r-code" data-layer="code"><header><span>处理方 · 确定性检查</span><span>→ 规则</span></header>
           <strong id="r-code">0</strong><p>本地代码，不调模型</p><small id="r-code-sub">在这层结束 0 句</small><ul id="r-code-top" class="tops"></ul></article>
-        <article class="route r-jev" data-layer="jev"><header><span>第 2 层 · p ≥ 0.95 当场定</span><span>→ Jev</span></header>
-          <strong id="r-jev">0</strong><p>分类模型，约 0.5 秒</p><small id="r-jev-sub">在这层结束 0 句</small><ul id="r-jev-top" class="tops"></ul></article>
-        <article class="route r-model" data-layer="model"><header><span>第 3 层 · 难的</span><span>→ DeepSeek</span></header>
-          <strong id="r-model">0</strong><p>生成模型，约 1 秒</p><small id="r-model-sub">在这层结束 0 句</small><ul id="r-model-top" class="tops"></ul></article>
-        <article class="route r-you" data-layer="you"><header><span>第 4 层 · 要拍板</span><span>→ 你</span></header>
+        <article class="route r-jev" data-layer="jev"><header><span>处理方 · 分类记录</span><span>→ Jev</span></header>
+          <strong id="r-jev">0</strong><p>概率与模型只取已有记录</p><small id="r-jev-sub">最后有记录的处理方 0 句</small><ul id="r-jev-top" class="tops"></ul></article>
+        <article class="route r-model" data-layer="model"><header><span>处理方 · 生成记录</span><span>→ DeepSeek</span></header>
+          <strong id="r-model">0</strong><p><span id="research-state">会中研究状态随来源显示</span></p><small id="r-model-sub">最后有记录的处理方 0 句</small><ul id="r-model-top" class="tops"></ul></article>
+        <article class="route r-you" data-layer="you"><header><span>处理方 · 确认要求</span><span>→ 你</span></header>
           <strong id="r-you">0</strong><p>只问需要你决定的</p><small id="r-you-sub">在这层结束 0 句</small><ul id="r-you-top" class="tops"></ul></article>
       </div>
       <canvas id="canvas" aria-hidden="true"></canvas>
@@ -92,12 +108,12 @@
         <p class="foot" id="spark-foot">平均 —</p>
       </div>
       <div class="pane">
-        <div class="pane-head"><span>▪ 已听句子</span><span class="muted">一点 = 一句，颜色 = 在哪层结束</span></div>
+        <div class="pane-head"><span>▪ 已看句子</span><span class="muted">一点 = 一句；灰色表示历史步骤缺失</span></div>
         <div id="dots" class="dotgrid"></div>
         <p class="foot" id="dots-foot">0 / 0</p>
       </div>
       <div class="pane">
-        <div class="pane-head"><span>▪ 在哪层结束</span><span class="muted">句子的出口</span></div>
+        <div class="pane-head"><span>▪ 最后有记录的处理方</span><span class="muted">不代表自动执行许可</span></div>
         <ul id="exits" class="exits"></ul>
       </div>
       <div class="pane">
@@ -109,12 +125,13 @@
     </div>
 
     <section id="mode-after" class="after" role="tabpanel" aria-labelledby="tab-after" hidden>
+      <p id="asr-review-note" class="source-note"></p>
       <div class="after-bar">
         <ol id="pipeline" class="pipeline" aria-label="会后整理的四步">
-          <li data-step="0"><span class="n">1</span><b>写纪要</b><span class="who l-model">DeepSeek</span><span class="what">一次读完全文</span><em id="p0"></em></li>
+          <li data-step="0"><span class="n">1</span><b>读取纪要</b><span class="who l-model">DeepSeek</span><span class="what" id="minutes-generation">本地源码：3 次生成后投票；历史次数另核对</span><em id="p0"></em></li>
           <li data-step="1"><span class="n">2</span><b>对回原话</b><span class="who l-code">规则</span><span class="what">每条结果找到它引用的句子</span><em id="p1"></em></li>
           <li data-step="2"><span class="n">3</span><b>规则复核</b><span class="who l-code">规则</span><span class="what">依据够不够、有没有多出数字</span><em id="p2"></em></li>
-          <li data-step="3"><span class="n">4</span><b>排核对队列</b><span class="who l-you">你</span><span class="what">待办 → 决定 → 补说话人</span><em id="p3"></em></li>
+          <li data-step="3"><span class="n">4</span><b>排核对队列</b><span class="who l-you">你</span><span class="what">待办 → 决定 → 未决事项</span><em id="p3"></em></li>
         </ol>
         <div class="controls">
           <button id="after-play" type="button" class="btn primary">▶ 播放</button>
