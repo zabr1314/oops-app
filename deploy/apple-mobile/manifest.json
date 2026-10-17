@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "files": {
+    "scripts/apple_mobile_gateway.py": "f9170f5e1884c0b83c33c16aa9415480aba20ccc6ecaae2ee07e758763ee4540",
+    "deploy/apple-mobile/oops-apple-mobile.service": "b5604c3a0d40feb0b0bf7c5b94a90ff39633e6feab9a1e396ad785fc3f49edfa",
+    "deploy/apple-mobile/nginx-hk-apple-mobile.conf": "55989428050cb6d29c79b3cce8e52a686467776fe918bec731f4743331dcc4ac",
+    "deploy/apple-mobile/install.py": "1459bfbd27fe6e62f35a49b45f88cdf067c135caa9e92cfc96bdc8a9c2ea46fd"
+  }
+}

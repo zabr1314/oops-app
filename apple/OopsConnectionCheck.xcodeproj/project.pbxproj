@@ -1,0 +1,574 @@
+// !$*UTF8*$!
+{
+	"archiveVersion" = 1;
+	"classes" = {
+	};
+	"objectVersion" = 56;
+	"objects" = {
+		"2C367F63AA9FF211A712788F" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.xcconfig";
+			"path" = "Configuration/Signing.xcconfig";
+			"sourceTree" = "<group>";
+		};
+		"F80830E864CE41E02106C38E" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/ConnectionCheckMessage.swift";
+			"sourceTree" = "<group>";
+		};
+		"35FE3774AFBA48563C125DA6" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/ConnectionCheckSession.swift";
+			"sourceTree" = "<group>";
+		};
+		"D9F016CD37458006DBEDD661" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/ConnectionCheckView.swift";
+			"sourceTree" = "<group>";
+		};
+		"84854A35AD16930033BECB0F" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "OopsPhoneCheck/OopsPhoneCheckApp.swift";
+			"sourceTree" = "<group>";
+		};
+		"AB1572A0817F062CAFDA8BDE" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "OopsWatchCheck/OopsWatchCheckApp.swift";
+			"sourceTree" = "<group>";
+		};
+		"E6F8B0C2758F975229802045" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "OopsWatchCheckTests/ConnectionCheckTests.swift";
+			"sourceTree" = "<group>";
+		};
+		"1E5F7EF6114FEDA75EB50C14" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"includeInIndex" = 0;
+			"path" = "OopsPhoneCheck.app";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"5B1730B764E524E99E53D8A4" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"includeInIndex" = 0;
+			"path" = "OopsWatchCheck.app";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"20ABD7A2BB9EDAFC09898A62" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.cfbundle";
+			"includeInIndex" = 0;
+			"path" = "OopsWatchCheckTests.xctest";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"FB3FFD61B7D6B9712B621E64" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "98F54143AB4E86B28C3AFEE0";
+			"proxyType" = 1;
+			"remoteGlobalIDString" = "D75C72E52BB1005307FFB0FA";
+			"remoteInfo" = "OopsWatchCheck";
+		};
+		"4D6FC66A63FC28E93730BC03" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "D75C72E52BB1005307FFB0FA";
+			"targetProxy" = "FB3FFD61B7D6B9712B621E64";
+		};
+		"7395CD3B076723358C708BE0" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "5B1730B764E524E99E53D8A4";
+			"settings" = {
+				"ATTRIBUTES" = (
+					"RemoveHeadersOnCopy",
+				);
+			};
+		};
+		"018BCDDADEF559EBA1EF98F0" = {
+			"isa" = "PBXCopyFilesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"dstPath" = "$(CONTENTS_FOLDER_PATH)/Watch";
+			"dstSubfolderSpec" = 16;
+			"files" = (
+				"7395CD3B076723358C708BE0",
+			);
+			"name" = "Embed Watch Content";
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"A76388DDAB9BF9DA4AD4DB87" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F80830E864CE41E02106C38E";
+		};
+		"2DAD271398073C035D3FC3EA" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "35FE3774AFBA48563C125DA6";
+		};
+		"7EEEF4EABA778EB544CB3D99" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D9F016CD37458006DBEDD661";
+		};
+		"81D97E50E8E0315E82CD8770" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "AB1572A0817F062CAFDA8BDE";
+		};
+		"70671F229526CBAF3D649026" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"A76388DDAB9BF9DA4AD4DB87",
+				"2DAD271398073C035D3FC3EA",
+				"7EEEF4EABA778EB544CB3D99",
+				"81D97E50E8E0315E82CD8770",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"7E7B11E99D3C211164DEA1BA" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"8ED928FFEDE250CE5521A5C7" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"DAD2926A5D097B0512F6D51D" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops 连接检查";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
+				"SDKROOT" = "watchos";
+				"TARGETED_DEVICE_FAMILY" = "4";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.connectioncheck.watchkitapp";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"WATCHOS_DEPLOYMENT_TARGET" = "26.0";
+				"INFOPLIST_KEY_WKApplication" = "YES";
+				"INFOPLIST_KEY_WKCompanionAppBundleIdentifier" = "com.oops.development.connectioncheck";
+				"INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp" = "NO";
+				"SKIP_INSTALL" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"ENABLE_TESTABILITY" = "YES";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Debug";
+		};
+		"1ECD99762341BF28B6B226D7" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops 连接检查";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
+				"SDKROOT" = "watchos";
+				"TARGETED_DEVICE_FAMILY" = "4";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.connectioncheck.watchkitapp";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"WATCHOS_DEPLOYMENT_TARGET" = "26.0";
+				"INFOPLIST_KEY_WKApplication" = "YES";
+				"INFOPLIST_KEY_WKCompanionAppBundleIdentifier" = "com.oops.development.connectioncheck";
+				"INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp" = "NO";
+				"SKIP_INSTALL" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+			"name" = "Release";
+		};
+		"EF82386AB3B48ABA7F634AB6" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"DAD2926A5D097B0512F6D51D",
+				"1ECD99762341BF28B6B226D7",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"D75C72E52BB1005307FFB0FA" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "EF82386AB3B48ABA7F634AB6";
+			"buildPhases" = (
+				"70671F229526CBAF3D649026",
+				"7E7B11E99D3C211164DEA1BA",
+				"8ED928FFEDE250CE5521A5C7",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"name" = "OopsWatchCheck";
+			"productName" = "OopsWatchCheck";
+			"productReference" = "5B1730B764E524E99E53D8A4";
+			"productType" = "com.apple.product-type.application";
+		};
+		"9C6B27A4C66F1546FB804C0B" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "F80830E864CE41E02106C38E";
+		};
+		"A0B4ED18AAD9EFC73DDCE8CB" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "35FE3774AFBA48563C125DA6";
+		};
+		"269992393EF6930932D2145A" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "D9F016CD37458006DBEDD661";
+		};
+		"C42F0CFB70758B2C83C652E6" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "84854A35AD16930033BECB0F";
+		};
+		"05EEB6F7EB30E2D5374EA195" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"9C6B27A4C66F1546FB804C0B",
+				"A0B4ED18AAD9EFC73DDCE8CB",
+				"269992393EF6930932D2145A",
+				"C42F0CFB70758B2C83C652E6",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"6B730B66CD73605D846B5D44" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"CEACF25B7F865CC0F382E6B1" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"4817055C7F5F450B8B266063" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops 连接检查";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"SDKROOT" = "iphoneos";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "26.0";
+				"TARGETED_DEVICE_FAMILY" = "1";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.connectioncheck";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation" = "YES";
+				"INFOPLIST_KEY_UILaunchScreen_Generation" = "YES";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"ENABLE_TESTABILITY" = "YES";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Debug";
+		};
+		"23D64B2A435EFF04798476F9" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops 连接检查";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"SDKROOT" = "iphoneos";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "26.0";
+				"TARGETED_DEVICE_FAMILY" = "1";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.connectioncheck";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation" = "YES";
+				"INFOPLIST_KEY_UILaunchScreen_Generation" = "YES";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+			"name" = "Release";
+		};
+		"B61C7BC5E6A45EA0E156BB5B" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"4817055C7F5F450B8B266063",
+				"23D64B2A435EFF04798476F9",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"D3B715E3AF7B15A42A9F80E0" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "B61C7BC5E6A45EA0E156BB5B";
+			"buildPhases" = (
+				"05EEB6F7EB30E2D5374EA195",
+				"6B730B66CD73605D846B5D44",
+				"CEACF25B7F865CC0F382E6B1",
+				"018BCDDADEF559EBA1EF98F0",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+				"4D6FC66A63FC28E93730BC03",
+			);
+			"name" = "OopsPhoneCheck";
+			"productName" = "OopsPhoneCheck";
+			"productReference" = "1E5F7EF6114FEDA75EB50C14";
+			"productType" = "com.apple.product-type.application";
+		};
+		"85D60ABDA40F44E9E3F5D174" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "E6F8B0C2758F975229802045";
+		};
+		"545DD5F014FF6B41E736F46A" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"85D60ABDA40F44E9E3F5D174",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"3D1166AAADE371C99D1E4DEA" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"D1300690FBD346BCC2DEB2C0" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"0B737FA45ADBEDD199C73A1A" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops 连接检查";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
+				"SDKROOT" = "watchos";
+				"TARGETED_DEVICE_FAMILY" = "4";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.connectioncheck.watchkitapp.tests";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"WATCHOS_DEPLOYMENT_TARGET" = "26.0";
+				"SKIP_INSTALL" = "YES";
+				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/OopsWatchCheck.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/OopsWatchCheck";
+				"BUNDLE_LOADER" = "$(TEST_HOST)";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"ENABLE_TESTABILITY" = "YES";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Debug";
+		};
+		"A6845BC0E32C6BA14C096703" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops 连接检查";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
+				"SDKROOT" = "watchos";
+				"TARGETED_DEVICE_FAMILY" = "4";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.connectioncheck.watchkitapp.tests";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"WATCHOS_DEPLOYMENT_TARGET" = "26.0";
+				"SKIP_INSTALL" = "YES";
+				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/OopsWatchCheck.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/OopsWatchCheck";
+				"BUNDLE_LOADER" = "$(TEST_HOST)";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+			"name" = "Release";
+		};
+		"1FBEE9018D4CC1E13B66B802" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"0B737FA45ADBEDD199C73A1A",
+				"A6845BC0E32C6BA14C096703",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"680EAF06FF24F518D0C953F4" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "1FBEE9018D4CC1E13B66B802";
+			"buildPhases" = (
+				"545DD5F014FF6B41E736F46A",
+				"3D1166AAADE371C99D1E4DEA",
+				"D1300690FBD346BCC2DEB2C0",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+				"4D6FC66A63FC28E93730BC03",
+			);
+			"name" = "OopsWatchCheckTests";
+			"productName" = "OopsWatchCheckTests";
+			"productReference" = "20ABD7A2BB9EDAFC09898A62";
+			"productType" = "com.apple.product-type.bundle.unit-test";
+		};
+		"FBDC4F23F93125BBEEAE800C" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"1E5F7EF6114FEDA75EB50C14",
+				"5B1730B764E524E99E53D8A4",
+				"20ABD7A2BB9EDAFC09898A62",
+			);
+			"name" = "Products";
+			"sourceTree" = "<group>";
+		};
+		"B28B7AF69320201D1CF206EB" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"F80830E864CE41E02106C38E",
+				"35FE3774AFBA48563C125DA6",
+				"D9F016CD37458006DBEDD661",
+				"84854A35AD16930033BECB0F",
+				"AB1572A0817F062CAFDA8BDE",
+				"E6F8B0C2758F975229802045",
+				"2C367F63AA9FF211A712788F",
+				"FBDC4F23F93125BBEEAE800C",
+			);
+			"sourceTree" = "<group>";
+		};
+		"AB52CB08E0FDF02BF6C67C33" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"SWIFT_VERSION" = "5.0";
+				"GCC_WARN_INHIBIT_ALL_WARNINGS" = "NO";
+				"SWIFT_EMIT_LOC_STRINGS" = "NO";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"ENABLE_TESTABILITY" = "YES";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Debug";
+			"baseConfigurationReference" = "2C367F63AA9FF211A712788F";
+		};
+		"5283471FF90C511CFE244FFF" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"SWIFT_VERSION" = "5.0";
+				"GCC_WARN_INHIBIT_ALL_WARNINGS" = "NO";
+				"SWIFT_EMIT_LOC_STRINGS" = "NO";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+			};
+			"name" = "Release";
+			"baseConfigurationReference" = "2C367F63AA9FF211A712788F";
+		};
+		"4BA304E783CFBB9FA6E56552" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"AB52CB08E0FDF02BF6C67C33",
+				"5283471FF90C511CFE244FFF",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"98F54143AB4E86B28C3AFEE0" = {
+			"isa" = "PBXProject";
+			"attributes" = {
+				"BuildIndependentTargetsInParallel" = "YES";
+				"LastUpgradeCheck" = "2700";
+				"TargetAttributes" = {
+					"680EAF06FF24F518D0C953F4" = {
+						"TestTargetID" = "D75C72E52BB1005307FFB0FA";
+					};
+				};
+			};
+			"buildConfigurationList" = "4BA304E783CFBB9FA6E56552";
+			"compatibilityVersion" = "Xcode 14.0";
+			"developmentRegion" = "en";
+			"hasScannedForEncodings" = 0;
+			"knownRegions" = (
+				"en",
+				"Base",
+			);
+			"mainGroup" = "B28B7AF69320201D1CF206EB";
+			"productRefGroup" = "FBDC4F23F93125BBEEAE800C";
+			"projectDirPath" = "";
+			"projectRoot" = "";
+			"targets" = (
+				"D3B715E3AF7B15A42A9F80E0",
+				"D75C72E52BB1005307FFB0FA",
+				"680EAF06FF24F518D0C953F4",
+			);
+		};
+	};
+	"rootObject" = "98F54143AB4E86B28C3AFEE0";
+}

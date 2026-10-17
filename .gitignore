@@ -38,6 +38,10 @@ deploy/__pycache__/
 evidence/
 讨论/
 
+# Local delivery bundles, recordings, and generated exports.
+/artifacts/
+/output/
+
 # Local backend state: Feishu people map and the confirm journal
 .local-backend/
 

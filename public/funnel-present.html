@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a0b0d">
+  <meta name="description" content="在同一屏展示 Oops 会议页面与演示文稿。">
+  <title>Oops · 会议与演示</title>
+  <link rel="stylesheet" href="./funnel-present.css?v=20261017">
+  <script src="./funnel-present.js?v=content-20261017" defer></script>
+</head>
+<body>
+  <div class="presentation-shell">
+    <header class="presentation-header">
+      <div class="presentation-brand">
+        <a id="back-to-meeting" class="back-link" href="./#after" aria-label="返回会议页面">← Oops</a>
+        <div><h1>会议与演示</h1><p>一边看内容，一边看原话与整理。</p></div>
+      </div>
+      <div class="layout-controls" aria-label="展示布局">
+        <div class="segmented" role="group" aria-label="选择展示内容">
+          <button type="button" data-layout="split" aria-pressed="true">均分</button>
+          <button type="button" data-layout="meeting" aria-pressed="false">网页为主</button>
+          <button type="button" data-layout="slides" aria-pressed="false">PPT 为主</button>
+        </div>
+        <label class="ratio-control" for="meeting-ratio">会议占比 <select id="meeting-ratio"><option value="35">35%</option><option value="50" selected>50%</option><option value="65">65%</option></select></label>
+        <a class="plain-button download-ppt" href="./presentation/oops-demo/oops-demo.pptx" download>下载 PPT</a>
+        <button id="fullscreen" class="plain-button" type="button">全屏</button>
+      </div>
+    </header>
+    <main id="presentation-workspace" class="presentation-workspace" data-layout="split">
+      <section id="meeting-panel" class="presentation-panel meeting-panel" aria-labelledby="meeting-heading">
+        <div class="panel-heading"><h2 id="meeting-heading"><span class="panel-dot"></span>Oops 会议</h2><a id="open-meeting" href="./#after" target="_blank" rel="noopener noreferrer">单独打开 ↗</a></div>
+        <iframe id="meeting-frame" title="Oops 会议原话与整理" referrerpolicy="no-referrer"></iframe>
+      </section>
+      <div id="presentation-splitter" class="presentation-splitter" role="separator" tabindex="0" aria-label="调整会议与 PPT 的宽度" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="75" aria-valuenow="50" aria-controls="meeting-panel slides-panel"><span></span></div>
+      <section id="slides-panel" class="presentation-panel slides-panel" aria-labelledby="slides-heading">
+        <div class="panel-heading"><h2 id="slides-heading"><span class="panel-dot slides-dot"></span><span id="deck-title">演示文稿</span></h2><span id="slide-position" class="slide-position" aria-live="polite">载入中</span></div>
+        <div id="slide-viewer" class="slide-viewer" tabindex="0" aria-label="幻灯片，使用左右方向键翻页">
+          <img id="slide-image" alt="" draggable="false" hidden>
+          <div id="deck-message" class="deck-message" role="status">正在读取演示文稿…</div>
+        </div>
+        <div class="slide-caption"><span id="slide-title"></span><span id="keyboard-hint">← → 翻页</span></div>
+        <nav class="slide-navigation" aria-label="演示文稿翻页">
+          <button id="previous-slide" class="plain-button" type="button" disabled aria-label="上一页">← 上一页</button>
+          <label class="slide-selector" for="slide-select"><span class="visually-hidden">选择幻灯片</span><select id="slide-select" disabled><option>载入中</option></select></label>
+          <button id="next-slide" class="plain-button" type="button" disabled aria-label="下一页">下一页 →</button>
+        </nav>
+      </section>
+    </main>
+    <footer class="presentation-footer"><span id="layout-note">拖动中间分隔条调整宽度。PPT 翻页与会议整理分别操作。</span><span>会议数据沿用原页面的读取权限</span></footer>
+  </div>
+  <noscript><p class="noscript">请启用 JavaScript 查看同屏会议与演示文稿。</p></noscript>
+</body>
+</html>

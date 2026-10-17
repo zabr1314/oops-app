@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Stored history is scoped, read-only and never silently reruns a model."""
 import datetime as dt
+import gzip
 import http.cookiejar
 import json
 import os
@@ -43,6 +44,22 @@ class HistoryTest(unittest.TestCase):
             with self.assertRaises(HistoryError) as raised:
                 self.history.detail(sid, ['safe'])
             self.assertEqual(status, raised.exception.status)
+
+    def test_live_metadata_and_snapshot_follow_sync_and_end_without_invented_trace(self):
+        before = self.history.detail('safe', ['safe'])
+        self.assertTrue(before['source']['live']['active'])
+        self.assertTrue(self.history.listing(['safe'])['meetings'][0]['is_live'])
+        self.assertEqual([], before['traces'])
+        self.row['last_sync_at'] = '2026-10-16T03:00:00Z'
+        self.write_row()
+        synced = self.history.detail('safe', ['safe'])
+        self.assertNotEqual(before['source']['snapshot_hash'], synced['source']['snapshot_hash'])
+        self.row['ended_at'] = '2026-10-16T04:00:00Z'
+        self.write_row()
+        ended = self.history.detail('safe', ['safe'])
+        self.assertFalse(ended['source']['live']['active'])
+        self.assertNotEqual(synced['source']['snapshot_hash'], ended['source']['snapshot_hash'])
+        self.assertFalse(self.history.listing(['safe'])['meetings'][0]['is_live'])
 
     def test_no_recorded_probability_context_or_model_is_fabricated(self):
         detail = self.history.detail('safe', ['safe'])
@@ -164,6 +181,60 @@ class HistoryTest(unittest.TestCase):
 
 
 class AccessTest(unittest.TestCase):
+    def test_compressed_conditional_details_recheck_scope_and_source(self):
+        class History:
+            available = True
+            text = '同一句原话' * 1000
+            def detail(self, sid, scope):
+                if sid not in scope:
+                    raise HistoryError(403, 'meeting_outside_scope')
+                if not self.available:
+                    raise HistoryError(410, 'transcript_expired')
+                return dict(text=self.text, pipeline=dict(scope='deployed_source', verified_at=time.time()))
+        history = History()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(history, self.access, self.temp.name, '/', False))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = 'http://127.0.0.1:' + str(server.server_port)
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        try:
+            invite = self.access.mint(['safe'])
+            with opener.open(urllib.request.Request(base + '/api/session', data=json.dumps(dict(invite=invite)).encode())):
+                pass
+            with opener.open(urllib.request.Request(base + '/api/meetings/safe', headers={'Accept-Encoding': 'gzip'})) as response:
+                compressed = response.read()
+                self.assertEqual('gzip', response.headers['Content-Encoding'])
+                self.assertEqual(history.text, json.loads(gzip.decompress(compressed))['text'])
+                self.assertLess(len(compressed), 1000)
+                etag = response.headers['ETag']
+            conditional = urllib.request.Request(base + '/api/meetings/safe', headers={'If-None-Match': etag})
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                opener.open(conditional)
+            self.assertEqual(304, raised.exception.code)
+            self.assertEqual(b'', raised.exception.read())
+            raised.exception.close()
+            history.text = '修订后的原话' * 1000
+            with opener.open(conditional) as response:
+                self.assertNotEqual(etag, response.headers['ETag'])
+                self.assertEqual(history.text, json.load(response)['text'])
+            with opener.open(urllib.request.Request(base + '/api/meetings/safe', headers={'Accept-Encoding': 'gzip;q=0'})) as response:
+                self.assertIsNone(response.headers.get('Content-Encoding'))
+            history.available = False
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                opener.open(conditional)
+            self.assertEqual(410, raised.exception.code)
+            raised.exception.close()
+            with opener.open(urllib.request.Request(base + '/api/session', method='DELETE')):
+                pass
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                opener.open(conditional)
+            self.assertEqual(401, raised.exception.code)
+            raised.exception.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.access = ReplayAccess(self.temp.name + '/access.sqlite3')
@@ -210,6 +281,141 @@ class AccessTest(unittest.TestCase):
         self.assertIsNone(self.access.open_scope())
         os.unlink(path)
         self.assertIsNone(self.access.open_scope())
+
+    def automatic_fixture(self):
+        root = self.temp.name + '/automatic-state'
+        os.makedirs(root + '/meetings')
+        os.makedirs(root + '/feishu')
+        os.makedirs(self.temp.name + '/replays')
+        history = StoredHistory(root, replays_dir=self.temp.name + '/replays',
+            builder=lambda row, minutes, traces: dict(sentences=row['utterances'], source=dict(kind='stored')))
+        now = dt.datetime.now(dt.timezone.utc)
+        cutoff = (now - dt.timedelta(minutes=2)).isoformat()
+        config_path = self.temp.name + '/open-access.json'
+        config = dict(meetings=['fixed-replay'], auto_meetings=dict(enabled=True, from_started_at=cutoff))
+        def write_config():
+            with open(config_path, 'w') as stream:
+                json.dump(config, stream)
+        def write_meeting(sid, minutes_ago=1, **changes):
+            started = now - dt.timedelta(minutes=minutes_ago)
+            policy = dict(version=1, recording_mode='meeting', cloud_save_confirmed=True,
+                archive_started_at=started.isoformat(), audio_retention_days=30, transcript_retention_days=30,
+                audio_expires_at=(started + dt.timedelta(days=30)).isoformat(),
+                transcript_expires_at=(started + dt.timedelta(days=30)).isoformat())
+            row = dict(session_id=sid, started_at=started.isoformat(), storage_policy=policy,
+                utterances=[dict(id='u1', text='已同步原话', start_ms=0, end_ms=1000)])
+            row.update(changes)
+            with open(root + '/meetings/' + sid + '.json', 'w') as stream:
+                json.dump(row, stream)
+            return row
+        write_config()
+        return history, config, config_path, write_config, write_meeting
+
+    def test_automatic_access_discovers_only_new_formal_cloud_meetings_without_writes(self):
+        history, config, _, _, write = self.automatic_fixture()
+        write('fresh')
+        write('before-cutoff', minutes_ago=3)
+        write('legacy', storage_policy=None)
+        write('temporary', recording_mode='daily')
+        invalid = write('unconfirmed')
+        invalid['storage_policy']['cloud_save_confirmed'] = False
+        write('unconfirmed', storage_policy=invalid['storage_policy'])
+        invalid = write('wrong-contract')
+        invalid['storage_policy']['archive_started_at'] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)).isoformat()
+        write('wrong-contract', storage_policy=invalid['storage_policy'])
+        invalid = write('wrong-expiry')
+        invalid['storage_policy']['transcript_expires_at'] = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=90)).isoformat()
+        write('wrong-expiry', storage_policy=invalid['storage_policy'])
+        write('future', minutes_ago=-10)
+        write('expired', transcript_status='expired')
+        write('deleted')
+        open(history.directory + '/deleted.json.deleted', 'w').close()
+        os.symlink(history.directory + '/fresh.json', history.directory + '/alias.json')
+        write('prepared-collision')
+        with open(self.temp.name + '/replays/prepared-collision.json', 'w') as stream:
+            json.dump(dict(version=2, source=dict(kind='replay'), sentences=[]), stream)
+        with open(history.directory + '/broken.json', 'w') as stream:
+            stream.write('{')
+        before = {name: os.stat(history.directory + '/' + name).st_mtime_ns
+                  for name in os.listdir(history.directory)}
+        with patch('urllib.request.urlopen', side_effect=AssertionError('no network')):
+            scope = self.access.open_scope(history)
+        self.assertEqual(['fixed-replay', 'fresh'], scope)
+        self.assertEqual(dict(enabled=True, from_started_at=config['auto_meetings']['from_started_at']), scope.auto_connect)
+        self.assertEqual(before, {name: os.stat(history.directory + '/' + name).st_mtime_ns
+                  for name in os.listdir(history.directory)})
+
+    def test_automatic_scope_rechecks_new_arrivals_exclusions_expiry_and_config_removal(self):
+        history, config, path, save, write = self.automatic_fixture()
+        self.assertEqual(['fixed-replay'], self.access.open_scope(history))
+        write('fresh')
+        self.assertEqual(['fixed-replay', 'fresh'], self.access.open_scope(history))
+        config['auto_meetings']['excluded_meetings'] = ['fresh']
+        save()
+        self.assertEqual(['fixed-replay'], self.access.open_scope(history))
+        config['auto_meetings']['excluded_meetings'] = []
+        save()
+        write('fresh', transcript_status='expired')
+        self.assertEqual(['fixed-replay'], self.access.open_scope(history))
+        write('fresh')
+        self.assertEqual(['fixed-replay', 'fresh'], self.access.open_scope(history))
+        os.unlink(history.directory + '/fresh.json')
+        self.assertEqual(['fixed-replay'], self.access.open_scope(history))
+        config['auto_meetings']['from_started_at'] = '2026-10-16T12:00:00'  # timezone required
+        save()
+        scope = self.access.open_scope(history)
+        self.assertEqual(['fixed-replay'], scope)
+        self.assertFalse(scope.auto_connect['enabled'])
+        os.unlink(path)
+        self.assertIsNone(self.access.open_scope(history))
+
+    def test_http_automatic_empty_waiting_new_arrival_and_revocation_before_conditional_read(self):
+        history, config, _, save, write = self.automatic_fixture()
+        config['meetings'] = []
+        save()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(history, self.access, self.temp.name, '/', False))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = 'http://127.0.0.1:' + str(server.server_port)
+        try:
+            with urllib.request.urlopen(base + '/api/meetings') as response:
+                result = json.load(response)
+                self.assertEqual([], result['meetings'])
+                self.assertEqual(dict(enabled=True, from_started_at=config['auto_meetings']['from_started_at']), result['auto_connect'])
+            write('fresh')
+            with urllib.request.urlopen(base + '/api/meetings') as response:
+                self.assertEqual(['fresh'], [row['session_id'] for row in json.load(response)['meetings']])
+            with urllib.request.urlopen(base + '/api/meetings/fresh') as response:
+                etag = response.headers['ETag']
+                self.assertEqual('已同步原话', json.load(response)['sentences'][0]['text'])
+            config['auto_meetings']['excluded_meetings'] = ['fresh']
+            save()
+            request = urllib.request.Request(base + '/api/meetings/fresh', headers={'If-None-Match': etag})
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(request)
+            self.assertEqual(403, raised.exception.code)
+            raised.exception.close()
+            config['auto_meetings']['enabled'] = False
+            save()
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(base + '/api/meetings')
+            self.assertEqual(401, raised.exception.code)
+            raised.exception.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_automatic_exclusion_keeps_separately_authorized_personal_scope(self):
+        history, config, _, save, write = self.automatic_fixture()
+        config['meetings'] = []
+        config['auto_meetings']['excluded_meetings'] = ['fresh']
+        save()
+        write('fresh')
+        invite = self.access.mint(['fresh'])
+        session, _ = self.access.exchange(invite)
+        self.assertEqual([], self.access.open_scope(history))
+        self.assertEqual(['fresh'], self.access.scope(session))
 
     def test_expired_sessions_do_not_return_scope(self):
         invite = self.access.mint(['safe'], 60)

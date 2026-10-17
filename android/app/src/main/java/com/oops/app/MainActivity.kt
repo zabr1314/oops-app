@@ -29,7 +29,10 @@ import com.oops.app.bridge.WebBridge
 import com.oops.app.core.Settings
 import com.oops.app.engine.OopsEngine
 import com.oops.app.service.CaptureService
+import com.oops.app.store.PersonalMemoryStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -37,6 +40,7 @@ import org.json.JSONObject
 class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private lateinit var bridge: WebBridge
+    private val personalMemories by lazy { PersonalMemoryStore(applicationContext) }
     private var insets = JSONObject().put("top", 0).put("bottom", 0)
     private var pendingSource: String? = null
     private var pendingRecordingPolicy = com.oops.app.store.RecordingPolicy()
@@ -46,11 +50,13 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             val source = pendingSource ?: return@registerForActivityResult
             pendingSource = null
-            if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            if (capturePermissions(source).all(::hasPermission)) {
                 CaptureService.start(this, source, pendingRecordingPolicy)
             } else {
                 OopsEngine.cancelVoiceprintRecording()
-                bridge.send("error", JSONObject().put("scope", "permission").put("message", "需要麦克风权限才能收音"))
+                bridge.send("error", JSONObject().put("scope", "permission").put("message",
+                    if (source == Settings.SOURCE_BEAN) "录音豆需要麦克风及蓝牙扫描、连接权限；旧版 Android 还需要位置权限"
+                    else "需要麦克风权限才能收音"))
             }
         }
 
@@ -73,6 +79,8 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
         webView = WebView(this).apply {
+            // Paint the Oops canvas until the page draws, so launching never flashes white.
+            setBackgroundColor(this@MainActivity.getColor(R.color.oops_bg))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = false
@@ -149,6 +157,10 @@ class MainActivity : ComponentActivity() {
 
     /** Notification "Oops 一下", plus adb hooks in debug builds for scripted end-to-end runs. */
     private fun handleIntent(intent: Intent?) {
+        if (intent?.data?.let { it.scheme == "oops" && it.host == "feishu" && it.path == "/complete" } == true) {
+            OopsEngine.feishu("feishu.status", JSONObject())
+            return
+        }
         when (intent?.action) {
             ACTION_RECALL -> OopsEngine.triggerRecall("notification", intent.getStringExtra(EXTRA_QUERY))
             ACTION_DEBUG_START -> if (BuildConfig.DEBUG) {
@@ -204,6 +216,7 @@ class MainActivity : ComponentActivity() {
                         }))
                         .put("insets", insets),
                     )
+                    OopsEngine.dailyResults() // read-only latest receipt; never auto-opens over a current capture
                     if (pendingVoiceprintPage) {
                         pendingVoiceprintPage = false
                         bridge.send("voiceprint.open")
@@ -212,6 +225,8 @@ class MainActivity : ComponentActivity() {
                 "capture.start" -> requestCapture(p.optString("source").ifBlank { OopsEngine.settings.source }, com.oops.app.store.RecordingPolicy.fromBridge(p))
                 "capture.meeting" -> recordingRequest(com.oops.app.store.RecordingPolicy.fromBridge(p)) { OopsEngine.startMeeting(it) }
                 "capture.stop" -> CaptureService.stop(this)
+                "capture.pause" -> OopsEngine.setCapturePaused(true)
+                "capture.resume" -> OopsEngine.setCapturePaused(false)
                 "recall.trigger" -> OopsEngine.triggerRecall("button", p.optString("query").ifBlank { null })
                 "ask.session" -> OopsEngine.askSession(p.getString("query"))
                 "agenda.set" -> OopsEngine.setAgenda(p)
@@ -219,13 +234,16 @@ class MainActivity : ComponentActivity() {
                 "notice.dismiss" -> OopsEngine.dismissNotice(p.getString("id"))
                 "notice.feedback" -> OopsEngine.noticeFeedback(p.getString("id"), p.getBoolean("useful"))
                 "digest.openMany" -> OopsEngine.openDigestItems(p.getJSONArray("ids").strings())
-                "history.list" -> OopsEngine.history("list", requestId = p.optString("requestId"))
+                "history.list" -> OopsEngine.history("list", value = if (p.optBoolean("includeEmpty")) "all" else "", requestId = p.optString("requestId"))
                 "history.open" -> OopsEngine.history("open", p.getString("sessionId"), requestId = p.optString("requestId"))
                 "meeting.retain" -> OopsEngine.retainMeeting(p)
                 "history.minutes" -> OopsEngine.minutes(p.getString("sessionId"), p.optString("requestId"))
+                "feishu.connect" -> OopsEngine.feishu(type, p) { url -> runOnUiThread { openExternal(url) } }
+                "feishu.status", "feishu.disconnect", "feishu.recipients",
+                "minutes.delivery.open", "minutes.delivery.save", "minutes.delivery.confirm", "minutes.delivery.status" -> OopsEngine.feishu(type, p)
                 "history.delete" -> OopsEngine.history("delete", p.getString("sessionId"), p.optBoolean("confirm"), p.optString("requestId"))
-                "projects.list" -> OopsEngine.projects()
-                "project.open" -> OopsEngine.projects(p.getString("name"))
+                "projects.list" -> OopsEngine.projects(requestId = p.optString("requestId"))
+                "project.open" -> OopsEngine.projects(p.getString("name"), p.optString("requestId"))
                 "meeting.project" -> OopsEngine.setMeetingProject(p.getString("sessionId"), p.getString("project"))
                 "history.rename" -> OopsEngine.renameMeeting(p.getString("sessionId"), p.getString("title"))
                 "history.search" -> OopsEngine.history("search", p.getString("query"), requestId = p.optString("requestId"))
@@ -239,15 +257,29 @@ class MainActivity : ComponentActivity() {
                     if (p.isNull("speaker")) null else p.getString("speaker"))
                 "review.set" -> OopsEngine.review(p.getString("sessionId"), p.getString("utteranceId"), p.getJSONObject("fields"))
                 "items.review" -> OopsEngine.reviewItem(p.getString("sessionId"), p)
+                "items.task.draft" -> OopsEngine.draftItemTask(p)
                 "tasks.list" -> OopsEngine.tasks(p.optBoolean("mine"), p.optString("status").ifBlank { "open" }, p.optString("requestId"))
+                "tasks.candidates" -> OopsEngine.taskCandidates(p.optString("requestId"))
+                "tasks.review.open", "tasks.review.save" -> OopsEngine.taskReview(p, type == "tasks.review.save")
+                "raft.request" -> OopsEngine.raftRequest(p)
                 "recall.save" -> OopsEngine.saveRecall(
                     p.getString("cardId"), p.getJSONArray("utteranceIds").strings(), p.getLong("startMs"), p.getLong("endMs"),
                 )
                 "recall.dismiss" -> OopsEngine.dismissRecall(p.optString("cardId"))
-                "daily.candidates" -> OopsEngine.dailyCandidates()
-                "daily.candidate.discard" -> OopsEngine.discardDailyCandidate(p.getString("sessionId"), p.getString("id"))
-                "daily.candidate.confirm" -> OopsEngine.confirmDailyCandidate(p.getString("sessionId"), p.getString("id"), p.getString("quote"), p.optBoolean("confirmed"))
+                "daily.results" -> OopsEngine.dailyResults(p.optString("sessionId").takeIf { !p.isNull("sessionId") && it.isNotBlank() }, p.optString("requestId"))
+                "daily.candidates" -> OopsEngine.dailyCandidates(p.optString("sessionId").takeIf { !p.isNull("sessionId") && it.isNotBlank() }, p.optString("requestId"))
+                "daily.candidate.discard" -> OopsEngine.discardDailyCandidate(p.getString("sessionId"), p.getString("id"),
+                    if (p.has("scopeSessionId")) p.optString("scopeSessionId").takeIf { !p.isNull("scopeSessionId") && it.isNotBlank() } else p.getString("sessionId"), p.optString("requestId"))
+                "daily.candidate.confirm" -> OopsEngine.confirmDailyCandidate(p.getString("sessionId"), p.getString("id"), p.getString("quote"), p.optBoolean("confirmed"),
+                    if (p.has("scopeSessionId")) p.optString("scopeSessionId").takeIf { !p.isNull("scopeSessionId") && it.isNotBlank() } else p.getString("sessionId"), p.optString("requestId"))
                 "saved.list" -> bridge.send("saved.items", BridgeJson.saved(OopsEngine.savedItems()))
+                "personal.list", "personal.save", "personal.delete" -> lifecycleScope.launch {
+                    val result = withContext(Dispatchers.IO) { personalMemories.handle(type.removePrefix("personal."), p) }
+                    bridge.send("personal.result", result)
+                }
+                "personal.candidates" -> OopsEngine.personalCandidates("list", p)
+                "personal.candidate.confirm" -> OopsEngine.personalCandidates("confirm", p)
+                "personal.candidate.discard" -> OopsEngine.personalCandidates("discard", p)
                 "action.draft" -> OopsEngine.draftAction(p.getString("cardId"), p.getJSONArray("utteranceIds").strings())
                 "action.ownerFeedback" -> OopsEngine.recordOwnerFeedback(p)
                 "action.confirm" -> OopsEngine.confirmAction(
@@ -264,8 +296,12 @@ class MainActivity : ComponentActivity() {
                 "testAudio.reset" -> OopsEngine.selectTestWav("", "内置合成对话")
                 "voiceprint.list" -> OopsEngine.loadVoiceprints()
                 "voiceprint.record" -> {
+                    val selectedSource = if (OopsEngine.state.value.capturing) OopsEngine.state.value.source else OopsEngine.settings.source
+                    require(selectedSource != Settings.SOURCE_BEAN || OopsEngine.state.value.capturing) {
+                        "请先开始录音豆正式会议，再录入或测试声纹"
+                    }
                     OopsEngine.beginVoiceprintRecording(p.optString("name"), p.optBoolean("consent"), p.optString("mode", "enroll"))
-                    if (!OopsEngine.state.value.capturing) requestCapture(Settings.SOURCE_MIC)
+                    if (!OopsEngine.state.value.capturing) requestCapture(selectedSource)
                 }
                 "voiceprint.stop" -> OopsEngine.finishVoiceprintRecording()
                 "voiceprint.save" -> OopsEngine.submitVoiceprintRecording()
@@ -289,7 +325,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Only the mic is required; the notification permission is asked for alongside but never blocks. */
+    /** Notification permission is optional; source-specific capture permissions are required. */
     private fun recordingRequest(policy: com.oops.app.store.RecordingPolicy, ready: (com.oops.app.store.RecordingPolicy) -> Unit) {
         lifecycleScope.launch {
             try {
@@ -304,15 +340,30 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestCaptureReady(source: String, policy: com.oops.app.store.RecordingPolicy) {
+        // Refuse unsupported modes or missing SDK credentials before launching a service.
+        OopsEngine.requireCaptureSource(source, policy)
         pendingRecordingPolicy = policy
         val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) Manifest.permission.POST_NOTIFICATIONS else null
-        if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
+        val missing = capturePermissions(source).filterNot(::hasPermission)
+        if (missing.isEmpty()) {
             CaptureService.start(this, source, policy)
             notifications?.let { permissionLauncher.launch(arrayOf(it)) }
         } else {
             pendingSource = source
-            permissionLauncher.launch(listOfNotNull(Manifest.permission.RECORD_AUDIO, notifications).toTypedArray())
+            permissionLauncher.launch((missing + listOfNotNull(notifications)).toTypedArray())
+        }
+    }
+
+    private fun capturePermissions(source: String): List<String> = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (source == Settings.SOURCE_BEAN) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            } else {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
         }
     }
 

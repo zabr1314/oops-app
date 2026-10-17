@@ -8,6 +8,7 @@ an HttpOnly cookie. The access database is separate from the meeting store.
 import argparse
 import ast
 import datetime as dt
+import gzip
 import hashlib
 import json
 import mimetypes
@@ -23,8 +24,15 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 ID = re.compile(r'[A-Za-z0-9_-]{1,100}')
 STATIC = {'funnel.html', 'funnel.css', 'funnel.js', 'funnel-after.js', 'funnel-sample.json',
+          'funnel-live.js', 'funnel-live.css', 'funnel-content.js', 'funnel-content.css',
+          'funnel-content-playback.js', 'funnel-content-playback.css',
+          'funnel-wide.js', 'funnel-wide.css',
           'funnel-web.js', 'funnel-crawler.js', 'funnel-dashboard.js', 'funnel-spider.js', 'funnel-studio.css', 'funnel-studio.js', 'funnel-after-studio.js', 'funnel-after-studio.css', 'brand/mascot.png'}
 STATIC.update('funnel-desks/desk-%d.png' % n for n in range(1, 7))
+STATIC.update({'funnel-present.html', 'funnel-present.css', 'funnel-present.js',
+               'funnel-present-link.js', 'funnel-embed.css',
+               'presentation/oops-demo/manifest.json', 'presentation/oops-demo/oops-demo.pptx'})
+STATIC.update('presentation/oops-demo/slide-%d.png' % n for n in range(1, 7))
 STATIC.update('icons/' + name + '.svg' for name in ('desk', 'desktop', 'file-text', 'microphone',
               'magnifying-glass', 'note-pencil', 'paper-plane-tilt', 'check-circle'))
 
@@ -33,6 +41,13 @@ class HistoryError(ValueError):
     def __init__(self, status, code):
         super().__init__(code)
         self.status, self.code = status, code
+
+
+class MeetingScope(list):
+    """Request-local IDs plus safe automatic-access status, never source bodies."""
+    def __init__(self, values=(), auto_connect=None):
+        super().__init__(values)
+        self.auto_connect = auto_connect or dict(enabled=False, from_started_at=None)
 
 
 def identifier(value):
@@ -140,7 +155,7 @@ def deployed_pipeline(source_dir):
 class StoredHistory:
     """Read the current owning store directly; no resync, cleanup write or model replay."""
     def __init__(self, state_dir, builder=None, minutes_file=None, backend_source_dir=None, reanalyses_dir=None,
-                 reanalysis_builder=None, replays_dir=None):
+                 reanalysis_builder=None, replays_dir=None, live_minutes_db=None):
         self.state_dir = os.path.realpath(state_dir)
         self.directory = os.path.join(self.state_dir, 'meetings')
         self.builder = builder
@@ -149,6 +164,7 @@ class StoredHistory:
         self.reanalyses_dir = os.path.realpath(reanalyses_dir) if reanalyses_dir else None
         self.reanalysis_builder = reanalysis_builder
         self.replays_dir = os.path.realpath(replays_dir) if replays_dir else None
+        self.live_minutes_db = os.path.abspath(live_minutes_db) if live_minutes_db else None
 
     def replay(self, sid):
         """A prepared replay file (e.g. an offline recording run through the pipeline), or None.
@@ -187,6 +203,62 @@ class StoredHistory:
                 utterance['review'] = saved
         return row
 
+    def automatic_meetings(self, from_started_at, excluded=(), only_sid=None):
+        """Discover newly consented cloud meetings in the owning store, fresh per request.
+
+        No historical/temporary session or prepared replay acquires access just
+        because a file appeared. Nothing is copied to the access database.
+        """
+        if only_sid is not None and (not isinstance(only_sid, str) or not ID.fullmatch(only_sid)):
+            return []
+        from archive_policy import instant
+        cutoff = instant(from_started_at)
+        now = dt.datetime.now(dt.timezone.utc)
+        candidates = []
+        if only_sid is None:
+            try:
+                names = os.listdir(self.directory)
+            except FileNotFoundError:
+                return candidates
+        else:
+            # Detail authorization checks only the requested automatic source;
+            # the same fresh cloud-save, deletion and expiry checks still apply.
+            names = [only_sid + '.json']
+        for name in names:
+            if not name.endswith('.json') or not ID.fullmatch(name[:-5]):
+                continue
+            sid = name[:-5]
+            if sid in excluded:
+                continue
+            # A separately prepared replay is only authorized by an explicit ID,
+            # including when it happens to collide with an owning meeting ID.
+            if self.replays_dir and os.path.lexists(os.path.join(self.replays_dir, name)):
+                continue
+            try:
+                row = self.row(sid)  # current tombstone, symlink and transcript TTL
+                policy = row.get('storage_policy')
+                if (not isinstance(policy, dict) or type(policy.get('version')) is not int or policy.get('version') != 1
+                        or policy.get('recording_mode') != 'meeting'
+                        or policy.get('cloud_save_confirmed') is not True
+                        or row.get('recording_mode', 'meeting') != 'meeting'):
+                    continue
+                started = instant(row.get('started_at'))
+                if (started < cutoff or started > now + dt.timedelta(minutes=5)
+                        or instant(policy.get('archive_started_at')) != started):
+                    continue
+                # Only the existing formal-cloud contract is eligible. Validate
+                # its retention values rather than interpreting partial metadata
+                # as consent or allowing a malformed expiry to become public.
+                days = policy.get('transcript_retention_days')
+                if (type(days) is not int or days not in (7, 30, 90)
+                        or instant(policy.get('transcript_expires_at')) != started + dt.timedelta(days=days)):
+                    continue
+                candidates.append(sid)
+            except (HistoryError, OSError, ValueError, TypeError, KeyError):
+                # A failed/malformed individual source never expands access.
+                continue
+        return sorted(candidates)
+
     @staticmethod
     def traces(row):
         sources = {u['id']: source_hash(u) for u in row['utterances']}
@@ -207,15 +279,17 @@ class StoredHistory:
             result.append(event)
         return result
 
-    def minutes(self, row):
-        try:
-            state = read_json(self.minutes_file)
-        except FileNotFoundError:
-            return dict(status='unavailable', reason='not_recorded')
+    def minutes(self, row, state=None):
+        if state is None:
+            try:
+                state = read_json(self.minutes_file)
+            except FileNotFoundError:
+                state = {}
         entry = (state.get('meetings') or {}).get(row['session_id']) or {}
         analysis = entry.get('analysis')
-        if not isinstance(analysis, dict):
-            return dict(status='pending' if row.get('ended_at') else 'unavailable', reason='not_recorded')
+        if not isinstance(analysis, dict) or not analysis:
+            return dict(status='pending' if row.get('ended_at') else 'unavailable',
+                        reason='not_recorded' if row.get('ended_at') else 'in_progress')
         fingerprint = entry.get('analysis_fingerprint')
         reviewed = any(any((u.get('review') or {}).get(k) is not None for k in ('speaker', 'owner', 'verdict'))
                        for u in row['utterances'])
@@ -228,10 +302,17 @@ class StoredHistory:
         generation = dict(recorded_calls=None, successful_runs=analysis.get('runs') if type(analysis.get('runs')) is int else None,
                           configured_runs=None, mode='majority_vote', evidence='stored',
                           source_binding='verified' if fingerprint else 'legacy_unverified')
+        model = analysis.get('generation_model')
+        if isinstance(model, str) and model.strip() and len(model) <= 200:
+            generation['model'] = model
         trace = entry.get('analysis_trace')
         if isinstance(trace, dict):
             generation.update({key: trace[key] for key in ('recorded_calls', 'successful_runs', 'configured_runs',
                                 'latency_ms', 'mode') if key in trace})
+            for key in ('requested_model', 'response_model'):
+                model = trace.get(key)
+                if isinstance(model, str) and model.strip() and len(model) <= 200:
+                    generation[key] = model
             stamp = trace.get('recorded_at')
             if isinstance(stamp, str) and len(stamp) <= 40:
                 try:
@@ -253,6 +334,7 @@ class StoredHistory:
 
     def listing(self, scope):
         rows = []
+        minutes_state = None
         for sid in scope:
             replay = self.replay(sid)
             if replay is not None:
@@ -268,10 +350,16 @@ class StoredHistory:
                 if error.status in (404, 410):
                     continue
                 raise
-            minutes = self.minutes(row)
+            if minutes_state is None:
+                try:
+                    minutes_state = read_json(self.minutes_file)
+                except FileNotFoundError:
+                    minutes_state = {}
+            minutes = self.minutes(row, state=minutes_state)
             theme = (minutes.get('minutes') or {}).get('theme')
             rows.append(dict(session_id=sid, title=row.get('title') or theme or (row.get('agenda') or {}).get('goal') or '会议',
                 started_at=row.get('started_at'), ended_at=row.get('ended_at'),
+                is_live=not bool(row.get('ended_at')), last_sync_at=row.get('last_sync_at'),
                 utterance_count=len(row['utterances']), trace_count=len(self.traces(row)),
                 transcript_status=row.get('transcript_status', 'available'), minutes_status=minutes['status']))
         rows.sort(key=lambda r: r.get('started_at') or '', reverse=True)
@@ -292,14 +380,35 @@ class StoredHistory:
         else:
             builder = self.builder
         result = builder(row, self.minutes(row), traces=self.traces(row))
+        source = result.setdefault('source', {})
+        source['live'] = dict(active=not bool(row.get('ended_at')), started_at=row.get('started_at'),
+                              ended_at=row.get('ended_at'), last_sync_at=row.get('last_sync_at'))
+        if self.live_minutes_db:
+            try:
+                # This store opens its SQLite database read-only. The viewer never
+                # loads model credentials or schedules processing on a GET.
+                from live_minutes import LiveMinutesStore
+                result['live_draft'] = LiveMinutesStore(self.live_minutes_db).view(row)
+            except (ImportError, OSError, ValueError, sqlite3.Error):
+                result['live_draft'] = dict(version=1, session_id=sid, draft=True,
+                    status='unavailable', reason='live_store_unavailable', interval_seconds=20)
         pipeline = deployed_pipeline(self.backend_source_dir)
         if pipeline:
             result['pipeline'] = dict(result.get('pipeline') or {}, **pipeline)
             generation = (result.get('post') or {}).get('generation')
             if isinstance(generation, dict) and pipeline.get('minutes_configured_runs') is not None:
                 generation['configured_runs'] = pipeline['minutes_configured_runs']
-        result.setdefault('source', {})['snapshot_hash'] = digest({key: result.get(key)
-            for key in ('sentences', 'post', 'post_status')})
+        source['snapshot_hash'] = digest(dict({key: result.get(key)
+            for key in ('sentences', 'post', 'post_status', 'live_draft')}, live=source['live']))
+        if sid in ('d401d862-7b4c-48d2-9d8a-c99cbe879daa', 'a332ef13-7fce-4895-9726-4d4ca548be83'):
+            try:
+                from assistant_reviews import attach
+            except ImportError:
+                result['content_review_status'] = dict(version=1, status='unavailable', reason='review_unavailable')
+            else:
+                # The original fresh row and replay remain the owning source;
+                # the independent review never replaces labels or traces.
+                result = attach(result, reanalysis_source_hash(row))
         return result
 
     def reanalysis_record(self, run_id):
@@ -589,10 +698,14 @@ class ReplayAccess:
     def key(token):
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def open_scope(self):
-        """Optional no-invite access: open-access.json beside the access database lists the meetings.
+    def open_scope(self, history=None, only_sid=None):
+        """Optional no-invite access from fixed IDs and explicitly enabled new meetings.
 
         Read on every request, so deleting the file restores invite-only access at once.
+        auto_meetings: {enabled: true, from_started_at: <zoned ISO timestamp>,
+                        excluded_meetings: [<optional IDs revoked from discovery>]}.
+        Automatic discovery only reads the configured owning store; it never
+        grants prepared replays or old sessions lacking the cloud-save contract.
         """
         path = os.path.join(os.path.dirname(os.path.abspath(self.path)), 'open-access.json')
         try:
@@ -602,13 +715,31 @@ class ReplayAccess:
             return None
         except (OSError, ValueError):
             return None
-        meetings = value.get('meetings') if isinstance(value, dict) else None
-        if not isinstance(meetings, list) or not meetings or len(meetings) > 200:
+        meetings = value.get('meetings', []) if isinstance(value, dict) else None
+        if not isinstance(meetings, list) or len(meetings) > 200:
             return None
         try:
-            return sorted({identifier(sid) for sid in meetings})
+            fixed = {identifier(sid) for sid in meetings}
         except HistoryError:
             return None
+        automatic = value.get('auto_meetings')
+        metadata = dict(enabled=False, from_started_at=None)
+        if isinstance(automatic, dict) and automatic.get('enabled') is True and history is not None:
+            from archive_policy import instant
+            try:
+                began = instant(automatic.get('from_started_at')).isoformat()
+                excluded = automatic.get('excluded_meetings', [])
+                if not isinstance(excluded, list) or len(excluded) > 10000:
+                    raise ValueError('invalid_automatic_exclusions')
+                excluded = {identifier(sid) for sid in excluded}
+            except (HistoryError, ValueError, TypeError):
+                pass  # Keep valid explicit IDs; malformed automatic config is closed.
+            else:
+                discovered = history.automatic_meetings(began, excluded) if only_sid is None else \
+                    history.automatic_meetings(began, excluded, only_sid=only_sid)
+                fixed.update(discovered)
+                metadata = dict(enabled=True, from_started_at=began)
+        return MeetingScope(sorted(fixed), metadata) if fixed or metadata['enabled'] else None
 
     def mint(self, scope, seconds=7200):
         if not scope or not 60 <= seconds <= 86400:
@@ -664,12 +795,49 @@ def make_handler(history, access, public_dir, url_prefix='/oops-meeting/history/
             pass  # Never log paths, invites, cookies or meeting text.
 
         def send(self, status, value, kind='application/json; charset=utf-8', cookie=None, public_metadata=False):
-            body = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False).encode()
+            body = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
+            # Callers have already checked the current scope and source expiry.
+            # Validators save retransmission, never permission/source validation.
+            conditional = status == 200 and kind.startswith('application/json') and self.request_path().startswith(('/api/meetings/', '/api/reanalyses/'))
+            validator_body = body
+            if conditional and isinstance(value, dict) and isinstance(value.get('pipeline'), dict) and 'verified_at' in value['pipeline']:
+                # This diagnostic timestamp changes on every read, even when all
+                # source/configuration data is unchanged. A weak validator ignores it.
+                stable = dict(value, pipeline={k: v for k, v in value['pipeline'].items() if k != 'verified_at'})
+                validator_body = json.dumps(stable, ensure_ascii=False, separators=(',', ':')).encode()
+            etag = 'W/"' + hashlib.sha256(validator_body).hexdigest() + '"' if conditional else None
+            if etag and etag in [v.strip() for v in self.headers.get('If-None-Match', '').split(',')]:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Vary', 'Accept-Encoding')
+                self.send_header('X-Robots-Tag', 'noindex, nofollow')
+                self.end_headers()
+                return
+            encoding = None
+            accepted = self.headers.get('Accept-Encoding', '')
+            accepts_gzip = False
+            for entry in accepted.lower().split(','):
+                parts = [part.strip() for part in entry.split(';')]
+                if parts[0] == 'gzip':
+                    try:
+                        accepts_gzip = all(float(part[2:]) > 0 for part in parts[1:] if part.startswith('q='))
+                    except ValueError:
+                        accepts_gzip = False
+            if status == 200 and len(body) >= 1024 and accepts_gzip and kind.startswith(('application/json', 'text/', 'application/javascript')):
+                compressed = gzip.compress(body, compresslevel=4, mtime=0)
+                if len(compressed) < len(body):
+                    body, encoding = compressed, 'gzip'
             self.send_response(status)
             for key, item in [('Content-Type', kind), ('Content-Length', str(len(body))), ('Cache-Control', 'no-store'),
                     ('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'no-referrer'),
                     ('X-Robots-Tag', 'noindex, nofollow'), ('Cross-Origin-Resource-Policy', 'same-origin')]:
                 self.send_header(key, item)
+            self.send_header('Vary', 'Accept-Encoding')
+            if etag:
+                self.send_header('ETag', etag)
+            if encoding:
+                self.send_header('Content-Encoding', encoding)
             if cookie:
                 self.send_header('Set-Cookie', cookie)
             if public_metadata:
@@ -692,16 +860,21 @@ def make_handler(history, access, public_dir, url_prefix='/oops-meeting/history/
                 token = ''
             return token
 
-        def authenticated(self):
-            # Openly listed meetings plus whatever a personal session adds; never narrower than the open list.
-            shared = (access.open_scope() if hasattr(access, 'open_scope') else None) or []
+        def authenticated(self, only_sid=None):
+            # Fixed/public and personal IDs remain intact. A detail read only
+            # narrows automatic discovery, never the requested source checks.
+            shared = None
+            if hasattr(access, 'open_scope'):
+                shared = access.open_scope(history) if only_sid is None else \
+                    access.open_scope(history, only_sid=only_sid)
             try:
                 personal = access.scope(self.session_token())
             except HistoryError as error:
-                if error.status == 401 and shared:
+                if error.status == 401 and shared is not None:
                     return shared
                 raise
-            return sorted(set(personal) | set(shared))
+            return MeetingScope(sorted(set(personal) | set(shared or [])),
+                                getattr(shared, 'auto_connect', None))
 
         def do_GET(self):
             try:
@@ -712,7 +885,10 @@ def make_handler(history, access, public_dir, url_prefix='/oops-meeting/history/
                     return self.send(200, deployed_pipeline(getattr(history, 'backend_source_dir', None)) or
                                      dict(scope='unknown', label='部署源码尚未配置，当前流水线未知'), public_metadata=True)
                 if path == '/api/meetings':
-                    return self.send(200, history.listing(self.authenticated()))
+                    scope = self.authenticated()
+                    result = history.listing(scope)
+                    result['auto_connect'] = getattr(scope, 'auto_connect', dict(enabled=False, from_started_at=None))
+                    return self.send(200, result)
                 if path == '/api/reanalyses':
                     query = parse_qs(urlsplit(self.path).query)
                     return self.send(200, history.reanalysis_listing(self.authenticated(),
@@ -722,7 +898,8 @@ def make_handler(history, access, public_dir, url_prefix='/oops-meeting/history/
                     return self.send(200, history.reanalysis_detail(unquote(match[1]), self.authenticated()))
                 match = re.fullmatch(r'/api/meetings/([^/]+)', path)
                 if match:
-                    return self.send(200, history.detail(unquote(match[1]), self.authenticated()))
+                    sid = unquote(match[1])
+                    return self.send(200, history.detail(sid, self.authenticated(only_sid=sid)))
                 name = 'funnel.html' if path == '/' else path.lstrip('/')
                 if name not in STATIC:
                     raise HistoryError(404, 'not_found')
@@ -797,6 +974,7 @@ def main(argv=None):
     serve.add_argument('--minutes-file', help='Explicit deployed minutes state path, if different from feishu/state.json')
     serve.add_argument('--backend-source-dir', help='Installed scripts directory, for current pipeline provenance')
     serve.add_argument('--reanalyses-dir', help='Private source-bound reruns; defaults beside the access database')
+    serve.add_argument('--live-minutes-db', help='Read-only live Sol drafts, separate from official minutes')
     serve.add_argument('--public-dir', default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'public'))
     serve.add_argument('--port', type=int, default=8797)
     serve.add_argument('--url-prefix', default='/oops-meeting/history/')
@@ -804,6 +982,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == 'cleanup-reanalyses':
         text = cleanup_reanalyses(args.state_dir, args.reanalyses_dir, args.jobs_dir, args.receipts_dir)
+        from assistant_reviews import cleanup as cleanup_assistant_reviews
+        text['assistant_reviews'] = cleanup_assistant_reviews(StoredHistory(args.state_dir).row, reanalysis_source_hash)
         print(json.dumps(text, sort_keys=True))
         return
     access = ReplayAccess(args.access_db)
@@ -817,7 +997,8 @@ def main(argv=None):
     handler = make_handler(StoredHistory(args.state_dir, minutes_file=args.minutes_file,
                            backend_source_dir=args.backend_source_dir,
                            reanalyses_dir=args.reanalyses_dir or os.path.join(os.path.dirname(os.path.abspath(args.access_db)), 'reanalyses'),
-                           replays_dir=os.path.join(os.path.dirname(os.path.abspath(args.access_db)), 'replays')),
+                           replays_dir=os.path.join(os.path.dirname(os.path.abspath(args.access_db)), 'replays'),
+                           live_minutes_db=args.live_minutes_db or os.path.join(os.path.dirname(os.path.abspath(args.access_db)), 'live-minutes.sqlite3')),
                            access, args.public_dir, args.url_prefix,
                            secure_cookie=not args.insecure_local_cookie)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), handler)

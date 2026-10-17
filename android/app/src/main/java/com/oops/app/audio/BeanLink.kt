@@ -14,6 +14,11 @@ interface BeanLink {
     fun start(sink: Sink)
 
     fun stop()
+    /** Called only after decoding a full PCM frame, so an Opus packet alone cannot confirm startup. */
+    fun confirmAudioReady() {}
+    val supportsPause: Boolean get() = false
+    fun pause() { error("当前录音豆连接不支持暂停") }
+    fun resume() { error("当前录音豆连接不支持继续") }
 
     interface Sink {
         /** One 20 ms Opus packet. [sequence] is the device's packet counter; [isMark] the mark button. */
@@ -24,6 +29,8 @@ interface BeanLink {
 
         /** A step the user must take, e.g. "请先按录音豆的录音键"; null clears it. */
         fun onStatus(detail: String?) {}
+        fun onControlState(state: String) {}
+        fun onControlError(message: String) {}
 
         fun onError(error: Throwable)
     }

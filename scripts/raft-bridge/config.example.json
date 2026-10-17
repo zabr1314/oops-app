@@ -1,0 +1,10 @@
+{
+  "server": "https://YOUR-OOPS-BACKEND",
+  "workerToken": "",
+  "raftCredential": "",
+  "raftAgentId": "",
+  "raftServerId": "83138da0-afd5-4496-af30-b76bab71d1bc",
+  "serverUrl": "https://api.raft.build",
+  "worker": "oops-raft-macbook",
+  "pollIntervalMs": 10000
+}

@@ -149,6 +149,8 @@ object OopsEngine {
     private var voiceprintSampleId = ""
     private var voiceprintRevision = ""
     private var asr: VolcAsrClient? = null
+    private var pausedAsrClosure: VolcAsrClient.Closure? = null
+    private var pauseAsrHadFailure = false
     private var asrGeneration = 0
     private var asrDownSinceMs: Long? = null
     private var reconnectAttempt = 0
@@ -168,6 +170,12 @@ object OopsEngine {
     @Volatile private var level = 0f
 
     private lateinit var dailyCandidateStore: com.oops.app.store.DailyCandidateStore
+    private lateinit var personalMemoryStore: com.oops.app.store.PersonalMemoryStore
+    @Volatile private var personalMemoryProcessingObserved = false
+    private lateinit var dailyResultStore: com.oops.app.store.DailyListeningResultStore
+    private lateinit var dailyResultReader: com.oops.app.store.DailyListeningResults
+    private val dailyResultsLock = Any()
+    private var dailyResultEpoch = 0L
     private val cards = ConcurrentHashMap<String, RecallCard>()
     private val drafts = ConcurrentHashMap<String, ActionDraft>()
     private val ownerHints = ConcurrentHashMap<String, com.oops.app.backend.DraftResponse>()
@@ -197,6 +205,7 @@ object OopsEngine {
         taskBoard = null; boardPoll?.cancel(); boardPoll = null
         cards.clear(); drafts.keys.removeAll { !submitted.containsKey(it) }
         ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear(); topicEvidence.clear(); conflictPairs.clear()
+        tracker.clearAgentNotices(); agentNoticeEvidence = emptyMap()
         sessionIndex.snapshot().forEach { sessionIndex.finishAnalysis(sessionId, it.id) }
     }
 
@@ -237,6 +246,10 @@ object OopsEngine {
         }.getOrDefault(com.oops.app.notice.Agenda()))
         store = SavedClipStore(File(application.filesDir, "saved"))
         dailyCandidateStore = com.oops.app.store.DailyCandidateStore(File(application.filesDir, "daily-candidates"))
+        personalMemoryStore = com.oops.app.store.PersonalMemoryStore(application)
+        dailyResultStore = com.oops.app.store.DailyListeningResultStore(File(application.filesDir, "daily-results"))
+        dailyResultReader = com.oops.app.store.DailyListeningResults(dailyResultStore,
+            { dailyCandidateStore.listStrict() }, { store.listStrict() })
         operations = ActionOperationStore(File(application.filesDir, "actions"))
         ownerFeedback = com.oops.app.store.OwnerFeedbackStore(File(application.filesDir, "owner-feedback"))
         scope.launch(Dispatchers.IO) {
@@ -421,10 +434,22 @@ object OopsEngine {
 
     suspend fun requireRecordingPolicySupport() { (api as? HttpOopsApi)?.requireArchivePolicy() }
 
+    fun captureStartRejected(message: String) {
+        fail("capture", message)
+    }
+
     fun startCapture(kind: String, policy: com.oops.app.store.RecordingPolicy = com.oops.app.store.RecordingPolicy()) {
         synchronized(pipeline) {
             if (source != null) return
-            if (kind == Settings.SOURCE_BEAN) requireBeanSource(policy)
+            try {
+                requireCaptureSource(kind, policy)
+            } catch (error: Exception) {
+                // Service starts are asynchronous: throwing here bypasses MainActivity's
+                // bridge handler and crashes the process instead of reporting the refusal.
+                fail("capture", "无法开始收音：${error.message}")
+                CaptureService.stop(app)
+                return
+            }
             if (captureStopping || asr?.isFinishing == true) {
                 emit(OopsEvent.Toast("正在接收上一场的最后转写，请稍候"))
                 return
@@ -432,6 +457,7 @@ object OopsEngine {
             settings.source = kind
             val origin = requireNotNull(currentOrigin()) { "服务地址无效，无法绑定本场保存来源" }
             recordingPolicy = policy
+            dailyResultEpoch++ // an older stop result must never interrupt any later capture
             ring.reset()
             resetSpeakerPreview()
             transcript.clear()
@@ -464,6 +490,8 @@ object OopsEngine {
             optionalRequests = com.oops.app.backend.OptionalRequests()
             reconnectAttempt = 0
             asrDownSinceMs = null
+            pausedAsrClosure = null
+            pauseAsrHadFailure = false
             var src: AudioSource? = null
             _state.update {
                 it.copy(
@@ -472,7 +500,8 @@ object OopsEngine {
                     audioRetentionDays = policy.audioDays, transcriptRetentionDays = policy.transcriptDays,
                     audioExpired = false, transcriptExpired = false,
                     boardSourceRevision = boardSourceRevision,
-                    asr = "connecting", asrDetail = null, asrGaps = emptyList(), sourceDetail = null, sourceReady = false,
+                    asr = if (kind == "bean") "off" else "connecting", asrDetail = null, asrGaps = emptyList(), sourceDetail = null, sourceReady = false,
+                    captureControl = "waiting", captureControlError = null,
                     digestCounts = emptyMap(), notices = emptyList(), commitmentCount = 0, analysisPending = 0, analysisFailed = 0, tagsSupported = null, sessionTruncated = false,
                 )
             }
@@ -480,7 +509,9 @@ object OopsEngine {
                 val created = createAudioSource(kind)
                 src = created
                 source = created
-                openAsrLocked()
+                // Hardware discovery may take longer than the ASR server's no-audio timeout.
+                // Start its ASR only when the first hardware packet arrives.
+                if (kind != "bean") openAsrLocked()
                 created.start(audioListenerFor(created))
             } catch (e: Throwable) {
                 Log.e(TAG, "capture failed to start", e)
@@ -512,7 +543,32 @@ object OopsEngine {
 
     fun isCaptureStopping(): Boolean = synchronized(pipeline) { captureStopping }
 
-    fun stopCapture() {
+    fun setCapturePaused(paused: Boolean) {
+        val target = synchronized(pipeline) {
+            val current = source
+            if (current == null || !current.supportsPause || captureStopping) {
+                fail("capture.control", "当前音源尚不能暂停或继续")
+                return
+            }
+            if (voiceprintCapture != null) {
+                fail("capture.control", "请先完成或取消声音采集，再控制录音")
+                return
+            }
+            if (!paused && asr?.isFinishing == true) {
+                emit(OopsEvent.Toast("正在接收暂停前的最后转写，请稍候"))
+                return
+            }
+            _state.update { it.copy(captureControlError = null) }
+            current
+        }
+        // Do not hold the pipeline lock while entering the SDK callback lock.
+        runCatching { if (paused) target.pause() else target.resume() }.onFailure {
+            _state.update { s -> s.copy(captureControlError = it.message) }
+            fail("capture.control", it.message ?: "录音控制失败，请重试")
+        }
+    }
+
+    fun stopCapture(showDailyResult: Boolean = true, dailyReason: String = "stopped") {
         val src: AudioSource
         val client: VolcAsrClient?
         val archives: Boolean
@@ -520,20 +576,28 @@ object OopsEngine {
         val stoppedTracker: com.oops.app.notice.NoticeTracker
         val stoppedSync: SyncContext?
         val stoppedRecorder: com.oops.app.store.SessionRecorder?
+        val stoppedResultEpoch: Long
+        val stoppedPauseClosure: VolcAsrClient.Closure?
+        val stoppedPauseFailure: Boolean
         synchronized(pipeline) {
             src = source ?: return
             captureStopping = true
             source = null
+            tracker.clearAgentNotices(); agentNoticeEvidence = emptyMap()
+            updateAssistanceState()
             if (voiceprintCapture != null) cancelVoiceprintRecording()
             client = asr
+            stoppedPauseClosure = pausedAsrClosure
+            stoppedPauseFailure = pauseAsrHadFailure
             archives = recordingPolicy.archives
             stoppedSession = sessionId
             stoppedTracker = tracker
             stoppedSync = syncContext
             stoppedRecorder = recorder
+            stoppedResultEpoch = dailyResultEpoch
             reconnectJob?.cancel()
         }
-        runCatching { src.stop() }.onFailure {
+        val sourceStop = runCatching { src.stop() }.onFailure {
             fail("capture", "音源关闭或录音豆临时副本清理失败：${it.message ?: "请检查设备后重试"}")
         }
         stoppedRecorder?.closeAudio() // finals that flush after stop are still appended
@@ -547,18 +611,22 @@ object OopsEngine {
         _state.update { it.copy(capturing = false, level = 0f, sourceDetail = null, sourceReady = false, asr = if (client != null) it.asr else "off") }
         resetSpeakerPreview()
         if (!archives) {
-            synchronized(pipeline) {
+            val receipt = synchronized(pipeline) { synchronized(dailyResultsLock) {
                 invalidateTaskBoard("daily_stopped")
                 val ids = transcript.snapshot().map { it.id }
                 sessionId = ""; asrGeneration++; asr = null
+                val pendingAtClear = sessionIndex.pendingCount()
                 captureStopping = false
                 transcript.clear(); sessionIndex.reset(""); ring.reset(); cards.clear()
                 drafts.keys.removeAll { !submitted.containsKey(it) }
                 ownerHints.clear(); hintEpochs.clear(); suggestionEpochs.clear(); topicEvidence.clear(); conflictPairs.clear()
                 tracker = com.oops.app.notice.NoticeTracker(tracker.agenda)
                 _state.update { it.copy(sessionId = "", sessionMs = 0, bufferedMs = 0, asr = "off", digestCounts = emptyMap(), notices = emptyList(), commitmentCount = 0, analysisPending = 0) }
-                emit(OopsEvent.Pruned(ids)); emit(OopsEvent.Json("capture.cleared", JSONObject().put("mode", "daily")))
-            }
+                emit(OopsEvent.Pruned(ids)); emit(OopsEvent.Json("capture.cleared", JSONObject().put("mode", "daily")
+                    .put("session_id", stoppedSession)))
+                dailyResultReader.snapshot(stoppedSession, Instant.now().toString(), sourceStop.isSuccess, pendingAtClear, dailyReason)
+            } }
+            dailyEnded(receipt, stoppedResultEpoch, showDailyResult)
             scheduleUpload()
             return
         }
@@ -574,15 +642,16 @@ object OopsEngine {
                     it.copy(asr = "error", asrDetail = "ASR结束未确认，已收到的转写已保留")
                 }
             }
-            val outcome = client?.closure
+            val outcome = client?.closure ?: stoppedPauseClosure
             val closure = when {
                 !terminated -> "incomplete"
+                stoppedPauseFailure -> "incomplete"
                 outcome?.acknowledged == true -> "acknowledged"
                 outcome?.errorCode == "cancelled" -> "cancelled"
                 else -> "incomplete"
             }
-            val errorCode = if (!terminated) "finish_timeout" else outcome?.errorCode ?: if (client == null) "asr_unavailable" else null
-            val error = if (!terminated) "ASR结束未确认，已收到的转写已保留" else outcome?.error ?: if (client == null) "ASR未连接，完整性未确认" else null
+            val errorCode = if (!terminated) "finish_timeout" else if (stoppedPauseFailure) "pause_asr_incomplete" else outcome?.errorCode ?: if (outcome == null) "asr_unavailable" else null
+            val error = if (!terminated) "ASR结束未确认，已收到的转写已保留" else if (stoppedPauseFailure) "暂停前有转写结束未确认，已收到的原话仍保留" else outcome?.error ?: if (outcome == null) "ASR未连接，完整性未确认" else null
             withContext(Dispatchers.IO) {
                 stoppedRecorder?.flush()
                 runCatching { stoppedRecorder?.recordAsrClosure(closure, errorCode, error) }
@@ -613,14 +682,15 @@ object OopsEngine {
         require(policy.archives) { "请选择正式会议并确认云端保存" }
         require(source != null && !recordingPolicy.archives) { "请先开始日常聆听，再切换正式会议" }
         val kind = source!!.kind
-        stopCapture()
+        stopCapture(showDailyResult = false, dailyReason = "meeting_switch")
         startCapture(kind, policy)
     }
 
-    private fun requireBeanSource(policy: com.oops.app.store.RecordingPolicy) {
+    fun requireCaptureSource(kind: String, policy: com.oops.app.store.RecordingPolicy) {
+        if (kind != Settings.SOURCE_BEAN) return
         BeanSdk.requireCaptureAllowed(policy)
         check(BeanSdk.included) { "这个安装包没有包含录音豆 SDK，请选择手机麦克风" }
-        check(BeanAuth.fromBuildConfig().complete) { "缺少录音豆鉴权信息，请先完成设备授权" }
+        BeanAuth.fromBuildConfig().requireUsable()
     }
 
     private fun createAudioSource(kind: String): AudioSource = when (kind) {
@@ -642,7 +712,7 @@ object OopsEngine {
 
     /** Replace only the input; the timeline, transcript, retained clips and pending work survive. */
     private fun switchCaptureSource(kind: String) {
-        if (kind == Settings.SOURCE_BEAN) requireBeanSource(recordingPolicy)
+        requireCaptureSource(kind, recordingPolicy)
         val next = createAudioSource(kind) // construction failures must not stop the current working source
         val previous = synchronized(pipeline) {
             val active = source ?: return
@@ -673,10 +743,33 @@ object OopsEngine {
     }
 
     private fun audioListenerFor(owner: AudioSource) = object : AudioSource.Listener {
+        override fun onControlState(state: String) {
+            synchronized(pipeline) {
+                if (source !== owner) return
+                _state.update { it.copy(captureControl = state) }
+                if (state in listOf("paused", "stopped")) {
+                    level = 0f
+                    reconnectJob?.cancel()
+                    asrDownSinceMs = null
+                    _state.update { it.copy(sourceReady = false, level = 0f,
+                        asr = if (asr != null) "finishing" else "off",
+                        asrDetail = if (asr != null) "正在接收暂停前的最后转写" else null) }
+                    // The audio worker sends this only after all queued tail packets and partial PCM.
+                    asr?.finish()
+                }
+            }
+        }
+
+        override fun onControlError(message: String) {
+            if (source !== owner) return
+            _state.update { it.copy(captureControlError = message) }
+            fail("capture.control", message)
+        }
         override fun onAudio(pcm: ByteArray) {
             synchronized(pipeline) {
                 if (source !== owner) return
-                _state.update { if (it.sourceReady) it else it.copy(sourceReady = true) }
+                val pausedTail = _state.value.captureControl in listOf("draining", "paused")
+                _state.update { if (it.sourceReady || pausedTail) it else it.copy(sourceReady = true) }
                 voiceprintCapture?.let { recording ->
                     val complete = recording.append(pcm)
                     _state.update { it.copy(voiceprint = it.voiceprint.copy(phase = "recording", elapsedMs = recording.elapsedMs)) }
@@ -688,8 +781,15 @@ object OopsEngine {
                     if (r.capped && !_state.value.recordingCapped) _state.update { it.copy(recordingCapped = true) }
                 }
                 // 回听时给 ASR 送静音：外放的原声不会被再转写一遍，连接和时间轴也不断。
-                asr?.sendAudio(if (player.isPlaying) ByteArray(pcm.size) else pcm)
-                level = maxOf((Pcm.rms(pcm) * 5).toFloat().coerceAtMost(1f), level * 0.7f)
+                if (pausedTail && (asr == null || asr?.isFinishing == true)) {
+                    if (!pauseAsrHadFailure) {
+                        val message = "暂停后有迟到尾音，原音已保留，文字完整性需核对"
+                        _state.update { it.copy(captureControlError = message) }
+                        fail("capture.control", message)
+                    }
+                    pauseAsrHadFailure = true
+                } else asr?.sendAudio(if (player.isPlaying) ByteArray(pcm.size) else pcm)
+                level = if (pausedTail) 0f else maxOf((Pcm.rms(pcm) * 5).toFloat().coerceAtMost(1f), level * 0.7f)
             }
         }
 
@@ -725,6 +825,7 @@ object OopsEngine {
             synchronized(pipeline) {
                 if (source !== owner) return
                 _state.update { it.copy(sourceReady = ready) }
+                if (ready && owner.kind == "bean" && asr == null && _state.value.asr == "off") openAsrLocked()
                 if (!ready) _state.update { it.copy(liveSpeakers = emptyList(), liveOverlap = false, liveSpeakerStatus = "waiting") }
             }
         }
@@ -844,6 +945,8 @@ object OopsEngine {
     // ---- streaming ASR ---------------------------------------------------------------------
 
     private fun openAsrLocked() {
+        if (source?.kind == "bean" && !_state.value.sourceReady) return
+        pausedAsrClosure = null
         val credentials = settings.volc
         if (!credentials.isConfigured) {
             _state.update { it.copy(asr = "unconfigured", asrDetail = "android/local.properties 里还没配置火山 ASR 密钥") }
@@ -929,6 +1032,7 @@ object OopsEngine {
     private fun tagUtterance(session: String, u: Utterance) {
         val client = api
         val service = serviceEpoch
+        val personalMemoryRequested = synchronized(pipeline) { session == sessionId && !recordingPolicy.archives }
         val policy = optionalRequests
         val reservation = policy.tryReserve("tag") ?: run {
             synchronized(pipeline) {
@@ -942,7 +1046,7 @@ object OopsEngine {
         val queuedAt = SystemClock.elapsedRealtime()
         scope.launch(Dispatchers.IO) {
             try {
-                val request = com.oops.app.backend.TagRequest(session, u.toCandidate(), context.map { it.toCandidate() })
+                val request = com.oops.app.backend.TagRequest(session, u.toCandidate(), context.map { it.toCandidate() }, personalMemoryRequested)
                 var httpStart = 0L
                 val result = policy.request(reservation) { httpStart = SystemClock.elapsedRealtime(); client.tagUtterance(request) }
                 val done = SystemClock.elapsedRealtime()
@@ -958,7 +1062,23 @@ object OopsEngine {
                         transcript.setTag(u.id, result.tag, result.prob, result.engine)
                         _state.update { it.copy(tagsSupported = true) }
                         if (updated != null) {
-                            if (!recordingPolicy.archives) dailyCandidateStore.upsert(session, updated)
+                            if (!recordingPolicy.archives) synchronized(dailyResultsLock) {
+                                val cutoff = (nowMs - RETENTION_MS).coerceAtLeast(0)
+                                val available = (context + u).mapNotNull { original ->
+                                    sessionIndex.get(original.id)?.takeIf { current -> current.text == original.text &&
+                                        current.startMs == original.startMs && current.endMs == original.endMs && current.startMs >= cutoff }
+                                }
+                                val highlight = result.highlight?.let { JSONObject(it.toString()).put("engine", result.engine) }
+                                if (personalMemoryRequested && available.any { it.id == u.id }) result.personalMemory?.let { personal ->
+                                    runCatching { personalMemoryStore.offer(session, updated, personal, available) }
+                                        .onSuccess { changed ->
+                                            personalMemoryProcessingObserved = true
+                                            if (changed) emit(OopsEvent.Json("personal.candidates.changed", JSONObject().put("version", 2)))
+                                        }
+                                        .onFailure { fail("personal.candidates", "自动个人候选未能保存，请重新读取核对") }
+                                }
+                                if (available.any { it.id == u.id }) dailyCandidateStore.upsert(session, updated, highlight, available)
+                            }
                             if (!_state.value.audioExpired && result.tag in com.oops.app.buffer.SessionIndex.RETAINED_TAGS) {
                                 val slice = ring.readAvailable(Pcm.msToSamples((u.startMs - CLIP_PAD_MS).coerceAtLeast(0)),
                                     Pcm.msToSamples(u.endMs + CLIP_PAD_MS))
@@ -1136,6 +1256,10 @@ object OopsEngine {
                 .filter { com.oops.app.backend.namedSpeaker(it.name) != null && it.score.isFinite() }.take(2)
             val trial = if (segments.isEmpty()) result?.usableTrial(u).orEmpty() else emptyList()
             val previous = sessionIndex.get(u.id)
+            // Persist the new excerpt version before publishing its identity.
+            // Confirmation takes the same pipeline lock and cannot race this change.
+            if (!recordingPolicy.archives && !personalSpeakerChanged(session, u.id, previous?.manualSpeaker ?: name,
+                    previous != null && previous.segments != segments)) return
             if (previous != null && (previous.speaker != name || previous.segments != segments)) invalidateTaskBoard("speaker_changed", setOf(u.id))
             sessionIndex.setSpeaker(session, u.id, name, segments, status, score, preview, hints, trial)?.let {
                 syncUtterance(session, it)
@@ -1217,6 +1341,8 @@ object OopsEngine {
         val previous = taskBoard
         taskSourceVersions.invalidate(sourceIds)
         boardSourceRevision++
+        agentNoticeEvidence = emptyMap()
+        if (tracker.clearAgentNotices()) updateAssistanceState()
         boardPoll?.cancel(); boardPoll = null
         taskBoard = null; taskBoardContext = null
         drafts.entries.forEach { (id, draft) ->
@@ -1333,7 +1459,7 @@ object OopsEngine {
     private fun reconnectAsrNow() {
         synchronized(pipeline) {
             // A live or connecting client exists while `asr` is set; it is null only during the backoff wait.
-            if (source == null || asr != null || _state.value.asr == "error") return
+            if (source == null || asr != null || _state.value.asr == "error" || source?.kind == "bean" && !_state.value.sourceReady) return
             reconnectJob?.cancel()
             reconnectAttempt = 0
             Log.i(TAG, "network available, reconnecting ASR now")
@@ -1344,9 +1470,17 @@ object OopsEngine {
     private fun onAsrClosed(generation: Int, error: String?, fatal: Boolean) {
         synchronized(pipeline) {
             if (generation != asrGeneration) return
+            val closedClient = asr
             asr = null
             if (source == null) {
                 _state.update { it.copy(asr = if (error == null) "off" else "error", asrDetail = error) }
+                return
+            }
+            if (_state.value.captureControl in listOf("paused", "stopped")) {
+                pausedAsrClosure = closedClient?.closure
+                if (pausedAsrClosure?.acknowledged != true) pauseAsrHadFailure = true
+                _state.update { it.copy(asr = "off", asrDetail = error) }
+                if (error != null) fail("capture.control", "暂停前的转写结束未确认，已收到的原话仍保留：$error")
                 return
             }
             if (asrDownSinceMs == null) asrDownSinceMs = nowMs
@@ -1420,11 +1554,15 @@ object OopsEngine {
             val received = client.recall(RecallRequest(session, trigger, query, now, inWindow.map { it.toCandidate() }))
             if (!currentSource(session, epoch)) return
             val byId = inWindow.associateBy { it.id }
-            response = received.copy(picks = PickPolicy.validated(received.picks, byId.keys) { id ->
+            val available: (String) -> Boolean = { id ->
                 val u = byId.getValue(id)
                 u.endMs > u.startMs && ring.contains(Pcm.msToSamples(u.startMs), Pcm.msToSamples(u.endMs))
-            })
-            if (PickPolicy.isConfident(response.picks)) break
+            }
+            val semantic = received.engine == "gpt-6.1-sol"
+            response = received.copy(picks = if (semantic) PickPolicy.semanticValidated(received.picks, byId.keys, available)
+                else PickPolicy.validated(received.picks, byId.keys, available))
+            // A semantic result has no probability threshold. Do not turn a null score into another billed request.
+            if (semantic || PickPolicy.isConfident(response.picks)) break
         }
         if (response == null) {
             val reason = if (all.isEmpty()) "还没有转写内容，先说几句话试试" else "最近 5 分钟内没有可召回的内容"
@@ -1438,7 +1576,7 @@ object OopsEngine {
             u != null && u.endMs > u.startMs &&
                 ring.contains(Pcm.msToSamples(u.startMs), Pcm.msToSamples(u.endMs))
         }
-        val decision = PickPolicy.decide(valid)
+        val decision = if (response.engine == "gpt-6.1-sol") PickPolicy.semanticDecision(valid) else PickPolicy.decide(valid)
         if (decision == null) {
             emit(OopsEvent.RecallNotFound("没有找到对得上的原话"))
             return
@@ -1531,6 +1669,7 @@ object OopsEngine {
                 .put("session_id", session)
                 .put("trigger", card.trigger)
                 .put("source", "语音转写")
+                .put("recording_mode", sessionModes[session] ?: recordingPolicy.mode)
                 .put("clip_start_ms", startMs)
                 .put("clip_end_ms", endMs)
                 .put("utterances", utterances)
@@ -1550,40 +1689,177 @@ object OopsEngine {
         cards.remove(cardId)
     }
 
-    fun dailyCandidates() {
-        scope.launch(Dispatchers.IO) { emit(OopsEvent.Json("daily.candidates", JSONObject().put("items", JSONArray(dailyCandidateStore.list())))) }
-    }
-
-    fun discardDailyCandidate(session: String, id: String) {
+    private fun dailyEnded(receipt: JSONObject, stoppedEpoch: Long, show: Boolean) {
         scope.launch(Dispatchers.IO) {
-            if (dailyCandidateStore.find(session, id) != null) dailyCandidateStore.remove(session, id)
-            dailyCandidates()
+            val payload = synchronized(dailyResultsLock) {
+                dailyResultReader.finish(receipt)
+            }
+            synchronized(pipeline) {
+                payload.put("auto_open", com.oops.app.store.DailyListeningResults.mayAutoOpen(show, stoppedEpoch,
+                    dailyResultEpoch, sessionId, _state.value.capturing))
+                emit(OopsEvent.Json(if (show) "daily.ended" else "daily.results", payload))
+            }
         }
     }
 
-    /** User confirmation saves only this edited short excerpt, never the daily full transcript or audio. */
-    fun confirmDailyCandidate(session: String, id: String, quote: String, confirmed: Boolean) {
-        require(confirmed && quote.isNotBlank() && quote.length <= 280) { "请核对 1–280 字内容后明确确认" }
+    fun dailyResults(session: String? = null, requestId: String = "") {
+        requireDailyScope(session)
         scope.launch(Dispatchers.IO) {
-            val candidates = dailyCandidateStore
-            val candidate = candidates.find(session, id) ?: return@launch fail("save", "候选已失效，请重新打开核对")
-            val savedId = "daily-$session-$id"
-            val line = JSONObject().put("id", id).put("text", quote).put("start_ms", candidate.getLong("start_ms"))
-                .put("end_ms", candidate.getLong("end_ms")).put("tag", candidate.getString("tag"))
-            store.save(savedId, JSONObject().put("id", savedId).put("saved_at", Instant.now().toString()).put("session_id", session)
-                .put("source", "本人核对的日常短摘录").put("visibility", "private").put("confirmed", true)
-                .put("original_available", false).put("audio_expired", true).put("utterances", JSONArray().put(line)), null)
-            candidates.remove(session, id)
-            _state.update { it.copy(savedCount = store.count()) }
-            emit(OopsEvent.Saved(savedId, store.count()))
+            val payload = synchronized(dailyResultsLock) { dailyResultReader.read(session, requestId) }
+            emit(OopsEvent.Json("daily.results", payload))
+        }
+    }
+
+    private fun dailyCandidatesPayload(session: String?, requestId: String): JSONObject {
+        val selected = session?.takeIf { it.isNotBlank() }
+        require(selected == null || selected.matches(Regex("[A-Za-z0-9_-]{1,100}")))
+        val read = runCatching { dailyCandidateStore.listStrict() }
+        val values = read.getOrDefault(emptyList()).filter { selected == null || it.optString("session_id") == selected }
+        return JSONObject().put("items", JSONArray(values)).put("session_id", selected ?: JSONObject.NULL).put("requestId", requestId)
+            .put("candidate_count", if (read.isSuccess) values.size else JSONObject.NULL)
+            .put("storage", JSONObject().put("candidates", if (read.isSuccess) "ok" else "failed"))
+            .put("errors", JSONArray().also { if (read.isFailure) it.put(JSONObject().put("scope", "candidates")
+                .put("code", "DAILY_RESULT_READ_FAILED").put("message", "私人候选读取失败，请重试；当前条数未知")) })
+    }
+
+    fun dailyCandidates(session: String? = null, requestId: String = "") {
+        requireDailyScope(session)
+        scope.launch(Dispatchers.IO) {
+            val payload = synchronized(dailyResultsLock) { dailyCandidatesPayload(session, requestId) }
+            emit(OopsEvent.Json("daily.candidates", payload))
+        }
+    }
+
+    private fun refreshDailyScope(session: String?, requestId: String) {
+        val (candidates, result) = synchronized(dailyResultsLock) {
+            dailyCandidatesPayload(session, requestId) to dailyResultReader.read(session, requestId)
+        }
+        emit(OopsEvent.Json("daily.candidates", candidates))
+        emit(OopsEvent.Json("daily.results", result))
+    }
+
+    fun discardDailyCandidate(session: String, id: String, scopeSessionId: String? = session, requestId: String = "") {
+        requireDailyScope(session); requireDailyScope(scopeSessionId)
+        scope.launch(Dispatchers.IO) {
+            try {
+                synchronized(dailyResultsLock) {
+                    dailyCandidateStore.removeStrict(session, id)
+                }
+            } catch (_: Exception) { fail("daily.results", "舍弃失败，原候选尚未确认移除，请重试",
+                JSONObject().put("requestId", requestId).put("session_id", scopeSessionId ?: JSONObject.NULL)); return@launch }
+            refreshDailyScope(scopeSessionId, requestId)
+        }
+    }
+
+    /** The user's edited memory and its immutable short source quotes are stored separately. */
+    fun confirmDailyCandidate(session: String, id: String, quote: String, confirmed: Boolean,
+                              scopeSessionId: String? = session, requestId: String = "") {
+        requireDailyScope(session); requireDailyScope(scopeSessionId)
+        require(confirmed && quote.isNotBlank() && quote.codePointCount(0, quote.length) <= 280) { "请核对 1–280 字内容后明确确认" }
+        scope.launch(Dispatchers.IO) {
+            try {
+                synchronized(dailyResultsLock) {
+                    val candidate = dailyCandidateStore.listStrict().firstOrNull { it.optString("session_id") == session && it.optString("id") == id }
+                        ?: error("候选已失效，请重新打开核对")
+                    val savedId = "daily-$session-$id"
+                    val evidence = candidate.optJSONArray("evidence")?.let { JSONArray(it.toString()) } ?: JSONArray().put(
+                        JSONObject().put("id", id).put("quote", candidate.getString("quote"))
+                            .put("start_ms", candidate.getLong("start_ms")).put("end_ms", candidate.getLong("end_ms")))
+                    val lines = JSONArray((0 until evidence.length()).map { index -> evidence.getJSONObject(index).let { part ->
+                        JSONObject().put("id", part.getString("id")).put("text", part.getString("quote"))
+                            .put("start_ms", part.getLong("start_ms")).put("end_ms", part.getLong("end_ms"))
+                            .put("tag", candidate.getString("tag"))
+                    } })
+                    store.save(savedId, JSONObject().put("id", savedId).put("saved_at", Instant.now().toString()).put("session_id", session)
+                        .put("source", "本人核对的日常私人记忆").put("visibility", "private").put("confirmed", true)
+                        .put("recording_mode", "daily").put("confirmed_text", quote).put("quote", candidate.getString("quote"))
+                        .put("summary", candidate.opt("summary") ?: JSONObject.NULL).put("evidence", evidence)
+                        .put("source_fingerprint", candidate.opt("source_fingerprint") ?: JSONObject.NULL)
+                        .put("content_kind", candidate.opt("content_kind") ?: JSONObject.NULL)
+                        .put("analysis_engine", candidate.opt("analysis_engine") ?: JSONObject.NULL)
+                        .put("original_available", false).put("audio_expired", true).put("utterances", lines), null)
+                    dailyCandidateStore.removeStrict(session, id)
+                    _state.update { it.copy(savedCount = store.count()) }
+                    emit(OopsEvent.Saved(savedId, store.count()))
+                }
+            } catch (_: Exception) {
+                fail("daily.results", "保存未完成，请重试并核对已有片段；不会自动舍弃候选",
+                    JSONObject().put("requestId", requestId).put("session_id", scopeSessionId ?: JSONObject.NULL))
+                return@launch
+            }
+            refreshDailyScope(scopeSessionId, requestId)
         }
     }
 
     fun savedItems(): List<JSONObject> = store.list()
 
+    /** Typed personal suggestions are independent of generic daily highlights and never auto-confirmed. */
+    fun personalCandidates(action: String, payload: JSONObject) {
+        scope.launch(Dispatchers.IO) {
+            val result = synchronized(pipeline) {
+                personalMemoryStore.candidates(action, payload)
+                    .put("processing_status", if (personalMemoryProcessingObserved) "supported" else "not_observed")
+            }
+            emit(OopsEvent.Json("personal.candidates.result", result))
+        }
+    }
+
+    /** Caller holds pipeline. A failed durable source update must not publish a new identity. */
+    private fun personalSpeakerChanged(session: String, id: String, speaker: String?, force: Boolean = false): Boolean {
+        return runCatching { personalMemoryStore.speakerChanged(session, id, speaker, force) }.fold(
+            onSuccess = { changed ->
+                if (changed) emit(OopsEvent.Json("personal.candidates.changed", JSONObject().put("version", 2)))
+                true
+            },
+            onFailure = {
+                fail("personal.candidates", "个人来源核对未能保存，本次说话人变更未应用，请重新读取后重试")
+                false
+            },
+        )
+    }
+
+    private fun requireDailyScope(session: String?) {
+        require(session.isNullOrBlank() || session.matches(Regex("[A-Za-z0-9_-]{1,100}"))) { "日常结果来源无效，请重新打开" }
+    }
+
     fun transcriptSnapshot(): List<Utterance> = transcript.snapshot()
 
     // ---- action ----------------------------------------------------------------------------
+
+    /** Reuse a human-checked minutes item; no model extraction or external write occurs here. */
+    fun draftItemTask(payload: JSONObject) {
+        val session = payload.getString("sessionId")
+        val item = payload.getString("itemId")
+        val fingerprint = payload.getString("fingerprint")
+        require(session.isNotBlank() && item.isNotBlank() && fingerprint.isNotBlank()) { "请重新打开当前事项" }
+        val epoch = serviceEpoch
+        val client = api
+        val key = "item-draft:$session:$item"
+        val context = serviceContext(epoch).put("operation", "items.task.draft").put("sessionId", session)
+            .put("itemId", item).put("requestId", payload.optString("requestId"))
+        if (!inFlight.add(key)) {
+            fail("items.task", "这件事的草稿仍在读取，请稍后重试", context)
+            return
+        }
+        scope.launch {
+            try {
+                val result = client.draftFromItem(session, item, fingerprint)
+                if (epoch != serviceEpoch) return@launch
+                require(result != null) { "当前后端尚未支持从已核对事项创建任务，请更新服务后重试" }
+                val draft = com.oops.app.backend.ItemTaskDraft.fromResponse(result, session, item, fingerprint)
+                drafts[draft.draftId] = draft
+                emit(OopsEvent.Json("action.draft", com.oops.app.bridge.BridgeJson.draft(draft)
+                    .put("requestId", payload.optString("requestId")).put("sessionId", session).put("sourceItemId", item)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (epoch == serviceEpoch) fail("items.task", error.message ?: "任务草稿未能读取，请重试", context
+                    .put("sourceChanged", error is com.oops.app.backend.ActionSourceRejected || error is com.oops.app.backend.HttpFailure && error.status == 409)
+                    .put("code", (error as? com.oops.app.backend.ActionSourceRejected)?.code
+                        ?: (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: "ITEM_TASK_DRAFT_FAILED"))
+            } finally { inFlight.remove(key) }
+        }
+    }
 
     fun draftAction(cardId: String, utteranceIds: List<String>) {
         val card = cards[cardId] ?: return fail("action", "这张卡片已失效")
@@ -1668,7 +1944,7 @@ object OopsEngine {
     fun recordOwnerFeedback(payload: JSONObject) {
         val draft = drafts[payload.optString("draftId")] ?: return
         if (submitted.containsKey(draft.draftId)) return
-        val session = sessionId
+        val session = TaskSourceBinding.sessionId(draft.evidence.sourceBinding) ?: sessionId
         val selected = payload.optString("selectedOwner").ifBlank { null }
         val previous = payload.optString("previousOwner").ifBlank { null }
         val suggestion = payload.optString("modelSuggestion").ifBlank { null }
@@ -1696,21 +1972,24 @@ object OopsEngine {
                 return fail("action", "原操作的来源已变化，请重新核对当前原话并起草")
         }
         val existing = submitted[draftId]
+        val sourceSession = existing?.request?.sessionId ?: TaskSourceBinding.sessionId(base.evidence.sourceBinding) ?: sessionId
         if (existing?.result?.sourceInvalidated == true)
             return fail("action", "旧依据已撤回，请重新核对原话并生成新草稿；本次没有创建任务")
         if (ActionWorkflow.shouldSubmit(existing?.result) && !(existing?.mock ?: (api is MockOopsApi))) {
             val evidence = existing?.request?.draft?.evidence ?: base.evidence
-            val session = existing?.request?.sessionId ?: sessionId
+            val session = sourceSession
             if (!TaskSourceBinding.valid(evidence.sourceBinding, session, evidence.utteranceIds, evidence.quote))
                 return fail("action", base.sourceError ?: "原话尚未由当前服务器核对，请重新打开来源并生成草稿；不会创建飞书任务")
         }
         if (!inFlight.add("confirm:$draftId")) return // 防连点
         val opId = opIds.getOrPut(draftId) { UUID.randomUUID().toString() }
         val confirmedDraft = com.oops.app.backend.DraftPolicy.confirm(base, who, what, whenIso, whenRaw, constraint, ownerSelectionSource)
-        val draft = existing?.request?.draft ?: if (recordingPolicy.archives) confirmedDraft else confirmedDraft.copy(
+        val dailySource = base.evidence.sourceBinding?.let { runCatching { JSONObject(it).optString("scope") == "daily" }.getOrDefault(false) }
+            ?: (sourceSession == sessionId && !recordingPolicy.archives)
+        val draft = existing?.request?.draft ?: if (!dailySource) confirmedDraft else confirmedDraft.copy(
             evidence = confirmedDraft.evidence.copy(quote = confirmedDraft.evidence.quote.take(280)), context = null)
         val operation = existing ?: ActionOperationStore.Operation(
-            ConfirmRequest(opId, sessionId, draft), settings.backendBaseUrl, api.name == "mock",
+            ConfirmRequest(opId, sourceSession, draft), settings.backendBaseUrl, api.name == "mock",
             ActionResult(opId, ActionResult.PENDING, mock = api.name == "mock"),
         )
         // Persist before the network call. A retry uses this frozen request, even after a restart.
@@ -1735,7 +2014,9 @@ object OopsEngine {
         val request = operation.request
         val draftId = request.draft.draftId
         val client = if (operation.mock) api.takeIf { it.name == "mock" } ?: MockOopsApi(Settings.TEAM)
-            else HttpOopsApi(http, operation.backendUrl, settings.backendTokenFor(operation.backendUrl))
+            else HttpOopsApi(http, operation.backendUrl, settings.backendTokenFor(operation.backendUrl),
+                personalToken = { settings.feishuSessionFor(operation.backendUrl) },
+                savePersonalToken = { settings.setFeishuSessionFor(operation.backendUrl, it) }, enablePersonalIdentity = true)
         emit(OopsEvent.ActionUpdate(draftId,
             if (!submit && operation.result.sourceBlocked) ActionWorkflow.restoredPending(operation.result).copy(polling = true)
             else ActionResult(request.opId, ActionResult.PENDING, polling = true, mock = operation.mock,
@@ -1795,7 +2076,7 @@ object OopsEngine {
             require(mode in setOf("enroll", "test")) { "录音模式无效" }
             require(mode == "test" || name in Settings.TEAM) { "请先选择本人姓名" }
             require(_state.value.voiceprint.phase !in setOf("saving", "testing", "checking", "loading", "recording")) { "请等待当前操作结束" }
-            val kind = source?.kind ?: Settings.SOURCE_MIC
+            val kind = source?.kind ?: settings.source
             require(kind in setOf(Settings.SOURCE_MIC, Settings.SOURCE_REMOTE, Settings.SOURCE_BEAN)) { "请先切换到手机、Mac 麦克风或录音豆，不能用测试音频注册" }
             val client = api as? HttpOopsApi ?: error("请先连接真实服务器")
             val catalog = _state.value.voiceprint.catalog ?: error("请先刷新声纹列表")
@@ -1927,6 +2208,12 @@ object OopsEngine {
     private val noticeBusy = java.util.concurrent.atomic.AtomicBoolean(false)
     private val topicEvidence = ConcurrentHashMap<String, MutableSet<String>>()
     private val conflictPairs = ConcurrentHashMap.newKeySet<String>()
+    private val agentNoticeBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var lastAgentNoticeAt = -20_000L
+    private var agentNoticeTracker: com.oops.app.notice.NoticeTracker? = null
+    private var agentNoticeIdentity = ""
+    private var agentNoticeSession = ""
+    private var agentNoticeEvidence: Map<String, String> = emptyMap()
     private class SyncContext(val queue: com.oops.app.backend.MeetingSync, @Volatile var client: OopsApi) {
         var job: Job? = null
         @Volatile var stopped = false
@@ -1975,12 +2262,12 @@ object OopsEngine {
     }
 
     fun dismissNotice(id: String) {
-        tracker.dismiss(id)?.let { syncContext?.queue?.notice(it.wire()) }
+        tracker.dismiss(id)?.let { if (!id.startsWith("agent-")) syncContext?.queue?.notice(it.wire()) }
         Log.i(TAG, "notice dismissed: $id")
         updateAssistanceState(); publishSessionSummary(sessionId)
     }
     fun noticeFeedback(id: String, useful: Boolean) {
-        tracker.feedback(id, useful)?.let { syncContext?.queue?.notice(it.wire()) }
+        tracker.feedback(id, useful)?.let { if (!id.startsWith("agent-")) syncContext?.queue?.notice(it.wire()) }
         Log.i(TAG, "notice feedback: $id useful=$useful")
         updateAssistanceState(); publishSessionSummary(sessionId)
     }
@@ -2042,7 +2329,9 @@ object OopsEngine {
                 val response = client.recall(RecallRequest(session, trigger, query, now, candidates.map { it.toCandidate() }))
                 if (!currentSource(session, epoch)) return@launch
                 val byId = candidates.filter { recordingPolicy.archives || sessionIndex.get(it.id) != null }.associateBy { it.id }
-                val picks = PickPolicy.decide(PickPolicy.validated(response.picks, byId.keys))
+                val picks = if (response.engine == "gpt-6.1-sol")
+                    PickPolicy.semanticDecision(PickPolicy.semanticValidated(response.picks, byId.keys))
+                    else PickPolicy.decide(PickPolicy.validated(response.picks, byId.keys))
                 if (picks == null) emit(OopsEvent.RecallNotFound("本场原话里没有找到答案"))
                 else {
                     val items = picks.picks.map { p -> byId.getValue(p.id).let { u ->
@@ -2065,10 +2354,10 @@ object OopsEngine {
         val current = ids.mapNotNull(sessionIndex::get)
         val history = tracker.list().mapNotNull { it.history }.filter { it.optString("id") in ids }
         if (history.isNotEmpty()) {
-            val rows = current.map { com.oops.app.bridge.BridgeJson.utterance(it).put("audioAvailable", false).put("prob", 1) } +
+            val rows = current.map { com.oops.app.bridge.BridgeJson.utterance(it).put("audioAvailable", false).put("prob", JSONObject.NULL) } +
                 history.map { h -> JSONObject().put("id", h.getString("id")).put("text", h.getString("text"))
                     .put("startMs", h.getLong("start_ms")).put("endMs", h.getLong("end_ms"))
-                    .put("prob", 1).put("audioAvailable", false).put("startedAt", h.getString("started_at")) }
+                    .put("prob", JSONObject.NULL).put("audioAvailable", false).put("startedAt", h.getString("started_at")) }
             emit(OopsEvent.Json("recall.card", JSONObject().put("id", "history-conflict").put("trigger", "conflict")
                 .put("items", JSONArray(rows)).put("pool", JSONArray(rows)).put("single", false).put("readOnly", true)
                 .put("engine", "evidence").put("latencyMs", 0)))
@@ -2079,7 +2368,7 @@ object OopsEngine {
             return fail("recall", "原话已不在本场索引里")
         }
         val card = RecallCard("c" + UUID.randomUUID().toString().take(8), if (ids.size > 1) "conflict" else "digest", null, nowMs,
-            current.map { u -> CardItem(u.id, u.startMs, u.endMs, u.text, u.speaker, u.tagProb ?: 1.0, evidenceAudioAvailable(u)) },
+            current.map { u -> CardItem(u.id, u.startMs, u.endMs, u.text, u.speaker, u.tagProb, evidenceAudioAvailable(u)) },
             current.size == 1, sessionIndex.neighbors(ids, 2, 2), "session", 0, 0)
         cards[card.id] = card; emit(OopsEvent.RecallReady(card))
     }
@@ -2098,7 +2387,7 @@ object OopsEngine {
                     val rows = history?.let { RetainedTaskEvidence.select(it, request.sessionId, ids) }
                     if (rows == null) { fail("recall", "这段短依据未单独确认保留，或已变化；不会恢复已到期的全文或原音"); return@synchronized }
                     val card = RecallCard("c" + UUID.randomUUID().toString().take(8), "digest", null, nowMs,
-                        rows.map { CardItem(it.id, it.startMs, it.endMs, it.text, it.speaker, 1.0, false) },
+                        rows.map { CardItem(it.id, it.startMs, it.endMs, it.text, it.speaker, null, false) },
                         rows.size == 1, emptyList(), "saved_excerpt", 0, 0)
                     cards[card.id] = card
                     emit(OopsEvent.RecallReady(card))
@@ -2110,6 +2399,7 @@ object OopsEngine {
     }
 
     private fun noticeTick(now: Long) {
+        checkAgentNotices()
         tracker.onTick(now).forEach { n -> publishNotice(n); if (n.title == "会议还剩 5 分钟") checkResolutions(now) }
         updateAssistanceState()
         val ag = tracker.agenda
@@ -2131,7 +2421,9 @@ object OopsEngine {
                 else {
                     val topic = result.getString("topic")
                     if (topic in ag.items.map { it.id }) topicEvidence.computeIfAbsent(topic) { ConcurrentHashMap.newKeySet() }.addAll(limited.map { it.id })
-                    val (notices, old) = t.onTopic(topic, if (result.isNull("prob")) null else result.getDouble("prob"), now)
+                    val semantic = result.optString("engine") == "gpt-6.1-sol" &&
+                        result.optString("confidence_kind") == "uncalibrated" && result.isNull("prob")
+                    val (notices, old) = t.onTopic(topic, if (result.isNull("prob")) null else result.getDouble("prob"), now, semantic)
                     notices.forEach { publishNotice(it, session) }
                     old?.let { checkResolution(it, now) }
                 }
@@ -2157,8 +2449,10 @@ object OopsEngine {
                     .put("utterances", JSONArray(rows.map { com.oops.app.backend.ApiJson.candidate(it.toCandidate()) }))
                 val result = policy.request("notice") { client.notice(request) }
                 if (currentSource(session, epoch) && t === tracker && ag.revision == tracker.agenda.revision && result != null) {
+                    val semantic = result.optString("engine") == "gpt-6.1-sol" &&
+                        result.optString("confidence_kind") == "uncalibrated" && result.isNull("prob")
                     t.onResolution(id, if (result.isNull("resolved")) null else result.getBoolean("resolved"),
-                        if (result.isNull("prob")) null else result.getDouble("prob"), now)?.let { publishNotice(it, session) }
+                        if (result.isNull("prob")) null else result.getDouble("prob"), now, semantic)?.let { publishNotice(it, session) }
                 }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { Log.w(TAG, "resolution failed: ${error.javaClass.simpleName}") }
@@ -2167,8 +2461,12 @@ object OopsEngine {
     }
 
     private fun checkConflict(session: String, u: Utterance) {
+        // Formal same-meeting conflicts come from the incremental Agent draft.
+        // Preserve the existing comparison with earlier meetings without rejudging local pairs.
+        val historyOnly = recordingPolicy.archives
         if (u.tag !in com.oops.app.buffer.SessionIndex.RETAINED_TAGS) return
-        val previous = sessionIndex.snapshot().filter { it.id != u.id && it.startMs < u.startMs && it.tag in setOf("decision", "constraint") }.takeLast(30)
+        val previous = if (historyOnly) emptyList() else sessionIndex.snapshot().filter {
+            it.id != u.id && it.startMs < u.startMs && it.tag in setOf("decision", "constraint") }.takeLast(30)
         // Empty local evidence still permits server-side comparison with earlier meetings.
         val request = JSONObject().put("kind", "conflict").put("session_id", session)
             .put("utterance", com.oops.app.backend.ApiJson.candidate(u.toCandidate()))
@@ -2180,6 +2478,8 @@ object OopsEngine {
                 val result = policy.request(reservation) { client.notice(request) } ?: return@launch
                 if (!currentSource(session, epoch) || t !== tracker || (!recordingPolicy.archives && sessionIndex.get(u.id) == null) || !result.getBoolean("conflict")) return@launch
                 val h = result.getJSONObject("with"); val otherId = h.getString("id")
+                if (historyOnly && (!otherId.startsWith("h:") || h.optString("session_id").isBlank() ||
+                        h.optString("session_id") == session)) return@launch
                 val prior = previous.firstOrNull { it.id == otherId }
                 if (prior == null && !otherId.startsWith("h:")) return@launch
                 if (!conflictPairs.add("${u.id}:$otherId")) return@launch
@@ -2201,6 +2501,84 @@ object OopsEngine {
         }.invokeOnCompletion { reservation.close() }
     }
 
+    private fun checkAgentNotices(): Unit = synchronized(pipeline) {
+        val t = tracker
+        val session = sessionId
+        val base = settings.backendBaseUrl
+        val identity = settings.feishuSessionFor(base)
+        fun clear() {
+            agentNoticeEvidence = emptyMap()
+            if (t.clearAgentNotices()) { updateAssistanceState(); publishSessionSummary(session) }
+        }
+        if (agentNoticeTracker !== t || agentNoticeSession != session || agentNoticeIdentity != identity) {
+            clear()
+            agentNoticeTracker = t; agentNoticeSession = session; agentNoticeIdentity = identity
+            lastAgentNoticeAt = -20_000L
+        }
+        val available = sessionIndex.snapshot()
+        if (agentNoticeEvidence.isNotEmpty()) {
+            val current = available.associateBy { it.id }
+            if (agentNoticeEvidence.any { (id, binding) -> current[id]?.let {
+                    com.oops.app.notice.LiveAgentNotices.binding(it) } != binding }) clear()
+        }
+        if (!recordingPolicy.archives || !currentSource(session, serviceEpoch)) { clear(); return }
+        if (boardBlockedSources.isNotEmpty()) { clear(); return }
+        if (!_state.value.capturing || settings.mockBackend || available.isEmpty()) return
+        val wallNow = SystemClock.elapsedRealtime()
+        if (wallNow - lastAgentNoticeAt < 20_000 || !agentNoticeBusy.compareAndSet(false, true)) return
+        lastAgentNoticeAt = wallNow
+        val client = api; val epoch = serviceEpoch; val sourceRevision = boardSourceRevision
+        scope.launch(Dispatchers.IO) {
+            try {
+                val payload = client.liveNotices(session)
+                synchronized(pipeline) {
+                    if (!currentSource(session, epoch) || tracker !== t ||
+                        identity != settings.feishuSessionFor(base) || sourceRevision != boardSourceRevision ||
+                        boardBlockedSources.isNotEmpty()) return@synchronized
+                    if (source == null || captureStopping || !_state.value.capturing) { clear(); return@synchronized }
+                    val current = sessionIndex.snapshot()
+                    val result = payload ?: run { clear(); return@synchronized }
+                    val snapshot = com.oops.app.notice.LiveAgentNotices.read(result, session, current, nowMs)
+                    if (snapshot == null) { clear(); return@synchronized }
+                    if (!t.acceptsAgentAttempt(snapshot.attempt)) return@synchronized
+                    val mayAlert = _state.value.capturing && _state.value.sourceReady &&
+                        _state.value.captureControl !in listOf("paused", "draining", "stopped") &&
+                        result.optString("status") in listOf("ready", "pending") && !result.optBoolean("meeting_ended")
+                    agentNoticeEvidence = snapshot.evidence
+                    val fresh = t.replaceAgentNotices(snapshot.notices, snapshot.attempt, mayAlert)
+                    // Candidates stay ephemeral: do not copy their quoted text into the meeting sync queue.
+                    fresh.forEach { notice ->
+                        if (current.filter { it.id in notice.evidenceIds }.maxOfOrNull { it.endMs }?.let {
+                                it >= nowMs - 90_000 } == true) {
+                            noticeAlert.alert(settings.noticeVibrate, notice.kind)
+                            emit(OopsEvent.Json("notice", notice.bridge()))
+                        }
+                    }
+                    updateAssistanceState(); publishSessionSummary(session)
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                synchronized(pipeline) {
+                    if (currentSource(session, epoch) && tracker === t && identity == settings.feishuSessionFor(base)) clear()
+                }
+                Log.w(TAG, "live Agent notices unavailable: ${error.javaClass.simpleName}")
+            } finally { agentNoticeBusy.set(false) }
+        }
+        Unit
+    }
+
+    private val historyDeletedSources = ConcurrentHashMap.newKeySet<Pair<Long, String>>()
+
+    private suspend fun browsePreview(client: com.oops.app.backend.OopsApi, epoch: Long, context: JSONObject,
+                                      operation: String, value: String = "", mine: Boolean = false, status: String = "all") {
+        // Background delivery settles only its final result and must never announce a cached result as new.
+        if (context.optString("requestId").startsWith("minutes-sync-")) return
+        val snapshot = (client as? HttpOopsApi)?.peekBrowse(operation, value, mine, status) ?: return
+        if (epoch != serviceEpoch || (epoch to value) in historyDeletedSources) return
+        context.keys().forEach { key -> snapshot.put(key, context.get(key)) }
+        emit(OopsEvent.Json(operation, snapshot))
+    }
+
     fun history(action: String, value: String = "", confirm: Boolean = false, requestId: String = "") {
         val client = api
         val epoch = serviceEpoch
@@ -2208,8 +2586,9 @@ object OopsEngine {
         if (action in setOf("open", "delete")) context.put("sessionId", value)
         scope.launch {
             try {
+                if (action in setOf("list", "open")) browsePreview(client, epoch, context, "history.$action", value)
                 val result = when (action) {
-                    "list" -> client.historyList()
+                    "list" -> client.historyList(includeEmpty = value == "all")
                     "open" -> client.historyOpen(value)
                     "delete" -> {
                         require(confirm) { "请确认删除会议文字" }
@@ -2219,6 +2598,7 @@ object OopsEngine {
                         if (result != null) {
                             synchronized(pipeline) { if (value == sessionId) invalidateTaskBoard("source_deleted") }
                             if (result.optBoolean("deleted") != true) error("服务未确认删除")
+                            historyDeletedSources.add(epoch to value)
                             invalidSessions.add(value)
                             syncContexts.filter { it.queue.sessionId == value }.forEach { it.queue.halt(endToo = true); it.job?.cancel() }
                             if (value == sessionId) synchronized(pipeline) {
@@ -2237,12 +2617,24 @@ object OopsEngine {
                     else -> error("未知往期操作")
                 }
                 if (epoch != serviceEpoch) return@launch
-                if (result == null) fail("history", "当前后端不支持往期会议", context)
+                if (action == "open" && (epoch to value) in historyDeletedSources) {
+                    fail("history", "会议来源已删除，请返回会议列表", context.put("sourceInvalid", true).put("code", "SOURCE_DELETED"))
+                    return@launch
+                }
+                if (result == null) fail("history", "当前后端不支持往期会议", context.put("unsupported", true))
                 else emit(OopsEvent.Json("history.$action", result.put("query", if (action == "search") value else "")
                     .put("requestId", requestId).also { if (action in setOf("open", "delete")) it.put("sessionId", value) }
                     .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { if (epoch == serviceEpoch) fail("history", "往期会议请求失败：${error.message}", context) }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("history", "往期会议请求失败：${error.message}", historyFailureContext(context, error)) }
+        }
+    }
+
+    private fun historyFailureContext(context: JSONObject, error: Exception): JSONObject = context.also {
+        if (error is com.oops.app.backend.HttpFailure) {
+            it.put("httpStatus", error.status)
+            error.errorCode?.let { code -> context.put("code", code) }
+            if (error.status in setOf(401, 403, 404, 410)) it.put("sourceInvalid", true)
         }
     }
 
@@ -2279,13 +2671,52 @@ object OopsEngine {
         val context = serviceContext(epoch).put("operation", "history.minutes").put("sessionId", sessionId).put("requestId", requestId)
         scope.launch {
             try {
+                browsePreview(client, epoch, context, "history.minutes", sessionId)
                 val result = client.historyMinutes(sessionId)
                 if (epoch != serviceEpoch) return@launch
-                if (result == null) fail("minutes", "当前后端不支持 AI 纪要", context)
+                if ((epoch to sessionId) in historyDeletedSources) {
+                    fail("minutes", "会议来源已删除，请返回会议列表", context.put("sourceInvalid", true).put("code", "SOURCE_DELETED"))
+                    return@launch
+                }
+                if (result == null) fail("minutes", "当前后端不支持 AI 纪要", context.put("unsupported", true))
                 else emit(OopsEvent.Json("history.minutes", result.put("session_id", sessionId).put("requestId", requestId)
                     .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { if (epoch == serviceEpoch) fail("minutes", "纪要读取失败：${error.message}", context) }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("minutes", "纪要读取失败：${error.message}", historyFailureContext(context, error)) }
+        }
+    }
+
+    /** Only the native HTTP client owns the phone's opaque personal credential. */
+    fun feishu(action: String, request: JSONObject, openAuthorization: ((String) -> Unit)? = null) {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", action)
+            .put("sessionId", request.optString("sessionId")).put("requestId", request.optString("requestId"))
+        scope.launch {
+            try {
+                val result = client.feishuCall(action, request)
+                if (epoch != serviceEpoch) return@launch
+                if (result == null) { fail("feishu", "当前服务尚未提供个人飞书连接", context); return@launch }
+                val event = when (action) {
+                    "feishu.connect" -> "feishu.authorization"
+                    "feishu.disconnect" -> "feishu.status"
+                    else -> if (action.startsWith("minutes.delivery.")) "minutes.delivery" else action
+                }
+                result.put("requestId", request.optString("requestId"))
+                    .put("session_id", request.optString("sessionId"))
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))
+                emit(OopsEvent.Json(event, result))
+                if (action == "feishu.connect") {
+                    val url = result.optString("authorization_url")
+                    val parsed = android.net.Uri.parse(url)
+                    require(parsed.scheme == "https" && parsed.host == "accounts.feishu.cn" && parsed.userInfo == null) { "授权地址无效，请重新连接" }
+                    openAuthorization?.invoke(url)
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (epoch == serviceEpoch) fail("feishu", error.message ?: "飞书操作未完成，请重试", context
+                    .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: "FEISHU_REQUEST_FAILED"))
+            }
         }
     }
 
@@ -2302,6 +2733,9 @@ object OopsEngine {
         var mutationVersion: Long? = null
         val live = synchronized(pipeline) {
             if (session != sessionId) return@synchronized null
+            val current = sessionIndex.get(utteranceId)
+            if (!recordingPolicy.archives && current != null && current.manualSpeaker != speaker &&
+                !personalSpeakerChanged(session, utteranceId, speaker ?: current.speaker, force = true)) return
             boardBlockedSources.add(utteranceId)
             invalidateTaskBoard("speaker_corrected", setOf(utteranceId))
             mutationVersion = boardSourceRevision
@@ -2428,18 +2862,21 @@ object OopsEngine {
         .put("sessionId", session).put("utteranceId", id).put("speaker", speaker ?: JSONObject.NULL).put("status", status)
         .put("serviceEpoch", serviceEpoch).put("backendUrl", _state.value.backendUrl)
 
-    fun projects(name: String? = null) {
+    fun projects(name: String? = null, requestId: String = "") {
         val client = api
         val epoch = serviceEpoch
-        val context = serviceContext(epoch).put("operation", if (name == null) "projects.list" else "project.open").put("name", name ?: JSONObject.NULL)
+        val context = serviceContext(epoch).put("operation", if (name == null) "projects.list" else "project.open")
+            .put("name", name ?: JSONObject.NULL).put("requestId", requestId)
         scope.launch {
             try {
+                browsePreview(client, epoch, context, context.getString("operation"), name.orEmpty())
                 val result = if (name == null) client.projects() else client.project(name)
                 if (epoch != serviceEpoch) return@launch
                 if (result == null) fail("projects", "当前后端不支持项目", context)
-                else emit(OopsEvent.Json(if (name == null) "projects.list" else "project.open", result.put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+                else emit(OopsEvent.Json(if (name == null) "projects.list" else "project.open", result.put("serviceEpoch", epoch)
+                    .put("requestId", requestId).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { if (epoch == serviceEpoch) fail("projects", "项目请求失败：${error.message}", context) }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("projects", "项目请求失败：${error.message}", historyFailureContext(context, error)) }
         }
     }
 
@@ -2513,14 +2950,85 @@ object OopsEngine {
         val context = serviceContext(epoch).put("operation", "tasks.list").put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL).put("requestId", requestId)
         scope.launch {
             try {
-                require(!mine || self != null) { "请先在设置里选择本人" }
-                val result = client.tasks(if (mine) self else null, status)
+                require(!mine || client !is MockOopsApi || self != null) { "请先在设置里选择本人" }
+                browsePreview(client, epoch, context, "tasks.list", mine = mine, status = status)
+                val result = client.tasks(if (mine && client is MockOopsApi) self else null, status, mine = mine)
                 if (epoch != serviceEpoch) return@launch
                 if (result == null) fail("tasks", "当前后端不支持任务列表", context)
                 else emit(OopsEvent.Json("tasks.list", result.put("mine", mine).put("status", status).put("selfName", self ?: JSONObject.NULL).put("requestId", requestId)
                     .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { if (epoch == serviceEpoch) fail("tasks", "任务列表请求失败：${error.message}", context) }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("tasks", "正式任务暂未读到：${error.message}",
+                historyFailureContext(context, error).put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: JSONObject.NULL)) }
+        }
+    }
+
+    fun taskCandidates(requestId: String) {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", "tasks.candidates").put("requestId", requestId)
+        scope.launch {
+            try {
+                browsePreview(client, epoch, context, "tasks.candidates")
+                val value = client.taskCandidates()
+                if (epoch != serviceEpoch) return@launch
+                if (value == null) fail("taskCandidates", "当前服务尚不支持独立读取会议候选，请更新服务", context.put("unsupported", true))
+                else emit(OopsEvent.Json("tasks.candidates", value.put("requestId", requestId)
+                    .put("serviceEpoch", epoch).put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("taskCandidates", "会议候选暂未读到：${error.message}", historyFailureContext(context, error)
+                .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: JSONObject.NULL)) }
+        }
+    }
+
+    fun taskReview(p: JSONObject, save: Boolean) {
+        val client = api
+        val epoch = serviceEpoch
+        val context = serviceContext(epoch).put("operation", if (save) "tasks.review.save" else "tasks.review.open")
+            .put("requestId", p.optString("requestId")).put("itemId", p.optString("item_id"))
+        val body = JSONObject(p.toString()).apply { remove("by"); remove("reviewer"); remove("selfName") }
+        scope.launch {
+            try {
+                val value = client.taskReview(body, save)
+                if (epoch != serviceEpoch) return@launch
+                if (value == null) fail("taskReview", "当前服务尚不支持 App 内核对，请更新服务", context)
+                else emit(OopsEvent.Json(if (save) "tasks.review.saved" else "tasks.review.open", value
+                    .put("requestId", p.optString("requestId")).put("serviceEpoch", epoch)
+                    .put("backendUrl", context.getString("backendUrl"))))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (epoch == serviceEpoch) fail("taskReview", error.message ?: "核对回执尚未确认", context
+                .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: JSONObject.NULL)
+                .put("changed", (error as? com.oops.app.backend.HttpFailure)?.status == 409)) }
+        }
+    }
+
+    private val raftBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun raftRequest(p: JSONObject) {
+        val epoch = serviceEpoch
+        val base = settings.backendBaseUrl.trim().trimEnd('/')
+        val token = settings.backendTokenFor(base)
+        val personal = settings.feishuSessionFor(base)
+        val operation = p.optString("operation")
+        val requestId = p.optString("requestId")
+        val body = p.optJSONObject("payload")?.let { JSONObject(it.toString()) } ?: JSONObject()
+        val context = serviceContext(epoch).put("operation", operation).put("requestId", requestId)
+        if (!requestId.matches(Regex("[A-Za-z0-9_.:-]{1,128}"))) return
+        if (!raftBusy.compareAndSet(false, true)) {
+            emit(OopsEvent.Json("raft.result", context.put("error", JSONObject().put("code", "BUSY").put("message", "另一条协作请求尚未结束，请核对原回执"))))
+            return
+        }
+        scope.launch {
+            val result = try {
+                require(!settings.mockBackend && base.isNotBlank()) { "协作需要连接真实后端，模拟模式不可发送" }
+                val value = com.oops.app.backend.RaftClient(http, base, token, personal).call(operation, body)
+                context.put("data", value)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                context.put("error", JSONObject()
+                    .put("code", (error as? com.oops.app.backend.HttpFailure)?.errorCode ?: "UNCONFIRMED")
+                    .put("message", "协作回执尚未确认：" + (error.message ?: "请刷新原请求")))
+            } finally { raftBusy.set(false) }
+            if (epoch == serviceEpoch) emit(OopsEvent.Json("raft.result", result))
         }
     }
 
@@ -2611,7 +3119,7 @@ object OopsEngine {
             com.oops.app.store.RecordingOrigin.from(old.second, old.first) !=
                 com.oops.app.store.RecordingOrigin.from(url, settings.mockBackend)
         } == true
-        if (serviceChanged) serviceEpoch += 1
+        if (serviceChanged) { serviceEpoch += 1; personalMemoryProcessingObserved = false }
         if (serviceChanged) synchronized(pipeline) {
             clearUnsubmittedSources()
             optionalRequests = com.oops.app.backend.OptionalRequests()
@@ -2628,7 +3136,11 @@ object OopsEngine {
             }
         }
         configuredService = nextService
-        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken, sessionMode = { sessionModes[it] })
+        (api as? HttpOopsApi)?.retireBrowseCache(clear = serviceChanged)
+        api = if (settings.mockBackend || url.isBlank()) MockOopsApi(Settings.TEAM) else HttpOopsApi(http, url, settings.backendToken,
+            sessionMode = { sessionModes[it] }, personalToken = { settings.feishuSessionFor(url) },
+            savePersonalToken = { settings.setFeishuSessionFor(url, it) }, enablePersonalIdentity = true,
+            cacheDirectory = File(app.noBackupFilesDir, "browse-cache-v1"))
         val previewUrl = if (com.oops.app.BuildConfig.DEBUG) settings.speakerPreviewUrl else ""
         previewApi = if (previewUrl.isBlank()) api else HttpOopsApi(http, previewUrl, settings.backendTokenFor(previewUrl), sessionMode = { sessionModes[it] })
         _state.update {

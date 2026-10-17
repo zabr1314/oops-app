@@ -59,6 +59,13 @@ object ActionWorkflow {
             else lastKnown?.takeIf { it.status == ActionResult.PENDING }?.copy(polling = false)
                 ?: ActionResult(request.opId, ActionResult.PENDING, message = "原操作结果尚未核实，请继续查询原操作", polling = false)
         } catch (e: Exception) {
+            if (confirming && e is HttpFailure && e.noExternalWrite) {
+                val alreadyLinked = e.errorCode == "ITEM_ALREADY_LINKED"
+                return ActionResult(request.opId, ActionResult.FAILED,
+                    message = if (alreadyLinked) "这件事已有创建操作，请返回当前事项查看已有任务；本次没有重复创建"
+                        else e.message ?: "本次尚未创建任务，请处理提示后重试", errorCode = e.errorCode,
+                    sourceInvalidated = alreadyLinked, polling = false)
+            }
             // A lost HTTP response does not prove that the write failed.
             lastKnown?.takeIf { it.status == ActionResult.PENDING && !it.message.isNullOrBlank() }?.let {
                 return it.copy(polling = false)

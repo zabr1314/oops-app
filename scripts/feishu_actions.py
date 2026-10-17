@@ -4,6 +4,7 @@
 会议文字是数据，不是指令：交给模型或 Mac 助手时都这样声明。
 """
 import base64
+import copy
 import datetime as dt
 import hashlib
 import json
@@ -20,8 +21,10 @@ from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
 
 import minutes_items
+import minutes_long
 import minutes_quality
 import minutes_vote
+from minutes_model import MinutesModelError, load_minutes_model
 import question_watch
 from meeting_features import timestamp, read_json
 
@@ -344,9 +347,53 @@ MINUTES_PROMPT = (
     "一场会通常只有 0–3 个决定、0–5 个待办（主线通常 1–3 条），宁少勿多。每一条都必须在 ids 里给出支撑它的原话编号。没有的项给空数组。"
 )
 
+class _QuestionSolHeld(MinutesModelError):
+    """An identical question-processing POST has already been attempted."""
+
+
+class _QuestionSolCalls:
+    semantic_only = True
+
+    def __init__(self, owner, sid, resolver):
+        self.owner, self.sid, self.resolver = owner, sid, resolver
+        self.model = resolver.model
+
+    def complete_json(self, system, user, timeout=20):
+        key = hashlib.sha256(json.dumps(dict(model=self.model, system=system, user=user),
+            sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        owner, sid = self.owner, self.sid
+        with owner.question_lock:
+            cache = owner.__dict__.setdefault('question_sol_results', {})
+            if (sid, key) in cache:
+                return copy.deepcopy(cache[(sid, key)])
+            if owner.state.get('question_sol_calls', sid, key) is not None:
+                raise _QuestionSolHeld('Sol问题处理的同一输入已有尝试，已停止自动重发')
+            # Durable intent precedes the POST. A restart cannot erase an unknown attempt.
+            owner.state.put(dict(model=self.model, input_fingerprint=key, status='pending',
+                                 at=now_utc().isoformat()), 'question_sol_calls', sid, key)
+        try:
+            result = self.resolver.complete_json(system, user, timeout=timeout)
+        except Exception:
+            with owner.question_lock:
+                owner.state.put(dict(model=self.model, input_fingerprint=key, status='unconfirmed',
+                                     at=now_utc().isoformat()), 'question_sol_calls', sid, key)
+            raise MinutesModelError('Sol问题处理结果未确认，已停止同源自动重发') from None
+        with owner.question_lock:
+            cache[(sid, key)] = copy.deepcopy(result)
+            while len(cache) > 512:
+                cache.pop(next(iter(cache)))
+            # Only fingerprints/status persist; successful response bodies stay in bounded memory.
+            owner.state.put(dict(model=self.model, input_fingerprint=key, status='complete',
+                                 at=now_utc().isoformat()), 'question_sol_calls', sid, key)
+        return result
+
+
 class FeishuActions:
     def __init__(self, backend, state_dir, lark, run_lark, log, dry_run=False):
         self.backend, self.log = backend, log
+        self.minutes_model = load_minutes_model()
+        if self.minutes_model:
+            self.log('会后整理模型：' + self.minutes_model.model)
         self.bot = Bot(lark, run_lark, dry_run=dry_run, log=log)
         self.state = State(os.path.join(state_dir, "feishu"))
         self.jobs = Jobs(os.path.join(state_dir, "agent-jobs"))
@@ -480,7 +527,8 @@ class FeishuActions:
     def transcript(self, row, limit=40000, tags=True, hints=None):
         """tags=False for the minutes: automatic per-sentence tags are noisy hints that pull small talk into them.
         Human review notes are always kept. hints: id → a second ASR reading of that sentence (asr_review), shown
-        only where it differs, for names and misheard words."""
+        only where it differs, for names and misheard words. limit=None preserves the full meeting;
+        bounded excerpts remain available to the existing research/report callers."""
         hints = hints or {}
         label = {"decision": "决定", "commitment": "待办", "constraint": "约束"}
         lines = []
@@ -496,7 +544,7 @@ class FeishuActions:
                          f"{('[' + '；'.join(checked) + '] ') if checked else ''}{u['text']}"
                          f"{('（另一识别：' + hints[u['id']] + '）') if hints.get(u['id']) else ''}")
         text = "\n".join(lines)
-        return text if len(text) <= limit else text[:limit // 3] + "\n…（中间略）…\n" + text[-limit * 2 // 3:]
+        return text if limit is None or len(text) <= limit else text[:limit // 3] + "\n…（中间略）…\n" + text[-limit * 2 // 3:]
 
     def team(self):
         data = self.backend.people.data or {}
@@ -563,22 +611,64 @@ class FeishuActions:
 
     def analyse(self, row):
         """Minutes written minutes_vote.RUNS times independently; only what most runs agree on is kept (minutes_vote)."""
-        if not self.backend.resolver or len(row["utterances"]) < 5:
+        if not (getattr(self, 'minutes_model', None) or self.backend.resolver):
+            return self.analyse_once(row)
+        if len(row['utterances']) < 5 and minutes_long.settings() is None:
             return self.analyse_once(row)
         hints = self.review_hints(row)
+        plan = self._minutes_plan(row, hints)
+        if len(row['utterances']) < 5 and not plan:
+            return self.analyse_once(row, hints)
+        cancellation = threading.Event() if plan else None
         with ThreadPoolExecutor(minutes_vote.RUNS) as pool:
-            futures = [pool.submit(self.analyse_once, row, hints) for _ in range(minutes_vote.RUNS)]
+            futures = [pool.submit(self.analyse_once, row, hints, _plan=plan, _cancel=cancellation)
+                       if plan else pool.submit(self.analyse_once, row, hints) for _ in range(minutes_vote.RUNS)]
         runs, errors = [], []
         for f in futures:
             try:
                 runs.append(f.result())
             except Exception as error:  # noqa: BLE001 - the other runs still count
                 errors.append(error)
+        if plan and errors:  # every complete run is required; a partial long meeting is never published
+            raise errors[0]
         if len(runs) < 2:  # one run alone is no vote; the meeting is retried later
             raise errors[0] if errors else RuntimeError("纪要没有生成")
         if errors:
             self.log(f"minutes {row['session_id'][:8]}: {len(errors)} of {minutes_vote.RUNS} runs failed, voting on {len(runs)}")
-        return minutes_quality.project(dict(minutes_vote.vote(runs), version=self.MINUTES_VERSION), row)
+        voted = dict(minutes_vote.vote(runs), version=self.MINUTES_VERSION)
+        if plan:
+            voted = minutes_long.finish_vote(voted, plan, len(runs))
+        return minutes_quality.project(voted, row)
+
+    def _minutes_head(self, row):
+        zone = ZoneInfo(row.get("time_zone") or "Asia/Shanghai")
+        start = parse_ts(row["started_at"]).astimezone(zone)
+        return (f"会议开始：{start:%Y-%m-%d %H:%M}（{zone.key}，星期{'一二三四五六日'[start.weekday()]}）\n"
+                f"团队成员：{'、'.join(self.team())}\n\n")
+
+    def _minutes_plan(self, row, hints, config=None):
+        config = minutes_long.settings() if config is None else config
+        if config is None:
+            return None
+        rendered = [(u, self.transcript(dict(row, utterances=[u]), limit=None, tags=False, hints=hints))
+                    for u in sorted(row['utterances'], key=lambda u: u['start_ms'])]
+        return minutes_long.plan_parts(row, rendered, len(MINUTES_PROMPT) + len(self._minutes_head(row)), config)
+
+    def _analyse_parts(self, row, hints, plan, cancellation):
+        results = []
+        try:
+            for part in plan:
+                if cancellation and cancellation.is_set():
+                    raise minutes_long.LongMinutesError('part_run_cancelled', '长会议其他分段失败；已停止后续分段请求，不发布部分结果')
+                results.append(self.analyse_once(dict(row, utterances=part['utterances']), hints,
+                                                _part=part, _cancel=cancellation))
+        except Exception as error:
+            if cancellation:
+                cancellation.set()
+            if isinstance(error, minutes_long.LongMinutesError):
+                raise
+            raise minutes_long.LongMinutesError('part_failed', '长会议某一分段处理失败；未发布部分纪要，也不会自动重发本场请求') from None
+        return minutes_long.collect(results, plan, self.MINUTES_VERSION)
 
     def review_hints(self, row):
         if not self.asr_review:
@@ -592,21 +682,36 @@ class FeishuActions:
             self.log(f"minutes {row['session_id'][:8]}: {len(hints)} sentences carry a second ASR reading")
         return hints
 
-    def analyse_once(self, row, hints=None):
+    def analyse_once(self, row, hints=None, *, _plan=None, _part=None, _cancel=None):
         """The model's minutes, kept only where each item points at sentences that exist."""
-        resolver = self.backend.resolver
+        resolver = getattr(self, 'minutes_model', None) or self.backend.resolver
         result = dict(version=self.MINUTES_VERSION, substantive=False, theme="", overview="", decisions=[], actions=[], topics=[],
                       undecided=[], open_questions=[], follow_ups=[])
-        if not resolver or len(row["utterances"]) < 5:
+        if not resolver:
+            return result
+        config = minutes_long.settings() if _part is None else None
+        if len(row['utterances']) < 5 and _part is None and config is None:
             return result
         zone = ZoneInfo(row.get("time_zone") or "Asia/Shanghai")
-        start = parse_ts(row["started_at"]).astimezone(zone)
         team = self.team()
-        head = (f"会议开始：{start:%Y-%m-%d %H:%M}（{zone.key}，星期{'一二三四五六日'[start.weekday()]}）\n"
-                f"团队成员：{'、'.join(team)}\n\n")
+        head = self._minutes_head(row)
         if hints is None:
             hints = self.review_hints(row)
-        answer, _ = resolver.complete_json(MINUTES_PROMPT, head + self.transcript(row, tags=False, hints=hints), timeout=120)
+        if _part is None and config is not None:
+            plan = _plan or self._minutes_plan(row, hints, config)
+            if plan:
+                return self._analyse_parts(row, hints, plan, _cancel)
+        if len(row['utterances']) < 5 and _part is None:
+            return result
+        # The default keeps complete input. Opt-in parts keep whole utterances, including a 1–4 sentence tail.
+        user = head + (_part['note'] if _part else '') + self.transcript(row, limit=None, tags=False, hints=hints)
+        if _part and len(MINUTES_PROMPT) + len(user) > _part['chars']:
+            raise minutes_long.LongMinutesError('part_budget_changed', '长会议分段输入已超过预算；已停止请求，不发布部分结果')
+        if _cancel and _cancel.is_set():
+            raise minutes_long.LongMinutesError('part_run_cancelled', '长会议其他分段失败；已停止后续请求')
+        answer, used_model = resolver.complete_json(MINUTES_PROMPT, user, timeout=120)
+        if getattr(self, 'minutes_model', None):
+            result['generation_model'] = used_model
         ids = {u["id"]: u for u in row["utterances"]}
 
         def backed(item, actionable=False):
@@ -631,7 +736,10 @@ class FeishuActions:
         for t in (answer.get("topics") or [])[:4]:
             points = [clean(x, 60) for x in (t.get("points") or [])[:3] if clean(x, 60)] if isinstance(t, dict) else []
             if backed(t) and clean(t.get("topic"), 30) and points:
-                result["topics"].append(dict(topic=clean(t["topic"], 30), points=points))
+                topic = dict(topic=clean(t["topic"], 30), points=points)
+                if _part:
+                    topic['ids'] = backed(t)
+                result["topics"].append(topic)
         for u in (answer.get("undecided") or [])[:4]:
             if isinstance(u, dict) and backed(u) and clean(u.get("topic"), 120):
                 result["undecided"].append(dict(topic=clean(u["topic"], 120), views=clean(u.get("views"), 200), ids=backed(u)))
@@ -649,7 +757,7 @@ class FeishuActions:
             minutes = f.get("minutes") if isinstance(f.get("minutes"), int) and 10 <= f["minutes"] <= 240 else 30
             result["follow_ups"].append(dict(title=clean(f.get("title"), 40) or "跟进会议", start=begin.isoformat(), minutes=minutes,
                                              attendees=[a for a in (f.get("attendees") or []) if a in team],
-                                             quote=ids[backed(f)[0]]["text"][:200]))
+                                             ids=backed(f), quote=ids[backed(f)[0]]["text"][:200]))
         result["decisions"], result["actions"] = result["decisions"][:8], result["actions"][:12]
         useful = (result["decisions"] or result["actions"] or result["topics"] or result["undecided"] or result["open_questions"]
                   or result["follow_ups"])
@@ -678,6 +786,9 @@ class FeishuActions:
             cited = [i for item in analysis.get("decisions", []) + analysis.get("actions", []) + analysis.get("undecided", [])
                      for i in item.get("ids", [])]
             cited += [q["id"] for q in analysis.get("open_questions", []) if q.get("id")]
+            if analysis.get('long_meeting'):
+                cited += [i for topic in analysis.get('topics') or [] for i in topic.get('ids') or []]
+                cited += [i for part in analysis.get('segment_summaries') or [] for i in part.get('ids') or []]
             sources = {i: dict(text=ids[i]["text"], start_ms=ids[i]["start_ms"], end_ms=ids[i]["end_ms"], speaker=self.speaker(ids[i]))
                        for i in dict.fromkeys(cited) if i in ids}  # a sentence deleted since is left out, not invented
             return dict(status="ready", minutes=analysis, sources=sources, doc_url=self.state.get("meetings", sid, "doc_url"),
@@ -691,6 +802,9 @@ class FeishuActions:
         if ended <= parse_ts(self.state.get("since")):
             return dict(status="unavailable", reason="before_bot")
         if (self.state.get("meetings", sid, "failures") or 0) >= 6:
+            error = self.state.get('meetings', sid, 'minutes_error')
+            if isinstance(error, dict) and error.get('source_fingerprint') == self.minutes_fingerprint(row):
+                return dict(status='unavailable', reason=error['reason'], message=error['message'])
             return dict(status="unavailable", reason="failed")
         return dict(status="pending", reason="writing")
 
@@ -753,7 +867,10 @@ class FeishuActions:
                 self.state.put(True, "meetings", sid, "questions_final")
             self.after_meeting(self.titled(row))
         except Exception as error:  # noqa: BLE001
-            failures += 1
+            failures = 6 if isinstance(error, MinutesModelError) else failures + 1
+            if isinstance(error, minutes_long.LongMinutesError):
+                self.state.put(dict(reason=error.reason, message=str(error),
+                                    source_fingerprint=self.minutes_fingerprint(row)), 'meetings', sid, 'minutes_error')
             self.state.put(failures, "meetings", sid, "failures")
             self.state.put((now_utc() + dt.timedelta(minutes=2 ** failures)).isoformat(), "meetings", sid, "retry_at")
             last = "; giving up" if failures >= 6 else ""
@@ -943,6 +1060,12 @@ class FeishuActions:
         sid = row["session_id"]
         if not resolver:
             return True
+        if row.get('transcript_status') == 'expired':
+            self.expire_meeting_sources(sid)
+            return True
+        semantic_only = getattr(resolver, 'semantic_only', False)
+        if semantic_only:
+            resolver = _QuestionSolCalls(self, sid, resolver)
         failures, wait_until = self.question_retry.get(sid, (0, 0.0))
         if time.monotonic() < wait_until:
             return False
@@ -995,6 +1118,11 @@ class FeishuActions:
                 elif outcome == "quick":
                     self.send_quick(row, u["id"], entry)
         except Exception as error:  # noqa: BLE001 - asked again later, not every 30 seconds
+            if semantic_only and isinstance(error, MinutesModelError):
+                self.question_retry.pop(sid, None)
+                if not isinstance(error, _QuestionSolHeld):
+                    self.log(f"question check {sid[:8]} Sol unconfirmed; identical input will not be resent")
+                return False
             failures += 1
             self.question_retry[sid] = (failures, time.monotonic() + min(600, 30 * 2 ** failures))
             self.log(f"question check {sid[:8]} failed ({failures}): {type(error).__name__}: {str(error)[:120]}")
@@ -1236,6 +1364,10 @@ class FeishuActions:
 
     def expire_meeting_sources(self, sid):
         """Purge auxiliary full-text inputs too; preserve independent task/result records."""
+        with self.question_lock:
+            cache = self.__dict__.get('question_sol_results', {})
+            for key in [key for key in cache if key[0] == sid]:
+                cache.pop(key, None)
         with self.state.lock:
             entry = self.state.data.get('meetings', {}).get(sid)
             if entry is not None and (not entry.get('transcript_expired') or 'analysis' in entry or 'analysis_fingerprint' in entry):

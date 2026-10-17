@@ -40,10 +40,12 @@ object ApiJson {
 
     fun tagRequest(r: TagRequest): JSONObject = JSONObject()
         .put("session_id", r.sessionId).put("utterance_id", r.utterance.id)
+        .put("personal_memory_requested", r.personalMemoryRequested)
         .put("start_ms", r.utterance.startMs).put("end_ms", r.utterance.endMs)
         .put("text", r.utterance.text).put("speaker", r.utterance.speaker ?: JSONObject.NULL)
         .put("context", JSONArray(r.context.takeLast(4).map {
-            JSONObject().put("text", it.text).put("speaker", it.speaker ?: JSONObject.NULL)
+            JSONObject().put("id", it.id).put("start_ms", it.startMs).put("end_ms", it.endMs)
+                .put("text", it.text).put("speaker", it.speaker ?: JSONObject.NULL).put("tag", it.tag ?: JSONObject.NULL)
         }))
 
     fun tagResult(json: JSONObject): TagResult {
@@ -51,7 +53,11 @@ object ApiJson {
         require(tag in ValueTags.ALL) { "后端返回未知价值标签" }
         val prob = if (json.isNull("prob")) null else json.getDouble("prob")
         require(prob == null || (prob.isFinite() && prob in 0.0..1.0)) { "标签概率无效" }
-        return TagResult(json.getString("utterance_id"), tag, prob, json.optString("engine", "unknown"))
+        require(!json.has("highlight") || json.isNull("highlight") || json.optJSONObject("highlight") != null) { "重点结果格式无效" }
+        require(!json.has("personal_memory") || json.isNull("personal_memory") || json.optJSONObject("personal_memory") != null) { "个人候选结果格式无效" }
+        return TagResult(json.getString("utterance_id"), tag, prob, json.optString("engine", "unknown"),
+            json.optJSONObject("highlight")?.let { JSONObject(it.toString()) },
+            json.optJSONObject("personal_memory")?.let { JSONObject(it.toString()) })
     }
 
     fun recallRequest(r: RecallRequest): JSONObject = JSONObject()
@@ -65,7 +71,7 @@ object ApiJson {
         val picks = json.optJSONArray("picks") ?: JSONArray()
         return RecallResponse(
             picks = (0 until picks.length()).mapNotNull { i ->
-                picks.optJSONObject(i)?.let { Pick(it.getString("id"), it.optDouble("prob", 0.0)) }
+                picks.optJSONObject(i)?.let { Pick(it.getString("id"), if (it.isNull("prob")) null else it.getDouble("prob")) }
             },
             engine = json.optString("engine", "unknown"),
         )

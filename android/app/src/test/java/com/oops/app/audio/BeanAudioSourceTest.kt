@@ -64,6 +64,51 @@ class BeanFramesTest {
 }
 
 class BeanAudioSourceTest {
+    @Test fun `pause drains tail keeps link alive and resume resets packet sequence in same source`() {
+        lateinit var sink: BeanLink.Sink
+        var stopped = false
+        val link = object : BeanLink {
+            override val label = "可暂停测试豆"
+            override val supportsPause = true
+            override fun start(value: BeanLink.Sink) { sink = value }
+            override fun stop() { stopped = true }
+            override fun pause() { sink.onControlState("pausing") }
+            override fun resume() { sink.onControlState("resuming") }
+        }
+        val decoder = FakeDecoder()
+        val source = BeanAudioSource(link, { decoder }, "bean")
+        val events = LinkedBlockingQueue<String>()
+        val gaps = LinkedBlockingQueue<Long>()
+        source.start(object : AudioSource.Listener {
+            override fun onAudio(pcm: ByteArray) { events.add("audio:${pcm.size}") }
+            override fun onControlState(state: String) { events.add(state) }
+            override fun onGap(missingMs: Long) { gaps.add(missingMs) }
+            override fun onError(error: Throwable) { events.add("error:${error.message}") }
+        })
+        repeat(3) { sink.onPacket(byteArrayOf(1), 10 + it, false) }
+        source.pause()
+        sink.onControlState("draining") // hardware paused; remaining packets still belong to pre-pause speech
+        sink.onPacket(byteArrayOf(1), 13, false) // remaining tail after pause command
+        sink.onControlState("paused") // SDK confirms tail transfer is idle
+        assertEquals("pausing", events.poll(2, SECONDS))
+        assertEquals("draining", events.poll(2, SECONDS))
+        assertEquals("audio:2560", events.poll(2, SECONDS)) // all 80 ms, including unfinished batch
+        assertEquals("paused", events.poll(2, SECONDS))
+        sink.onPacket(byteArrayOf(9), 14, false) // no late old packet can leak into resumed speech
+        assertNull(events.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS))
+        assertFalse(stopped)
+        assertFalse(decoder.closed)
+        source.resume()
+        repeat(5) { sink.onPacket(byteArrayOf(2), 50_000 + it, false) }
+        assertEquals("resuming", events.poll(2, SECONDS))
+        assertEquals("recording", events.poll(2, SECONDS))
+        assertEquals("audio:3200", events.poll(2, SECONDS))
+        assertTrue(gaps.isEmpty()) // deliberate pause is not a Bluetooth loss gap
+        assertFalse(stopped)
+        source.stop()
+        assertTrue(stopped)
+        assertTrue(decoder.closed)
+    }
     /** Decodes a "packet" by repeating its first byte as 320 samples (20 ms at 16 kHz). */
     private class FakeDecoder : OpusDecoder {
         var closed = false

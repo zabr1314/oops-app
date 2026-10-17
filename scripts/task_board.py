@@ -16,10 +16,12 @@ import json
 import os
 import re
 import sys
+import tempfile
 import threading
 from action_sources import board_source_hash
 
 from item_quality import assess_item, bounded_context
+from minutes_model import MinutesModelError
 
 PRIORITIES = ("P0", "P1", "P2", "P3")
 CONTEXT_LINES = 12
@@ -103,6 +105,17 @@ def update(model, board, drafts, context, timeout=40):
     return out[:MAX_TASKS]
 
 
+class _SolBoardModel:
+    def __init__(self, boards, sid):
+        self.boards, self.sid, self.last_key = boards, sid, None
+
+    def complete_json(self, system, user, timeout=40):
+        model = self.boards.model
+        self.last_key = hashlib.sha256(json.dumps(dict(model=model.model, system=system, user=user),
+            sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        return self.boards._sol_complete(self.sid, self.last_key, system, user, timeout)
+
+
 class Boards:
     """Live boards. `submit` never waits for the model; `view` returns the board as it stands, `pending` while a batch runs."""
 
@@ -119,6 +132,60 @@ class Boards:
         if not self.SESSION.fullmatch(sid or ""):
             raise ValueError("会议编号无效")
         return os.path.join(self.folder, sid + ".json")
+
+    def _sol_calls(self, sid):
+        self.path(sid)
+        path = os.path.join(self.folder, '.sol-calls', sid + '.json')
+        if not os.path.exists(path):
+            return dict(calls={})
+        try:
+            with open(path, encoding='utf-8') as source:
+                value = json.load(source)
+            if not isinstance(value, dict) or not isinstance(value.get('calls'), dict):
+                raise ValueError
+            return value
+        except (OSError, ValueError):
+            raise MinutesModelError('Sol任务板调用记录不可核对，已停止自动重发') from None
+
+    def _save_sol_calls(self, sid, value):
+        folder = os.path.join(self.folder, '.sol-calls')
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix='.call-', dir=folder)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                json.dump(value, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, os.path.join(folder, sid + '.json'))
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def _mark_sol_call(self, sid, key, status):
+        with self.lock:
+            calls = self._sol_calls(sid)
+            calls['calls'][key] = dict(model=self.model.model, input_fingerprint=key, status=status,
+                                       at=dt.datetime.now(dt.timezone.utc).isoformat())
+            calls['latest'] = key
+            self._save_sol_calls(sid, calls)
+
+    def _sol_complete(self, sid, key, system, user, timeout):
+        with self.lock:
+            calls = self._sol_calls(sid)
+            if key in calls['calls']:
+                raise MinutesModelError('Sol任务板同一输入已有尝试；保留已有任务，不自动重发或伪称新结果成功')
+            calls['calls'][key] = dict(model=self.model.model, input_fingerprint=key, status='pending',
+                                       at=dt.datetime.now(dt.timezone.utc).isoformat())
+            calls['latest'] = key
+            self._save_sol_calls(sid, calls)  # durable intent before a potentially billable POST
+        try:
+            result = self.model.complete_json(system, user, timeout=timeout)
+        except Exception:
+            self._mark_sol_call(sid, key, 'unconfirmed')
+            raise MinutesModelError('Sol任务板结果未确认；已停止同输入自动重发') from None
+        self._mark_sol_call(sid, key, 'model_received')
+        return result
 
     def view(self, sid):
         path = self.path(sid)
@@ -159,8 +226,19 @@ class Boards:
             else:
                 candidate['status'] = 'needs_review'
                 review_queue.append(candidate)
-        return dict(session_id=sid, tasks=tasks, review_queue=review_queue,
-                    updated_at=saved.get("updated_at"), pending=pending)
+        result = dict(session_id=sid, tasks=tasks, review_queue=review_queue,
+                      updated_at=saved.get("updated_at"), pending=pending)
+        if getattr(self.model, 'semantic_only', False):
+            with self.lock:
+                try:
+                    calls = self._sol_calls(sid)
+                    latest = calls['calls'].get(calls.get('latest'), {})
+                    status = latest.get('status')
+                except MinutesModelError:
+                    status = 'unconfirmed'
+            result['generation_status'] = ('ready' if status == 'board_saved' else
+                                            'pending' if pending else 'unconfirmed' if status else 'not_requested')
+        return result
 
     def _hashes(self, sid):
         return self._row_hashes(self.source_rows(sid))
@@ -225,7 +303,8 @@ class Boards:
                     previous = prior['tasks'] + prior['review_queue']
                     used = {d['source'] for d in drafts} | {u['id'] for u in context} | {i for t in previous for i in t['sources']}
                     hashes = {i: all_hashes[i] for i in used if i in all_hashes} if all_hashes is not None else None
-                    board = update(self.model, previous, drafts, context[-CONTEXT_LINES * 2:])
+                    request_model = _SolBoardModel(self, sid) if getattr(self.model, 'semantic_only', False) else self.model
+                    board = update(request_model, previous, drafts, context[-CONTEXT_LINES * 2:])
                 except Exception as error:  # noqa: BLE001 - the drafts stay in the minutes; the board just misses them
                     self.log(f"task board {sid[:8]} update failed: {type(error).__name__}: {str(error)[:120]}")
                     continue
@@ -239,6 +318,8 @@ class Boards:
                               f, ensure_ascii=False, indent=1)
                 os.chmod(path + ".tmp", 0o600)
                 os.replace(path + ".tmp", path)
+                if isinstance(request_model, _SolBoardModel) and request_model.last_key:
+                    self._mark_sol_call(sid, request_model.last_key, 'board_saved')
         except Exception:
             with self.lock:
                 self.running.discard(sid)

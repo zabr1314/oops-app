@@ -7,7 +7,17 @@ import com.oops.app.asr.VolcCredentials
 
 /** Debug-drawer settings layered over BuildConfig defaults from local.properties. */
 class Settings(context: Context) {
+    private val feishuIdentity = FeishuSessionStore(context)
+    fun feishuSessionFor(url: String): String = feishuIdentity.read(url)
+    fun setFeishuSessionFor(url: String, token: String) = feishuIdentity.write(url, token)
     private val prefs = context.getSharedPreferences("oops_settings", Context.MODE_PRIVATE)
+
+    init {
+        // One upgrade migration to the user's selected hardware. Later manual source choices persist.
+        if (com.oops.app.audio.BeanSdk.included && !prefs.getBoolean("bean_source_default_v1", false)) {
+            prefs.edit { putString(KEY_SOURCE, SOURCE_BEAN); putBoolean("bean_source_default_v1", true) }
+        }
+    }
 
     var voiceTrigger: Boolean
         get() = prefs.getBoolean("voice_trigger", true)
@@ -65,7 +75,8 @@ class Settings(context: Context) {
         set(value) = prefs.edit { putString("speaker_preview_url", value.trim()) }
 
     var source: String
-        get() = prefs.getString(KEY_SOURCE, SOURCE_MIC) ?: SOURCE_MIC
+        get() = prefs.getString(KEY_SOURCE, null)
+            ?: if (com.oops.app.audio.BeanSdk.included) SOURCE_BEAN else SOURCE_MIC
         set(value) = prefs.edit { putString(KEY_SOURCE, value) }
 
     /** Where [com.oops.app.audio.RemoteAudioSource] connects; 127.0.0.1 rides `adb reverse` over USB. */

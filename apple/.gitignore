@@ -1,0 +1,9 @@
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcresult/
+*.log
+*.ipa
+*.xcarchive/
+Configuration/Signing.local.xcconfig

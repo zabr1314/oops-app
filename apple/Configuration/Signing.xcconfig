@@ -1,0 +1,2 @@
+// Optional per-machine signing configuration. Never commit the local file.
+#include? "Signing.local.xcconfig"

@@ -45,8 +45,11 @@ object BridgeJson {
         .put("testWavName", s.testWavName)
         .put("sourceDetail", s.sourceDetail ?: NULL)
         .put("sourceReady", s.sourceReady)
+        .put("captureControl", s.captureControl).put("captureControlError", s.captureControlError ?: NULL)
         .put("remoteAddress", s.remoteAddress)
         .put("beanSdk", com.oops.app.audio.BeanSdk.included)
+        .put("beanAuthorized", com.oops.app.audio.BeanAuth.fromBuildConfig().let { runCatching { it.requireUsable() }.isSuccess })
+        .put("beanLicenseExpiresAt", com.oops.app.audio.BeanAuth.fromBuildConfig().licenseExpiresAt)
         .put("asrGaps", JSONArray(s.asrGaps.map { JSONObject().put("fromMs", it.fromMs).put("toMs", it.toMs) }))
         .put("digestCounts", JSONObject(s.digestCounts)).put("agenda", s.agenda).put("notices", JSONArray(s.notices))
         .put("voiceTrigger", s.voiceTrigger).put("noticeVibrate", s.noticeVibrate).put("memorySync", s.memorySync).put("selfName", s.selfName)
@@ -103,7 +106,7 @@ object BridgeJson {
             JSONArray(
                 c.items.map {
                     JSONObject().put("id", it.utteranceId).put("startMs", it.startMs).put("endMs", it.endMs)
-                        .put("text", it.text).put("speaker", it.speaker ?: NULL).put("prob", it.prob).put("audioAvailable", it.audioAvailable)
+                        .put("text", it.text).put("speaker", it.speaker ?: NULL).put("prob", it.prob ?: NULL).put("audioAvailable", it.audioAvailable)
                 },
             ),
         )

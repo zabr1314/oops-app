@@ -4,6 +4,8 @@ import { sharedMemoryEligible } from '../memoryAccess';
 import { sourceAvailable, sourceTurn, taskVisible, findSourceTask, invalidateSessionSources, makeSourceReference, provenanceAvailable, materialVisible as materialForProject } from '../sourceAccess';
 import { clearObjectViewState, useViewState } from '../viewState';
 import { projectMemorySummary } from '../projectMemoryLogic';
+import { isTemporaryDaily } from '../storagePolicy';
+import type { SessionReviewItem } from '../sessionLogic';
 import { contentScopes, selectContentScope } from '../contentScopeLogic';
 import { unknownConversationClues, preferenceDraft, personIdentityClues, unboundIdentityClues, identityClueTopics, identityClueRoute, identityClueSelection, type IdentityClue } from '../feedbackPresentation';
 import { personContentTopics, profileUpdateLabel, understandingEvidence } from '../memoryPeoplePresentation';
@@ -12,6 +14,8 @@ import { Avatar, Badge, Button, Card, Check, Chips, Empty, Field, Icon, Notice, 
 import { PrivacyNoticeCard } from './PrivacyNotice';
 import { DocumentRoleDraft } from './DocumentRoleDraft';
 import { DevicePair, DeviceDetail } from './DeviceStartup';
+import { RaftConnection, isLocalRaftConnectionAllowed } from './RaftConnection';
+import { RaftCollaboration } from './RaftCollaboration';
 import './MemorySettings.css';
 
 const PERSONAL = '我的空间';
@@ -418,7 +422,7 @@ export function memoryTitle(route: Route) {
   return titles[route.view] || '记忆';
 }
 export function settingsTitle(route: Route) {
-  const titles: Record<string, string> = { settings: '设置', 'settings-role-import': '文档角色建议', 'settings-identity': '身份与角色', 'settings-preferences': '助理偏好', 'settings-voice': '我的声音身份', 'settings-voice-identities': '声音样本与身份', 'settings-voice-match': '声音识别与核对', 'settings-devices': '设备与声音入口', 'settings-device': '设备详情', 'settings-pair': '添加设备', 'settings-deskpet': '桌面伙伴', 'settings-tools': '工具连接', 'settings-tool': '连接与权限', 'settings-sync': '离线记录', 'settings-sharing': '已共享内容', 'settings-retention': '保存期限', 'settings-spaces': '内容范围与共享', 'settings-members': '协作与共享', 'settings-trash': '回收站', 'settings-privacy': '隐私与数据', 'settings-export': '导出与清理', 'settings-logs': '操作记录', 'settings-notifications': '通知与自主等级', 'settings-account': '账户与安全', 'settings-usage': '用量与方案' };
+  const titles: Record<string, string> = { settings: '设置', 'settings-role-import': '文档角色建议', 'settings-identity': '身份与角色', 'settings-preferences': '助理偏好', 'settings-voice': '我的声音身份', 'settings-voice-identities': '声音样本与身份', 'settings-voice-match': '声音识别与核对', 'settings-devices': '设备与声音入口', 'settings-device': '设备详情', 'settings-pair': '添加设备', 'settings-deskpet': '桌面伙伴', 'settings-tools': '工具连接', 'settings-raft': 'Raft 沟通', 'settings-raft-collaboration': 'Oops 协作群', 'settings-tool': '连接与权限', 'settings-sync': '离线记录', 'settings-sharing': '已共享内容', 'settings-retention': '保存期限', 'settings-spaces': '内容范围与共享', 'settings-members': 'Oops 协作群', 'settings-trash': '回收站', 'settings-privacy': '隐私与数据', 'settings-export': '导出与清理', 'settings-logs': '操作记录', 'settings-notifications': '通知与自主等级', 'settings-account': '账户与安全', 'settings-usage': '用量与方案' };
   return titles[route.view] || '设置';
 }
 export function MemoryScreens() {
@@ -462,34 +466,107 @@ function UnderstandingCard({open,onToggle}: {open: boolean; onToggle: () => void
     </div>}
   </Card>;
 }
+const personalMemoryGroups = ['身份', '偏好', '目标', '经历', '日常'];
+function personalMemoryGroup(memory: Pick<Memory, 'category' | 'tags'>): string {
+  if (memory.category === '目标' || memory.tags.includes('目标')) return '目标';
+  if (memory.tags.some(tag => ['身份', '角色', '角色背景', '角色冲突'].includes(tag))) return '身份';
+  if (memory.tags.some(tag => tag.includes('偏好'))) return '偏好';
+  if (memory.tags.some(tag => ['经历', '背景', '个人经历'].includes(tag))) return '经历';
+  return '日常';
+}
+function personalMemoryLabel(memory: Memory): string {
+  const group = personalMemoryGroup(memory);
+  return group === '日常' && !memory.tags.some(tag => ['日常', '日常候选', 'Recall'].includes(tag)) ? '日常 / 未分类' : group;
+}
+/** Read existing local results only. Shared cards never use the private legacy summary. */
+function meetingMemoryPreview(data: AppData, session: Session) {
+  const personal = data.settings.space === PERSONAL;
+  const changed = data.settings.toggles[`review-${session.id}`] === true;
+  const rows = parse<SessionReviewItem[]>(data.settings.retention[`session-review-items:${session.id}`], []);
+  const confirmed = Array.isArray(rows) ? rows.filter(item => item && item.kind === 'conclusion' && item.confirmed && typeof item.text === 'string' && (personal || item.shared === true) && (item.sourceId === undefined || sourceAvailable(data, { sourceSession: session.id, sourceId: item.sourceId }, { publicOnly: !personal, requireShared: !personal }))) : [];
+  const transcriptAvailable = !session.storage || session.storage.transcriptState === 'available';
+  const text = changed ? [] : confirmed.length ? confirmed.map(item => item.text) : personal && transcriptAvailable ? session.summary : [];
+  const pending = personal && (changed || !data.settings.retention[`session-review-completed:${session.id}`] || session.transcript.some(turn => anonymousName(turn.speaker)) || memoryReviewQueue(data).some(memory => memory.sourceSession === session.id) || data.tasks.some(task => (task.sourceSession === session.id || task.relatedSessionId === session.id) && taskVisible(data, task) && (task.status === '待承接' || task.needsReview || task.sourceNeedsReview)));
+  return { text: text.filter(value => typeof value === 'string' && value.trim()).slice(0, 2), changed, pending, transcriptAvailable };
+}
 function MemoryHome() {
-  const { data, route, navigate } = useOops();
+  const { data, route, navigate, update } = useOops();
   const listKey = 'memory-list:' + data.settings.space + ':' + route.view + ':' + (route.mode || '');
-  const [tab, setTab] = useViewState(listKey + ':tab', route.view === 'memory-people' ? '人物' : route.view === 'memory-projects' ? '项目' : route.mode || '记忆');
+  const [tab, setTab] = useViewState(listKey + ':tab', route.view === 'memory-people' ? '人物' : route.view === 'memory-projects' ? '项目' : route.mode || '会议／项目');
+  const [collection, setCollection] = useViewState(listKey + ':collection', route.view === 'memory-projects' || route.mode === '项目' || tab === '项目' ? '项目' : '会议');
+  const [group, setGroup] = useViewState(listKey + ':group', '全部');
   const [query, setQuery] = useViewState(listKey + ':query', ''); const [filter, setFilter] = useViewState(listKey + ':filter', '全部'); const [understandingOpen, setUnderstandingOpen] = useViewState(listKey + ':understanding', false);
   const categoryMap: Record<string, Memory['category']> = { 'memory-inspiration': '灵感', 'memory-goals': '目标', 'memory-templates': '模板' };
-  const category = categoryMap[route.view]; const favorite = route.view === 'memory-favorites'; const special = !!category || favorite;
-  const base = data.memories.filter(x => visible(data, x));
-  const results = base.filter(x => (!category || x.category === category || category === '模板' && x.category === '工作流') && (!favorite || x.starred || x.category === '收藏') && (special || x.category === '记忆') && (!query || (x.title + x.body + x.tags.join(' ')).toLowerCase().includes(query.toLowerCase())) && (filter === '全部' || filter === '待核对' && needsMemoryReview(x, data) || filter === '已收藏' && x.starred || filter === '已停用' && x.tags.includes('已停用') || filter === '可用' && memoryUsable(data, x)));
-  const visiblePeople = data.people.filter(x => personVisible(data, x));
+  const category = categoryMap[route.view]; const favorite = route.view === 'memory-favorites';
+  const peopleIndex = route.view === 'memory-people' || route.mode === '人物';
+  const savedIndex = route.mode === '已存内容';
+  const special = !!category || favorite || peopleIndex || savedIndex;
+  // Existing saved list state and old mode links continue to resolve to their former content.
+  const mainTab = ['个人', '记忆', '人物'].includes(tab) ? '个人' : '会议／项目';
+  const personalHome = !special && mainTab === '个人';
+  const meetingHome = !special && mainTab === '会议／项目';
+  const personal = data.settings.space === PERSONAL;
+  const contentFilter = ['全部', '可用', '待核对', '已收藏', '已停用'].includes(filter) ? filter : '全部';
+  const matchesQuery = (text: string) => !query || text.toLowerCase().includes(query.trim().toLowerCase());
+  const base = data.memories.filter(memory => visible(data, memory));
+  const results = base.filter(memory => (!personalHome || personal && memory.visibility === '私有' && ['记忆', '灵感', '目标'].includes(memory.category) && !memory.tags.some(tag => ['修订历史', '资料', '会中检索', '任务成果'].includes(tag))) && (!category || memory.category === category || category === '模板' && memory.category === '工作流') && (!favorite || memory.starred || memory.category === '收藏') && (special || group === '全部' || personalMemoryGroup(memory) === group) && matchesQuery(memory.title + memory.body + memory.tags.join(' ')) && (contentFilter === '全部' || contentFilter === '待核对' && needsMemoryReview(memory, data) || contentFilter === '已收藏' && memory.starred || contentFilter === '已停用' && memory.tags.includes('已停用') || contentFilter === '可用' && memoryUsable(data, memory)));
+  const meetings = data.sessions.filter(session => session.kind === '会议' && !session.archived && session.status !== '待开始' && !isTemporaryDaily(session) && sessionVisible(data, session)).map(session => ({ session, preview: meetingMemoryPreview(data, session) })).filter(({ session, preview }) => matchesQuery(session.title + session.date + session.project + preview.text.join(' '))).sort((a, b) => (sessionDateValue(b.session) || 0) - (sessionDateValue(a.session) || 0));
+  const visiblePeople = data.people.filter(person => personVisible(data, person));
   const conversations = new Map(visiblePeople.map(person => [person.id, personConversations(data, person)]));
   const todayPeople = visiblePeople.filter(person => conversations.get(person.id)?.some(link => happenedToday(link.session)));
-  const people = visiblePeople.filter(x => (!query || (x.name + x.role + x.company).toLowerCase().includes(query.toLowerCase()) || personIdentityClues(data, x.id).some(clue => (clue.session.title + clue.session.project + clue.turn.text).toLowerCase().includes(query.toLowerCase()))) && (filter !== '待核对' || !personNameConfirmed(data, x) || personIdentityClues(data, x.id).length > 0) && (filter !== '今天聊过' || todayPeople.some(person => person.id === x.id)));
-  const projects = data.projects.filter(x => (data.settings.space === PERSONAL || (data.settings.retention['project-space:' + x.id] || TEAM) === data.settings.space) && (!query || (x.name + x.description).toLowerCase().includes(query.toLowerCase())));
+  const people = visiblePeople.filter(person => (matchesQuery(person.name + person.role + person.company) || personIdentityClues(data, person.id).some(clue => matchesQuery(clue.session.title + clue.session.project + clue.turn.text))) && (filter !== '待核对' || !personNameConfirmed(data, person) || personIdentityClues(data, person.id).length > 0) && (filter !== '今天聊过' || todayPeople.some(value => value.id === person.id)));
+  const projects = data.projects.filter(project => (personal || (data.settings.retention['project-space:' + project.id] || TEAM) === data.settings.space) && matchesQuery(project.name + project.description));
+  const pending = personal ? memoryReviewQueue(data).filter(memory => memory.visibility === '私有') : [];
   const newCategory = category || '记忆';
-  return <div className="stack memory-settings">
-    {!special && <Tabs items={['记忆', '人物', '项目']} value={tab} onChange={v => { setTab(v); setFilter('全部'); }} />}
-    <Search value={query} onChange={setQuery} placeholder={tab === '人物' && !special ? '搜索姓名、角色或原话线索' : tab === '项目' && !special ? '搜索项目' : '搜索内容、标签'} />
-    {(special || tab === '记忆') && <Chips items={['全部', '可用', '待核对', '已收藏', '已停用']} value={filter} onChange={setFilter} />}
-    {!special && tab === '记忆' && data.settings.space === PERSONAL && <UnderstandingCard open={understandingOpen} onToggle={() => setUnderstandingOpen(!understandingOpen)} /> }{!special && tab === '记忆' && <><div className="ms-quick-grid">{[{ label: '灵感', icon: 'sparkle', view: 'memory-inspiration' }, { label: '成长', icon: 'target', view: 'memory-goals' }, { label: '收藏', icon: 'bookmark-simple', view: 'memory-favorites' }, { label: '模板', icon: 'stack', view: 'memory-templates' }].map(x => <button key={x.view} onClick={() => navigate({ view: x.view })}><Icon name={x.icon} /><span>{x.label}</span></button>)}</div>{memoryReviewQueue(data).length > 0 && <Card className="ms-pending" onClick={() => navigate({ view: 'memory-candidate' })}><Badge>需要你确认</Badge><h3>{memoryReviewQueue(data).length} 条新信息待核对</h3><p className="meta">核对后再用于后续建议</p></Card>}</>}
-    <SectionTitle action="新增" onAction={() => navigate({ view: !special && tab === '人物' ? 'memory-person-edit' : !special && tab === '项目' ? 'memory-project-edit' : 'memory-edit', mode: newCategory })}>{special ? category === '目标' ? '我的成长目标' : favorite ? '已保存的内容' : category === '模板' ? '模板与工作流' : '我的灵感' : tab === '人物' ? '认识的人' : tab === '项目' ? '进行中的项目' : '长期记忆'}</SectionTitle>
-    {!special && tab === '人物' ? <>
-      <Card className="ms-today-people" onClick={() => setFilter('今天聊过')}><div className="ms-card-heading"><span className="ms-today-icon"><Icon name="users-three" /></span><Badge>{todayPeople.length} 人</Badge></div><h3>今天聊过</h3><p className="meta">{todayPeople.length ? todayPeople.map(p => p.name).join('、') : '今天还没有已确认身份的对话'}</p><p className="meta">只统计当前可见会话</p></Card>
-      <Chips items={['全部', '今天聊过', '待核对']} value={filter} onChange={setFilter} />
-      {filter !== '今天聊过' && <UnboundIdentityPanel compact query={query} />}
-      {people.map(p => { const links = conversations.get(p.id) || []; return personIdentityClues(data, p.id).length > 0 || !personNameConfirmed(data, p) && !links.length ? <UnresolvedPersonContext key={p.id} person={p} compact /> : <Card key={p.id}><Row title={p.name} subtitle={p.role + (p.company ? ' · ' + p.company : '') + (links.length ? ' · ' + links.length + ' 个可见会话' : '')} icon="user-circle" badge="姓名已确认" onClick={() => navigate({ view: 'memory-person', id: p.id })} /><PersonContentTopicList personId={p.id} sessionOrder={links.map(link => link.session.id)} compact/></Card>; })}
-      <Button tone="secondary" icon="user-plus" onClick={() => navigate({ view: 'memory-exchange' })}>交换身份</Button><Button tone="quiet" onClick={() => navigate({ view: 'memory-social' })}>声音动态</Button>{!people.length && <Empty title={filter === '今天聊过' ? '今天还没有可关联的人物' : '没有符合条件的人物'} body={filter === '今天聊过' ? '未知身份、待开始会话和不可见的发言不计入今天人数。' : '调整关键词，或添加一位人物。'} />}
-    </> : !special && tab === '项目' ? <><Card>{projects.map(p => <Row key={p.id} title={p.name} subtitle={p.members.length + ' 位成员 · 预算 ¥' + p.budget.toLocaleString()} icon="folder-simple" onClick={() => navigate({ view: 'memory-project', id: p.id })} />)}</Card>{!projects.length && <Empty title="还没有项目" body="添加背景，让每次讨论更有上下文。" />}</> : <>{results.map(m => <Card key={m.id} onClick={() => navigate({ view: m.category === '模板' ? 'memory-template' : m.category === '工作流' ? 'memory-workflow' : m.category === '目标' ? 'memory-goal' : needsMemoryReview(m, data) ? 'memory-candidate' : 'memory-detail', id: m.id })}><div className="ms-card-heading"><Badge>{m.tags.includes('已停用') ? '已停用' : m.category}</Badge>{m.starred && <Icon name="bookmark-simple" size={17} />}</div><h3>{m.title}</h3><p className="ms-preview">{m.body}</p><p className="meta">{m.updated} · {m.visibility}</p></Card>)}{!results.length && <Empty title="这里还没有内容" body={data.settings.space !== PERSONAL ? '团队空间只显示已共享的内容。' : '保存一条内容，之后可以继续整理。'} action="新增内容" onAction={() => navigate({ view: 'memory-edit', mode: newCategory })} />}{favorite && <Card><SectionTitle>任务成果</SectionTitle>{data.tasks.filter(t => t.results.length && taskVisible(data, t)).map(t => <Row key={t.id} title={t.title} subtitle={t.results.length + ' 项成果'} icon="files" onClick={() => navigate({ view: 'task-result', id: t.id })} />)}</Card>}{category === '模板' && <Button tone="secondary" onClick={() => navigate({ view: 'memory-edit', mode: '工作流' })}>新建工作流</Button>}</>}
+  const addContent = () => navigate({ view: 'memory-edit', mode: personalHome ? '个人:' + (group === '全部' ? '日常' : group) : newCategory });
+  const openMemory = (memory: Memory) => navigate({ view: memory.category === '模板' ? 'memory-template' : memory.category === '工作流' ? 'memory-workflow' : memory.category === '目标' ? 'memory-goal' : needsMemoryReview(memory, data) ? 'memory-candidate' : 'memory-detail', id: memory.id });
+  return <div className="stack memory-settings ms-memory-overview">
+    {!special && <Tabs items={['会议／项目', '个人']} value={mainTab} onChange={value => { setTab(value); setFilter('全部'); setQuery(''); }} />}
+    {personalHome && !personal ? <Empty title="个人记忆仅在我的空间查看" body="身份、偏好和个人经历保持私有。切回我的空间后继续整理。" action="切回我的空间" onAction={() => update(current => ({ ...current, settings: { ...current.settings, space: PERSONAL } }))} icon="lock-key" /> : <>
+      {meetingHome ? <>
+        <Chips items={['会议', '项目']} value={collection} onChange={value => { setCollection(value); setQuery(''); }} />
+        <Search value={query} onChange={setQuery} placeholder={collection === '项目' ? '搜索项目名称、背景' : '搜索会议、项目或已有整理'} />
+        {collection === '会议' ? <>
+          <SectionTitle action="全部会话" onAction={() => navigate({ view: 'sessions' })}>每一次会议</SectionTitle>
+          <p className="meta">本地体验 · 查看已保存的会议内容与整理结果</p>
+          {meetings.map(({ session, preview }) => <Card key={session.id} className="ms-meeting-card">
+            <div className="ms-card-heading"><Badge tone={session.status === '进行中' ? 'purple' : 'gray'}>{session.status}</Badge><Badge tone={preview.changed || preview.pending ? 'orange' : 'gray'}>{!personal ? '获准共享的结果' : preview.changed ? '来源变化 · 待复核' : preview.pending ? '整理结果待核对' : '本次核对已结束'}</Badge></div>
+            <h3>{session.title}</h3><p className="meta">{session.date || '日期未记录'} · {session.duration || '时长未记录'}</p>
+            {session.project && <Badge tone="gray">{session.project}</Badge>}
+            {preview.text.length ? <><p className="meta">{personal ? '已有整理' : '已确认并共享的结论'}</p>{preview.text.map((text, index) => <p className="ms-preview" key={index}>{text}</p>)}</> : <p className="meta">{preview.changed ? '旧整理需重新核对，请打开会议处理。' : !personal ? '尚无逐项获准共享的结论。' : !preview.transcriptAvailable ? '全文已到期或清除，可打开会议查看独立保留的内容。' : '暂未保存总结纪要，可打开会议查看原文。'}</p>}
+            <Button tone="secondary" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: '概览' })}>查看会议内容</Button>
+            <div className="ms-meeting-actions"><Button tone="quiet" onClick={() => navigate({ view: 'session-transcript', id: session.id })}>原文</Button><Button tone="quiet" onClick={() => navigate({ view: 'session-detail', id: session.id, mode: '行动' })}>行动</Button>{personal && preview.pending && <Button tone="quiet" onClick={() => navigate({ view: 'session-review', id: session.id })}>继续核对</Button>}</div>
+          </Card>)}
+          {!meetings.length && <Empty title={query ? '没有找到这场会议' : '还没有已保存的会议'} body={query ? '试试会议名称或项目关键词。' : '正式会议结束后，原文和整理结果会汇集在这里。'} action="查看会话" onAction={() => navigate({ view: 'sessions' })} />}
+        </> : <>
+          <SectionTitle action="新增项目" onAction={() => navigate({ view: 'memory-project-edit' })}>项目</SectionTitle>
+          {projects.map(project => { const summary = projectMemorySummary(data, project.id); return <Card key={project.id}><Row title={project.name} subtitle={project.description} icon="folder-simple" onClick={() => navigate({ view: 'memory-project', id: project.id })} /><p className="meta">{summary.sessions.filter(session => session.kind === '会议' && !session.archived && session.status !== '待开始' && !isTemporaryDaily(session)).length} 场关联会议 · {summary.decisions.length} 条已确认决定 · {summary.tasks.filter(task => !['已完成', '已拒绝', '已取消'].includes(task.status)).length} 项待推进</p><Button tone="quiet" onClick={() => navigate({ view: 'memory-project', id: project.id, mode: '会话' })}>查看项目会议</Button></Card>; })}
+          {!projects.length && <Empty title={query ? '没有找到这个项目' : '还没有项目'} body="把相关会议、背景和已确认决定放在一起。" action="新增项目" onAction={() => navigate({ view: 'memory-project-edit' })} />}
+        </>}
+      </> : <>
+        {personalHome && <>
+          <UnderstandingCard open={understandingOpen} onToggle={() => setUnderstandingOpen(!understandingOpen)} />
+          {pending.length > 0 && <Card className="ms-pending" onClick={() => navigate({ view: 'memory-candidate' })}><Badge>需要你确认</Badge><h3>{pending.length} 条新信息待核对</h3><p className="meta">确认后再用于后续建议</p></Card>}
+          <Chips items={['全部', ...personalMemoryGroups]} value={group} onChange={setGroup} />
+        </>}
+        <Search value={query} onChange={setQuery} placeholder={peopleIndex ? '搜索姓名、角色或原话线索' : '搜索内容、标签'} />
+        {!peopleIndex && <Chips items={['全部', '可用', '待核对', '已收藏', '已停用']} value={contentFilter} onChange={setFilter} />}
+        <SectionTitle action="新增" onAction={peopleIndex ? () => navigate({ view: 'memory-person-edit' }) : addContent}>{peopleIndex ? '认识的人' : savedIndex ? '全部已存内容' : category === '目标' ? '我的成长目标' : favorite ? '已保存的内容' : category === '模板' ? '模板与工作流' : category === '灵感' ? '我的灵感' : group === '全部' ? '我的长期记忆' : group}</SectionTitle>
+        {peopleIndex ? <>
+          <Card className="ms-today-people" onClick={() => setFilter('今天聊过')}><div className="ms-card-heading"><span className="ms-today-icon"><Icon name="users-three" /></span><Badge>{todayPeople.length} 人</Badge></div><h3>今天聊过</h3><p className="meta">{todayPeople.length ? todayPeople.map(person => person.name).join('、') : '今天还没有已确认身份的对话'}</p><p className="meta">只统计当前可见会话</p></Card>
+          <Chips items={['全部', '今天聊过', '待核对']} value={filter} onChange={setFilter} />
+          {filter !== '今天聊过' && <UnboundIdentityPanel compact query={query} />}
+          {people.map(person => { const links = conversations.get(person.id) || []; return personIdentityClues(data, person.id).length > 0 || !personNameConfirmed(data, person) && !links.length ? <UnresolvedPersonContext key={person.id} person={person} compact /> : <Card key={person.id}><Row title={person.name} subtitle={person.role + (person.company ? ' · ' + person.company : '') + (links.length ? ' · ' + links.length + ' 个可见会话' : '')} icon="user-circle" badge="姓名已确认" onClick={() => navigate({ view: 'memory-person', id: person.id })} /><PersonContentTopicList personId={person.id} sessionOrder={links.map(link => link.session.id)} compact /></Card>; })}
+          <Button tone="secondary" icon="user-plus" onClick={() => navigate({ view: 'memory-exchange' })}>交换身份</Button><Button tone="quiet" onClick={() => navigate({ view: 'memory-social' })}>声音动态</Button>{!people.length && <Empty title={filter === '今天聊过' ? '今天还没有可关联的人物' : '没有符合条件的人物'} body={filter === '今天聊过' ? '未知身份、待开始会话和不可见的发言不计入今天人数。' : '调整关键词，或添加一位人物。'} />}
+        </> : <>
+          {results.map(memory => <Card key={memory.id} onClick={() => openMemory(memory)}><div className="ms-card-heading"><Badge>{memory.tags.includes('已停用') ? '已停用' : personalHome ? personalMemoryLabel(memory) : memory.category}</Badge>{needsMemoryReview(memory, data) ? <Badge tone="orange">待核对</Badge> : <Badge tone="green">已确认</Badge>}{memory.starred && <Icon name="bookmark-simple" size={17} />}</div><h3>{memory.title}</h3><p className="ms-preview">{memory.body}</p><p className="meta">{memory.updated || '更新时间未记录'} · {memory.visibility}</p></Card>)}
+          {!results.length && <Empty title="这里还没有内容" body={!personal ? '当前范围只显示获准共享的内容。' : query || contentFilter !== '全部' ? '调整关键词或筛选，查看已保存内容。' : '由你填写或确认的信息会保留在这里。'} action="新增内容" onAction={addContent} />}
+          {favorite && <Card><SectionTitle>任务成果</SectionTitle>{data.tasks.filter(task => task.results.length && taskVisible(data, task)).map(task => <Row key={task.id} title={task.title} subtitle={task.results.length + ' 项成果'} icon="files" onClick={() => navigate({ view: 'task-result', id: task.id })} />)}</Card>}
+          {category === '模板' && <Button tone="secondary" onClick={() => navigate({ view: 'memory-edit', mode: '工作流' })}>新建工作流</Button>}
+        </>}
+        {personalHome && <Card className="ms-personal-tools"><SectionTitle>更多内容</SectionTitle><Row title="全部已存内容" subtitle="包括资料、旧记录与已共享内容" icon="files" onClick={() => navigate({ view: 'memory', mode: '已存内容' })} /><Row title="人物" subtitle="已核对的身份与交流线索" icon="users-three" onClick={() => navigate({ view: 'memory-people' })} /><Row title="灵感" subtitle="随手留下的想法" icon="sparkle" onClick={() => navigate({ view: 'memory-inspiration' })} /><Row title="成长目标" icon="target" onClick={() => navigate({ view: 'memory-goals' })} /><Row title="收藏与成果" icon="bookmark-simple" onClick={() => navigate({ view: 'memory-favorites' })} /><Row title="模板与工作流" icon="stack" onClick={() => navigate({ view: 'memory-templates' })} /></Card>}
+      </>}
+    </>}
   </div>;
 }
 function MemoryDetail() {
@@ -524,28 +601,35 @@ function MemoryDetail() {
 }
 function MemoryEditor() {
   const { data, route, update, navigate, toast } = useOops(); const existing = data.memories.find(x => x.id === route.id); const key = 'memory-edit:' + data.settings.space + ':' + (route.id || route.mode || 'new');
-  const [title, setTitle] = useViewState(key + ':title', existing?.title || ''); const [body, setBody] = useViewState(key + ':body', existing?.body || ''); const [tags, setTags] = useViewState(key + ':tags', existing?.tags.join('、') || ''); const [category, setCategory] = useViewState(key + ':category', existing?.category || (route.mode as Memory['category']) || '记忆'); const [visibility, setVisibility] = useViewState(key + ':visibility', existing?.visibility || (data.settings.space === PERSONAL ? '私有' : '项目共享')); const [error, setError] = useState('');
+  const personalEntry = route.mode?.startsWith('个人:') === true;
+  const entryGroup = personalMemoryGroups.includes(route.mode?.slice(3) || '') ? route.mode!.slice(3) : '日常';
+  const entryCategory = personalEntry ? entryGroup === '目标' ? '目标' : '记忆' : ['记忆', '灵感', '目标', '模板', '工作流', '收藏'].includes(route.mode || '') ? route.mode as Memory['category'] : '记忆';
+  const [title, setTitle] = useViewState(key + ':title', existing?.title || ''); const [body, setBody] = useViewState(key + ':body', existing?.body || ''); const [tags, setTags] = useViewState(key + ':tags', existing?.tags.join('、') || (personalEntry ? entryGroup : '')); const [category, setCategory] = useViewState<Memory['category']>(key + ':category', existing?.category || entryCategory); const [visibility, setVisibility] = useViewState<Memory['visibility']>(key + ':visibility', existing?.visibility || (data.settings.space === PERSONAL ? '私有' : '项目共享')); const [error, setError] = useState('');
   if (route.id && !existing) return <Missing />;
   if (existing && !visible(data, existing)) return <Denied />;
+  if (personalEntry && data.settings.space !== PERSONAL) return <Empty title="请在我的空间整理个人记忆" body="个人内容保持私有，不写入当前共享范围。" action="回到个人记忆" onAction={() => navigate({ view: 'memory', mode: '个人' })} icon="lock-key" />;
+  const privateCreation = !existing && data.settings.space === PERSONAL;
+  const draftGroup = personalMemoryGroup({ category, tags: split(tags) });
   const save = () => {
     if (!title.trim() || !body.trim()) { setError('请填写标题和内容。'); return; }
     if (data.settings.space !== PERSONAL && visibility === '私有') { setError('私有内容请切回个人空间创建。'); return; }
     const id = existing?.id || uid('MEM');
-    const fields = { title: title.trim(), body: body.trim(), category, tags: split(tags), visibility };
+    const savedVisibility: Memory['visibility'] = privateCreation ? '私有' : visibility;
+    const fields = { title: title.trim(), body: body.trim(), category, tags: split(tags), visibility: savedVisibility };
     const draft = memoryEditDraft(existing, fields, id);
-    if (visibility === '项目共享' && (existing && !memoryShareEligible(data, existing, data.settings.space === PERSONAL ? data.settings.retention['memory-space:' + existing.id] || TEAM : data.settings.space) || !memoryShareEligible(data, draft, data.settings.space === PERSONAL && existing ? data.settings.retention['memory-space:' + existing.id] || TEAM : data.settings.space === PERSONAL ? TEAM : data.settings.space))) { setError(shareUnavailable); return; }
+    if (savedVisibility === '项目共享' && (existing && !memoryShareEligible(data, existing, data.settings.space === PERSONAL ? data.settings.retention['memory-space:' + existing.id] || TEAM : data.settings.space) || !memoryShareEligible(data, draft, data.settings.space === PERSONAL && existing ? data.settings.retention['memory-space:' + existing.id] || TEAM : data.settings.space === PERSONAL ? TEAM : data.settings.space))) { setError(shareUnavailable); return; }
     update(d => {
       const current = existing ? d.memories.find(x => x.id === id) : undefined;
       if (existing && (!current || !visible(d, current))) return d;
       const latest = memoryEditDraft(current, fields, id);
-      if (visibility === '项目共享' && (current && !memoryShareEligible(d, current, d.settings.space === PERSONAL ? d.settings.retention['memory-space:' + current.id] || TEAM : d.settings.space) || !memoryShareEligible(d, latest, d.settings.space === PERSONAL && current ? d.settings.retention['memory-space:' + current.id] || TEAM : d.settings.space === PERSONAL ? TEAM : d.settings.space))) return d;
-      const changed = current && (current.title !== latest.title || current.body !== latest.body || current.category !== latest.category || JSON.stringify(current.tags) !== JSON.stringify(latest.tags) || current.visibility === '项目共享' && visibility === '私有');
+      if (savedVisibility === '项目共享' && (current && !memoryShareEligible(d, current, d.settings.space === PERSONAL ? d.settings.retention['memory-space:' + current.id] || TEAM : d.settings.space) || !memoryShareEligible(d, latest, d.settings.space === PERSONAL && current ? d.settings.retention['memory-space:' + current.id] || TEAM : d.settings.space === PERSONAL ? TEAM : d.settings.space))) return d;
+      const changed = current && (current.title !== latest.title || current.body !== latest.body || current.category !== latest.category || JSON.stringify(current.tags) !== JSON.stringify(latest.tags) || current.visibility === '项目共享' && savedVisibility === '私有');
       const base = changed ? invalidateMemoryDerivations(d, id, '记忆正文或共享范围已变化') : d;
-      return logData({ ...base, memories: existing ? base.memories.map(x => x.id === id ? latest : x) : [latest, ...base.memories], settings: { ...base.settings, retention: { ...base.settings.retention, ...(visibility === '项目共享' ? { ['memory-space:' + id]: existing ? d.settings.retention['memory-space:' + id] || TEAM : d.settings.space === PERSONAL ? TEAM : d.settings.space } : {}) } } }, existing ? '编辑内容：' + title : '新建内容：' + title);
+      return logData({ ...base, memories: existing ? base.memories.map(x => x.id === id ? latest : x) : [latest, ...base.memories], settings: { ...base.settings, retention: { ...base.settings.retention, ...(savedVisibility === '项目共享' ? { ['memory-space:' + id]: existing ? d.settings.retention['memory-space:' + id] || TEAM : d.settings.space === PERSONAL ? TEAM : d.settings.space } : {}) } } }, existing ? '编辑内容：' + title : '新建内容：' + title);
     });
     setError(''); if (!existing) { setTitle(''); setBody(''); setTags(''); } toast('已保存'); navigate({ view: category === '目标' ? 'memory-goal' : category === '模板' ? 'memory-template' : category === '工作流' ? 'memory-workflow' : 'memory-detail', id });
   };
-  return <div className="stack"><Field label="标题" value={title} onChange={setTitle} placeholder="给这条内容起个名字" /><Field label={category === '工作流' ? '步骤（每行一步）' : category === '模板' ? '模板正文' : '内容'} value={body} onChange={setBody} multiline placeholder={category === '模板' ? '{{项目}}：本次目标、结论与下一步' : '写下要保留的内容'} hint={category === '模板' ? '用 {{变量名}} 表示每次需要填写的内容。' : undefined} /><SelectField label="内容类型" value={category} onChange={v => setCategory(v as Memory['category'])} options={['记忆', '灵感', '目标', '模板', '工作流', '收藏']} /><Field label="标签" value={tags} onChange={setTags} placeholder="用顿号或逗号分隔" /><SelectField label="可见范围" value={visibility} onChange={v => setVisibility(v as Memory['visibility'])} options={['私有', '项目共享']} />{error && <p className="error-text">{error}</p>}
+  return <div className="stack">{privateCreation && <Badge tone="gray">个人内容 · 仅自己可见</Badge>}<Field label="标题" value={title} onChange={setTitle} placeholder="给这条内容起个名字" /><Field label={category === '工作流' ? '步骤（每行一步）' : category === '模板' ? '模板正文' : '内容'} value={body} onChange={setBody} multiline placeholder={category === '模板' ? '{{项目}}：本次目标、结论与下一步' : '写下要保留的内容'} hint={category === '模板' ? '用 {{变量名}} 表示每次需要填写的内容。' : undefined} />{personalEntry ? <SelectField label="个人内容归类" value={draftGroup} onChange={value => { setCategory(value === '目标' ? '目标' : '记忆'); setTags([...split(tags).filter(tag => !personalMemoryGroups.includes(tag)), value].join('、')); }} options={personalMemoryGroups} /> : <SelectField label="内容类型" value={category} onChange={value => setCategory(value as Memory['category'])} options={['记忆', '灵感', '目标', '模板', '工作流', '收藏']} />}<Field label="标签" value={tags} onChange={setTags} placeholder="用顿号或逗号分隔" />{!privateCreation && <SelectField label="可见范围" value={visibility} onChange={value => setVisibility(value as Memory['visibility'])} options={['私有', '项目共享']} />}{error && <p className="error-text">{error}</p>}
     <Button onClick={save}>保存内容</Button>
     {existing && <MemorySource memory={existing} />}
   </div>;
@@ -734,6 +818,8 @@ function Social() {
 
 export function SettingsScreens() {
   const { route } = useOops();
+  if (route.view === 'settings-raft') return <RaftConnection />;
+  if (route.view === 'settings-raft-collaboration' || route.view === 'settings-members') return <RaftCollaboration />;
   const components: Record<string, ReactNode> = { 'settings-role-import': <DocumentRoleDraft />, 'settings-identity': <Identity />, 'settings-preferences': <Preferences />, 'settings-voice': <VoiceEnrollment />, 'settings-voice-identities': <VoiceIdentitySamples key={route.id || 'all'} />, 'settings-voice-match': <VoiceIdentityMatch key={(route.id || 'all') + ':' + (route.mode || '')} />, 'settings-devices': <Devices />, 'settings-pair': <DevicePair key={route.id} />, 'settings-device': <DeviceDetail key={route.id} />, 'settings-deskpet': <Deskpet />, 'settings-tools': <Tools />, 'settings-tool': <ToolDetail key={route.id} />, 'settings-sync': <OfflineSync />, 'settings-sharing': <Sharing />, 'settings-retention': <Retention />, 'settings-spaces': <Spaces />, 'settings-members': <Members />, 'settings-trash': <Trash />, 'settings-privacy': <Privacy />, 'settings-export': <ExportData />, 'settings-logs': <Logs />, 'settings-notifications': <NotificationSettings />, 'settings-account': <Account />, 'settings-usage': <Usage /> };
   return components[route.view] || <SettingsHome />;
 }
@@ -743,7 +829,7 @@ function SettingsHome() {
     { title: '账户', rows: [['账户与安全', 'settings-account', 'lock-key'], ['用量与方案', 'settings-usage', 'chart-bar']] },
     { title: '身份与助理', rows: [['身份与角色', 'settings-identity', 'user-circle'], ['助理偏好', 'settings-preferences', 'sliders-horizontal'], ['我的声音身份', 'settings-voice', 'waveform']] },
     { title: '设备与聆听', rows: [['设备与声音入口', 'settings-devices', 'bluetooth'], ['聆听设置', 'settings-listening', 'ear']] },
-    { title: '工具与通知', rows: [['工具连接', 'settings-tools', 'plugs-connected'], ['通知与自主等级', 'settings-notifications', 'bell']] },
+    { title: '工具与通知', rows: [['Oops 协作群', 'settings-raft-collaboration', 'chat-circle-text'], ['工具连接', 'settings-tools', 'plugs-connected'], ['通知与自主等级', 'settings-notifications', 'bell']] },
     { title: '隐私与共享', rows: [['隐私与数据', 'settings-privacy', 'shield-check'], ['内容范围与共享', 'settings-spaces', 'share-network']] },
   ];
   function subtitle(view: string) {
@@ -751,6 +837,7 @@ function SettingsHome() {
     if (view === 'settings-identity') return data.settings.role || '称呼、角色与适用场景';
     if (view === 'settings-preferences') return '回答方式、长度与关注事项';
     if (view === 'settings-voice') return '声音样本、身份关联与使用范围';
+    if (view === 'settings-raft-collaboration') return '人与 Agent 在 Raft 群里按任务接力';
     if (view === 'settings-tools') return Object.values(data.settings.connections).filter(Boolean).length + ' 个示例连接';
     if (view === 'settings-devices') return Object.values(data.settings.devices).filter(Boolean).length + ' 台示例设备';
     if (view === 'settings-listening') return '对话检测、唤醒与自动起止';
@@ -802,7 +889,7 @@ function Deskpet() {
 }
 const tools = ['飞书', '邮箱', '日历', '资料库', '电脑助手'];
 function Tools() {
-  const { data, navigate } = useOops(); return <div className="stack"><Notice>所有连接为本机示例。读取与写入分别授权，未接真实服务。</Notice><Card>{tools.map(name => <Row key={name} title={name} icon={name === '日历' ? 'calendar' : name === '电脑助手' ? 'desktop' : name === '邮箱' ? 'envelope' : 'plugs-connected'} subtitle={data.settings.connections[name] ? '示例连接 · ' + (data.settings.toggles['read:' + name] ? '可读取' : '不可读取') + ' · ' + (data.settings.toggles['write:' + name] ? '可申请写入' : '不可写入') : '未连接'} onClick={() => navigate({ view: 'settings-tool', id: name })} />)}</Card></div>;
+  const { data, navigate } = useOops(); return <div className="stack">{isLocalRaftConnectionAllowed() && <Card><Row title="Raft 沟通" subtitle="连接私人后端 · 发送消息、指令与读取回复" icon="plugs-connected" onClick={() => navigate({ view: 'settings-raft' })} /></Card>}<Card><Row title="Oops 协作群" subtitle="群成员、任务线程、进展与成果核对" icon="chat-circle-text" onClick={()=>navigate({view:'settings-raft-collaboration'})}/></Card><Notice>以下连接为本机示例。读取与写入分别授权，未接真实服务。</Notice><Card>{tools.map(name => <Row key={name} title={name} icon={name === '日历' ? 'calendar' : name === '电脑助手' ? 'desktop' : name === '邮箱' ? 'envelope' : 'plugs-connected'} subtitle={data.settings.connections[name] ? '示例连接 · ' + (data.settings.toggles['read:' + name] ? '可读取' : '不可读取') + ' · ' + (data.settings.toggles['write:' + name] ? '可申请写入' : '不可写入') : '未连接'} onClick={() => navigate({ view: 'settings-tool', id: name })} />)}</Card></div>;
 }
 function ToolDetail() {
   const { data, route, update, toast } = useOops(); const name = route.id || '飞书'; const connected = !!data.settings.connections[name]; const [scope, setScope] = useState(data.settings.retention['scope:' + name] || (name === '飞书' ? 'Oops 项目群' : name === '日历' ? '工作日历' : name === '邮箱' ? '已选择的项目邮件' : name === '电脑助手' ? 'Oops 工作目录' : 'Oops 项目资料')); const [error, setError] = useState(false); const [remove, setRemove] = useState(false);

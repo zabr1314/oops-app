@@ -1,0 +1,16 @@
+{
+  "name": "oops-raft-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node bridge.mjs"
+  },
+  "dependencies": {
+    "@botiverse/raft": "0.0.26",
+    "@botiverse/raft-sdk": "0.18.0"
+  }
+}

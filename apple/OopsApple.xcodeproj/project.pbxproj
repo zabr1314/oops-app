@@ -1,0 +1,491 @@
+// !$*UTF8*$!
+{
+	"archiveVersion" = 1;
+	"classes" = {
+	};
+	"objectVersion" = 56;
+	"objects" = {
+		"CB75B1519E29E592966E8AB9" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.xcconfig";
+			"path" = "Configuration/Signing.xcconfig";
+			"sourceTree" = "<group>";
+		};
+		"E6D5E7A5A7ADFC5098AA7672" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/BusinessModel.swift";
+			"sourceTree" = "<group>";
+		};
+		"08801F90B68A5B4D6B46727C" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/BusinessTransport.swift";
+			"sourceTree" = "<group>";
+		};
+		"9AFE1C10550FFED0899E9924" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/MobileGateway.swift";
+			"sourceTree" = "<group>";
+		};
+		"4B76356635E0304F40C0C5A4" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/PhoneAudioProcessing.swift";
+			"sourceTree" = "<group>";
+		};
+		"A4DF4E61C9C534C912C2FA4C" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/PhoneBusinessStore.swift";
+			"sourceTree" = "<group>";
+		};
+		"1326BCFBBFFEC5BD09026643" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/OopsPhoneApp.swift";
+			"sourceTree" = "<group>";
+		};
+		"5F9B4329EAC288C936252456" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/WatchAudioRecorder.swift";
+			"sourceTree" = "<group>";
+		};
+		"3A8417ABAC2648A02C2B322B" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/WatchBusinessStore.swift";
+			"sourceTree" = "<group>";
+		};
+		"0A47B8B65EF1E4304FC1B2A6" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Business/OopsWatchApp.swift";
+			"sourceTree" = "<group>";
+		};
+		"4305C37F6D81FF197CEB5051" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "text.plist.xml";
+			"path" = "Business/Watch-Info.plist";
+			"sourceTree" = "<group>";
+		};
+		"84C42B532F1F5BAFEB863FBD" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"includeInIndex" = 0;
+			"path" = "OopsPhone.app";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"C516F7918EA1C78B13FE3833" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.application";
+			"includeInIndex" = 0;
+			"path" = "OopsWatch.app";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"B76E3A1DF590BC488BD20397" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "311349834B7C1A97A9DC8B20";
+			"proxyType" = 1;
+			"remoteGlobalIDString" = "EB0E5F0EBDC1FBFF1A8873B9";
+			"remoteInfo" = "OopsWatch";
+		};
+		"3378F305BA0BB00EE18CC41C" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "EB0E5F0EBDC1FBFF1A8873B9";
+			"targetProxy" = "B76E3A1DF590BC488BD20397";
+		};
+		"08D15231A93563497E761121" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "C516F7918EA1C78B13FE3833";
+			"settings" = {
+				"ATTRIBUTES" = (
+					"RemoveHeadersOnCopy",
+				);
+			};
+		};
+		"A35FADA60A6EA09F91DC8D6E" = {
+			"isa" = "PBXCopyFilesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"dstPath" = "$(CONTENTS_FOLDER_PATH)/Watch";
+			"dstSubfolderSpec" = 16;
+			"files" = (
+				"08D15231A93563497E761121",
+			);
+			"name" = "Embed Watch Content";
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"F5FC60D398E530765BB34C1A" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "E6D5E7A5A7ADFC5098AA7672";
+		};
+		"304DE61648A8A3BEF4B87BC6" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "08801F90B68A5B4D6B46727C";
+		};
+		"D9FEA06F8A1C660BF24540F8" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "5F9B4329EAC288C936252456";
+		};
+		"F94B8B6B56E40281ADBE129C" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "3A8417ABAC2648A02C2B322B";
+		};
+		"CD19DEC4B1A78BD17E0C0587" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "0A47B8B65EF1E4304FC1B2A6";
+		};
+		"F89B26ACF6202D18E7AC029C" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"F5FC60D398E530765BB34C1A",
+				"304DE61648A8A3BEF4B87BC6",
+				"D9FEA06F8A1C660BF24540F8",
+				"F94B8B6B56E40281ADBE129C",
+				"CD19DEC4B1A78BD17E0C0587",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"468FF2C2A749DF63E719456F" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"BE996FB185401DA3538FAA90" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"9EB1E495A605A21B96546A05" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.apple.watchkitapp";
+				"SDKROOT" = "watchos";
+				"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
+				"TARGETED_DEVICE_FAMILY" = "4";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"WATCHOS_DEPLOYMENT_TARGET" = "26.0";
+				"INFOPLIST_FILE" = "Business/Watch-Info.plist";
+				"INFOPLIST_KEY_WKApplication" = "YES";
+				"INFOPLIST_KEY_WKCompanionAppBundleIdentifier" = "com.oops.development.apple";
+				"INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp" = "NO";
+				"SKIP_INSTALL" = "YES";
+				"INFOPLIST_KEY_NSMicrophoneUsageDescription" = "Oops 仅在你确认开始后使用手表麦克风记录会议，并将录音传至你的 iPhone。";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) DEBUG";
+			};
+			"name" = "Debug";
+		};
+		"EBA52DE6D591C401BB740AFF" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.apple.watchkitapp";
+				"SDKROOT" = "watchos";
+				"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
+				"TARGETED_DEVICE_FAMILY" = "4";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"WATCHOS_DEPLOYMENT_TARGET" = "26.0";
+				"INFOPLIST_FILE" = "Business/Watch-Info.plist";
+				"INFOPLIST_KEY_WKApplication" = "YES";
+				"INFOPLIST_KEY_WKCompanionAppBundleIdentifier" = "com.oops.development.apple";
+				"INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp" = "NO";
+				"SKIP_INSTALL" = "YES";
+				"INFOPLIST_KEY_NSMicrophoneUsageDescription" = "Oops 仅在你确认开始后使用手表麦克风记录会议，并将录音传至你的 iPhone。";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Release";
+		};
+		"D58057201BA1D83CF9C11616" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"9EB1E495A605A21B96546A05",
+				"EBA52DE6D591C401BB740AFF",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"EB0E5F0EBDC1FBFF1A8873B9" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "D58057201BA1D83CF9C11616";
+			"buildPhases" = (
+				"F89B26ACF6202D18E7AC029C",
+				"468FF2C2A749DF63E719456F",
+				"BE996FB185401DA3538FAA90",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"name" = "OopsWatch";
+			"productName" = "OopsWatch";
+			"productReference" = "C516F7918EA1C78B13FE3833";
+			"productType" = "com.apple.product-type.application";
+		};
+		"7D7C4A26186A8CC2BC3CDF00" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "E6D5E7A5A7ADFC5098AA7672";
+		};
+		"203D2EF532556FEE7A80C3FD" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "08801F90B68A5B4D6B46727C";
+		};
+		"2ABC9D6BB9CF007D8945F4DE" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "9AFE1C10550FFED0899E9924";
+		};
+		"B708D64E6633CEF8BD179DDB" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "4B76356635E0304F40C0C5A4";
+		};
+		"A945C86F3CAB14307F046B67" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A4DF4E61C9C534C912C2FA4C";
+		};
+		"7D5857345F994E987A300CE5" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "1326BCFBBFFEC5BD09026643";
+		};
+		"204909CE139929DDC760DFD7" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+				"7D7C4A26186A8CC2BC3CDF00",
+				"203D2EF532556FEE7A80C3FD",
+				"2ABC9D6BB9CF007D8945F4DE",
+				"B708D64E6633CEF8BD179DDB",
+				"A945C86F3CAB14307F046B67",
+				"7D5857345F994E987A300CE5",
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"BB12500B2C1E3A0F806806BC" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"719E65D0E66DB83E7A8E14B3" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = 2147483647;
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = 0;
+		};
+		"3C38B347ECEC6656F2AAC65D" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.apple";
+				"SDKROOT" = "iphoneos";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "26.0";
+				"TARGETED_DEVICE_FAMILY" = "1";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation" = "YES";
+				"INFOPLIST_KEY_UILaunchScreen_Generation" = "YES";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"INFOPLIST_KEY_NSSpeechRecognitionUsageDescription" = "Oops 在你开启后，使用 iPhone 本机中文识别处理从已配对手表收到的录音。";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) DEBUG";
+			};
+			"name" = "Debug";
+		};
+		"597426659058092B1308B488" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CURRENT_PROJECT_VERSION" = "1";
+				"MARKETING_VERSION" = "0.1";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"INFOPLIST_KEY_CFBundleDisplayName" = "Oops";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_STRICT_CONCURRENCY" = "minimal";
+				"ENABLE_USER_SCRIPT_SANDBOXING" = "YES";
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.oops.development.apple";
+				"SDKROOT" = "iphoneos";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "26.0";
+				"TARGETED_DEVICE_FAMILY" = "1";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation" = "YES";
+				"INFOPLIST_KEY_UILaunchScreen_Generation" = "YES";
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations" = "UIInterfaceOrientationPortrait";
+				"INFOPLIST_KEY_NSSpeechRecognitionUsageDescription" = "Oops 在你开启后，使用 iPhone 本机中文识别处理从已配对手表收到的录音。";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Release";
+		};
+		"85FCF8E42DC33BEE357EB5D6" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"3C38B347ECEC6656F2AAC65D",
+				"597426659058092B1308B488",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"B6BEEFE0B40F47A901B5005F" = {
+			"isa" = "PBXNativeTarget";
+			"buildConfigurationList" = "85FCF8E42DC33BEE357EB5D6";
+			"buildPhases" = (
+				"204909CE139929DDC760DFD7",
+				"BB12500B2C1E3A0F806806BC",
+				"719E65D0E66DB83E7A8E14B3",
+				"A35FADA60A6EA09F91DC8D6E",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+				"3378F305BA0BB00EE18CC41C",
+			);
+			"name" = "OopsPhone";
+			"productName" = "OopsPhone";
+			"productReference" = "84C42B532F1F5BAFEB863FBD";
+			"productType" = "com.apple.product-type.application";
+		};
+		"EAB9AD2BEF22420DA90B298C" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"84C42B532F1F5BAFEB863FBD",
+				"C516F7918EA1C78B13FE3833",
+			);
+			"name" = "Products";
+			"sourceTree" = "<group>";
+		};
+		"7BAFA8884CA4DEE285FAF230" = {
+			"isa" = "PBXGroup";
+			"children" = (
+				"E6D5E7A5A7ADFC5098AA7672",
+				"08801F90B68A5B4D6B46727C",
+				"9AFE1C10550FFED0899E9924",
+				"4B76356635E0304F40C0C5A4",
+				"A4DF4E61C9C534C912C2FA4C",
+				"1326BCFBBFFEC5BD09026643",
+				"5F9B4329EAC288C936252456",
+				"3A8417ABAC2648A02C2B322B",
+				"0A47B8B65EF1E4304FC1B2A6",
+				"CB75B1519E29E592966E8AB9",
+				"4305C37F6D81FF197CEB5051",
+				"EAB9AD2BEF22420DA90B298C",
+			);
+			"sourceTree" = "<group>";
+		};
+		"BD7C2F1DD03D8840A7DAA4DB" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "$(inherited) DEBUG";
+			};
+			"name" = "Debug";
+			"baseConfigurationReference" = "CB75B1519E29E592966E8AB9";
+		};
+		"2AE1D127E3215970AC465F2F" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_ENABLE_MODULES" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"SWIFT_VERSION" = "5.0";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"ONLY_ACTIVE_ARCH" = "YES";
+			};
+			"name" = "Release";
+			"baseConfigurationReference" = "CB75B1519E29E592966E8AB9";
+		};
+		"31FECB068F31B2EB798980D0" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"BD7C2F1DD03D8840A7DAA4DB",
+				"2AE1D127E3215970AC465F2F",
+			);
+			"defaultConfigurationIsVisible" = 0;
+			"defaultConfigurationName" = "Release";
+		};
+		"311349834B7C1A97A9DC8B20" = {
+			"isa" = "PBXProject";
+			"attributes" = {
+				"BuildIndependentTargetsInParallel" = "YES";
+				"LastUpgradeCheck" = "2700";
+			};
+			"buildConfigurationList" = "31FECB068F31B2EB798980D0";
+			"compatibilityVersion" = "Xcode 14.0";
+			"developmentRegion" = "en";
+			"hasScannedForEncodings" = 0;
+			"knownRegions" = (
+				"en",
+				"Base",
+			);
+			"mainGroup" = "7BAFA8884CA4DEE285FAF230";
+			"productRefGroup" = "EAB9AD2BEF22420DA90B298C";
+			"projectDirPath" = "";
+			"projectRoot" = "";
+			"targets" = (
+				"B6BEEFE0B40F47A901B5005F",
+				"EB0E5F0EBDC1FBFF1A8873B9",
+			);
+		};
+	};
+	"rootObject" = "311349834B7C1A97A9DC8B20";
+}

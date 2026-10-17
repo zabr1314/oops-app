@@ -48,17 +48,26 @@ object PickPolicy {
 
     /** Reject invented ids, non-probabilities, expired audio and duplicate ids before thresholding. */
     fun validated(picks: List<Pick>, candidateIds: Set<String>, available: (String) -> Boolean = { true }): List<Pick> =
-        picks.filter { it.id in candidateIds && it.prob.isFinite() && it.prob in 0.0..1.0 && available(it.id) }
-            .groupBy { it.id }.values.map { group -> group.maxBy { it.prob } }
+        picks.filter { val prob = it.prob; it.id in candidateIds && prob != null && prob.isFinite() && prob in 0.0..1.0 && available(it.id) }
+            .groupBy { it.id }.values.map { group -> group.maxBy { it.prob!! } }
+
+    /** Only the explicitly selected semantic provider uses this path; order is not a probability. */
+    fun semanticValidated(picks: List<Pick>, candidateIds: Set<String>, available: (String) -> Boolean = { true }): List<Pick> =
+        picks.filter { it.id in candidateIds && it.prob == null && available(it.id) }.distinctBy { it.id }
+
+    fun semanticDecision(picks: List<Pick>): Decision? {
+        val chosen = picks.filter { it.prob == null }.distinctBy { it.id }.take(MAX_CANDIDATES)
+        return chosen.takeIf { it.isNotEmpty() }?.let { Decision(it, it.size == 1) }
+    }
 
     fun decide(picks: List<Pick>): Decision? {
-        val sorted = picks.filter { it.prob.isFinite() && it.prob in MIN_PROB..1.0 }.sortedByDescending { it.prob }
+        val sorted = picks.filter { val prob = it.prob; prob != null && prob.isFinite() && prob in MIN_PROB..1.0 }.sortedByDescending { it.prob }
         if (sorted.isEmpty()) return null
-        val single = sorted.size == 1 || sorted[0].prob - sorted[1].prob >= LEAD_MARGIN
+        val single = sorted.size == 1 || sorted[0].prob!! - sorted[1].prob!! >= LEAD_MARGIN
         return Decision(if (single) sorted.take(1) else sorted.take(MAX_CANDIDATES), single)
     }
 
-    fun isConfident(picks: List<Pick>) = (picks.maxOfOrNull { it.prob } ?: 0.0) >= CONFIDENT_PROB
+    fun isConfident(picks: List<Pick>) = (picks.mapNotNull { it.prob }.maxOrNull() ?: 0.0) >= CONFIDENT_PROB
 }
 
 data class CardItem(
@@ -67,7 +76,7 @@ data class CardItem(
     val endMs: Long,
     val text: String,
     val speaker: String?,
-    val prob: Double,
+    val prob: Double?,
     val audioAvailable: Boolean = true,
 )
 

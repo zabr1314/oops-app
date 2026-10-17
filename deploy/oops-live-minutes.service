@@ -1,0 +1,25 @@
+[Unit]
+Description=Oops source-bound live Sol meeting drafts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=oops
+Group=oops
+WorkingDirectory=/opt/oops/history
+Environment=PYTHONPATH=/opt/oops/history/scripts:/opt/oops/app/scripts
+Environment=OOPS_MINUTES_CONFIG=/var/lib/oops/.config/oops/minutes-model.json
+ExecStart=/opt/oops/venv/bin/python -B -u /opt/oops/history/scripts/live_minutes.py --state-dir /var/lib/oops/backend --db /var/lib/oops-history/live-minutes.sqlite3 --config /var/lib/oops-history/live-minutes-config.json --run
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/oops/backend
+ReadWritePaths=/var/lib/oops-history
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

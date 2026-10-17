@@ -4,6 +4,12 @@ import org.json.JSONObject
 
 /** A server snapshot is required for source-based writes; it is not reconstructed from a quote. */
 object TaskSourceBinding {
+    fun sessionId(value: String?): String? = runCatching {
+        val json = JSONObject(value ?: error("缺少来源"))
+        require(json.opt("version") == 1)
+        json.getString("session_id").also { require(it.matches(Regex("[A-Za-z0-9_-]{1,100}"))) }
+    }.getOrNull()
+
     data class Source(val id: String, val kind: String, val textHash: String, val revision: String, val quote: String,
                       val speaker: String?, val review: Map<String, String>)
     fun sources(value: String?, session: String, ids: List<String>): List<Source>? = runCatching {

@@ -13,6 +13,7 @@
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
   const clip = (t, n) => { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
   const fmt = (ms) => ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms';
+  const recordedLatency = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
   const ui = {
     stage: $('after-stage'), canvas: $('after-canvas'), doc: $('doc'), docMeta: $('doc-meta'), docTitle: $('doc-title'),
@@ -20,7 +21,7 @@
     overview: $('overview'), queue: $('queue'), cost: $('after-cost'), pipeline: [...document.querySelectorAll('#pipeline li')],
     boards: { task: $('board-task'), decision: $('board-decision'), open: $('board-open') },
     counts: { task: $('n-task'), decision: $('n-decision'), open: $('n-open') },
-    tabs: [...document.querySelectorAll('.modes button')], live: $('mode-live'), after: $('mode-after'),
+    tabs: [...document.querySelectorAll('.modes button')], content: $('mode-content'), live: $('mode-live'), after: $('mode-after'),
   };
   const ctx = ui.canvas.getContext('2d');
 
@@ -29,7 +30,7 @@
   let here = -1, grabUntil = 0, flyers = [], phases = [0, 0, 0, 0], ends = [0, 0, 0, 0];
   const spider = { x: 0, y: 0, ready: false, feet: [] };
   const neon = window.OopsSpider ? window.OopsSpider.create({ scale: 0.6, tone: '#5cc3ff' }) : null;
-  let lastGrab = 0;
+  let restoring = false, paintPending = true, loadedSourceKey = '';
 
   // ---------------------------------------------------------------- build
   function clauses(text) {
@@ -37,7 +38,60 @@
     return parts.map((p) => p.trim()).filter(Boolean);
   }
 
-  function build(raw) {
+  function sourceKey(raw) {
+    const source = raw?.source;
+    if (!source || source.kind === 'empty' || !Array.isArray(raw.sentences) || !raw.sentences.length) return '';
+    const id = source.kind === 'reanalysis' ? source.run_id : source.session_id;
+    // Local files without stable IDs must not be confused just because their titles match.
+    return id ? source.kind + ':' + id : '';
+  }
+
+  function playbackPosition() {
+    const boundaries = [0, ...ends, total];
+    const phase = Math.min(4, boundaries.findIndex((end, i) => i > 0 && at < end) - 1);
+    const index = phase < 0 ? 4 : phase;
+    const start = boundaries[index], end = boundaries[index + 1];
+    return { phase: index, progress: end > start ? Math.max(0, Math.min(1, (at - start) / (end - start))) : 1,
+      playing, speed, started, scroll: ui.doc.scrollTop, queueScroll: ui.queue.scrollTop };
+  }
+
+  function afterContent(raw) {
+    return JSON.stringify([raw.sentences?.map(({ id, text, speaker, outcome }) => [id, text, speaker, outcome]), raw.post, raw.post_status]);
+  }
+
+  function generationModel() {
+    const generation = post?.generation;
+    if (!generation || typeof generation !== 'object') return '';
+    const recorded = [generation.response_model, generation.model, generation.generation_model,
+      ...(Array.isArray(generation.models) ? generation.models : [])];
+    return [...new Set(recorded.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()))].join(' / ');
+  }
+
+  function update(raw) {
+    const sameSource = sourceKey(raw) && sourceKey(raw) === loadedSourceKey;
+    if (sameSource && afterContent(raw) === afterContent(data)) {
+      // New live classification traces do not change the after-meeting presentation.
+      data = raw; post = raw.post;
+      renderPipelineLabels();
+      emitAfterState('funnel:after-data');
+      return;
+    }
+    const previous = sameSource && post && raw.post ? playbackPosition() : null;
+    build(raw, !previous);
+    if (!previous) return;
+    const boundaries = [0, ...ends, total];
+    const begin = boundaries[previous.phase], end = boundaries[previous.phase + 1];
+    restoring = true;
+    try { if (previous.started || previous.phase > 0 || previous.progress > 0) runUntil(begin + (end - begin) * previous.progress); }
+    finally { restoring = false; }
+    speed = previous.speed; ui.speed.value = String(speed); started = previous.started;
+    ui.doc.scrollTop = previous.scroll; ui.queue.scrollTop = previous.queueScroll;
+    setPlaying(previous.playing);
+    emitAfterState('funnel:after-data');
+  }
+
+  function build(raw, publish = true) {
+    loadedSourceKey = sourceKey(raw);
     // Invalidated history must leave no private text in the last canvas frame.
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -47,8 +101,9 @@
     data = validSource ? raw : { ...raw, source: raw?.source || { kind: 'empty' }, sentences: [], post: null };
     post = data.post;
     rows = []; items = [];
-    events = []; next = 0; at = 0; total = 1; speed = 1; playing = false; started = false; here = -1; flyers = []; phases = [0, 0, 0, 0]; ends = [0, 0, 0, 0]; spider.ready = false; spider.feet = [];
-    ui.queue.replaceChildren(); KIND_ORDER.forEach((k) => { ui.boards[k].replaceChildren(); ui.counts[k].textContent = '0'; });
+    events = []; next = 0; at = 0; total = 1; speed = 1; playing = false; started = false; here = -1; flyers = []; phases = [0, 0, 0, 0]; ends = [0, 0, 0, 0]; spider.ready = false; spider.feet = []; paintPending = true;
+    ui.queue.replaceChildren(); KIND_ORDER.forEach((k) => { ui.boards[k].replaceChildren(); ui.counts[k].textContent = '—'; ui.counts[k].title = ''; });
+    ui.docMeta.textContent = '';
     ui.pipeline.forEach((li) => { li.classList.remove('active', 'done'); li.style.setProperty('--p', '0%'); });
     ['p0', 'p1', 'p2', 'p3'].forEach((id) => { $(id).textContent = ''; });
     const replay = data.source && data.source.kind !== 'example';
@@ -56,15 +111,19 @@
     renderPipelineLabels();
     if (!post) {
       const state = data.post_status || {};
-      const reasons = { in_progress: '会议尚未结束', writing: '已有后台尚在整理', source_changed: '来源已变更，旧纪要不能作为当前依据', source_expired: '完整转写已到期', before_bot: '该会议早于纪要服务启用', failed: '已有生成记录失败', no_end: '未保存会议结束状态', bot_off: '此后端未启用纪要服务' };
+      const reasons = { in_progress: '会议尚未结束', writing: '已有后台尚在整理', not_recorded: '本场尚无已存会后纪要记录', source_changed: '来源已变更，旧纪要不能作为当前依据', source_expired: '完整转写已到期', before_bot: '该会议早于纪要服务启用', failed: '已有生成记录失败', no_end: '未保存会议结束状态', bot_off: '此后端未启用纪要服务' };
       ui.doc.replaceChildren(el('li', null, state.message || reasons[state.reason] || '没有可用的已存会后纪要。'));
-      ui.note.textContent = '这里只读历史结果；打开页面不会生成或重试纪要。'; ui.overview.replaceChildren(); ui.cost.replaceChildren();
+      ui.docMeta.textContent = state.reason === 'in_progress' ? '会议进行中 · 尚无已存纪要' : '无可用已存纪要';
+      ui.note.textContent = (state.reason === 'in_progress' ? '会议进行中，尚无可用的已存会后纪要；会中原话与处理记录请查看逐句页。' : '没有可用的已存会后纪要；事项数量显示为 —。') + '这里只读历史结果；打开页面不会生成或重试纪要。'; ui.overview.replaceChildren(); ui.cost.replaceChildren();
       setPlaying(false); started = false;
       emitAfterState('funnel:after-data');
       return;
     }
-    ui.note.textContent = '读取已有纪要，再按当前确定性代码对回原话、规则复核和排事项核对队列；这三个步骤不调模型。蜘蛛爬行是引用关系的动画，不是模型实时思考。' +
-      (data.source?.kind === 'reanalysis' ? ' 复用原有纪要；本次重新分析只调用 Jev，没有调用 DeepSeek 生成新纪要。' : data.source?.kind === 'history' ? ' 后端历史只读；历史调用次数有记录才显示。' : replay ? ' 重新运行的分析回放，不能证明会议当时如何判断。' : ' 示例会议，纪要为演示编写。');
+    const evidence = post.generation?.evidence;
+    const model = generationModel();
+    const noActionable = post.substantive === false && post.items.length === 0;
+    ui.note.textContent = (noActionable ? '已完成整理，未提取明确待办、决定或未决问题。' : '') + '读取已有纪要，再按当前确定性代码对回原话、规则复核和排事项核对队列；这三个步骤不调模型。蜘蛛爬行是引用关系的动画，不是模型实时思考。' +
+      (data.source?.kind === 'reanalysis' ? (evidence === 'reanalysis' ? ' 本次获准的全链路分析包含新生成的纪要' + (model ? '（已存模型：' + model + '）' : '（模型未记录）') + '；此页面只回放已存结果。' : evidence === 'reused_history' ? ' 本次重新分析复用原有纪要，没有重新生成纪要。' : ' 纪要生成来源未完整记录，不推定是否重新生成。') : data.source?.kind === 'history' ? ' 后端历史只读；历史调用次数有记录才显示。' : replay ? ' 重新运行的分析回放，不能证明会议当时如何判断。' : ' 示例会议，纪要为演示编写。');
 
     const byId = new Map();
     rows = data.sentences.map((s, i) => {
@@ -79,8 +138,14 @@
     });
     ui.doc.replaceChildren(...rows.map((r) => r.li));
 
+    // Stored totals are available immediately; animation only presents their evidence.
+    KIND_ORDER.forEach((kind) => {
+      ui.counts[kind].textContent = String(post.items.filter((item) => item.kind === kind).length);
+      ui.counts[kind].title = '已存纪要中的' + KIND[kind].name + '总数，不随回放动画变化';
+    });
+
     items = post.items.map((it, n) => {
-      const card = el('li', 'card');
+      const card = el('li', 'card in');
       const meta = el('div', 'm');
       const who = [it.owner ? '负责人线索：' + it.owner + '（待人确认）' : '', it.due].filter(Boolean).join(' · ');
       if (who) meta.append(el('span', null, who));
@@ -90,11 +155,12 @@
       card.append(el('div', 't', it.title), meta);
       ui.boards[it.kind].append(card);
       const item = { ...it, n, card, ev, q, shown: false, seen: new Set() };
-      it.ids.forEach((id) => { const r = byId.get(id); if (r) r.items.push(item); });
+      it.ids.forEach((id) => { const r = byId.get(id); if (r) { r.items.push(item); addEvidence(item, id, false); } });
       return item;
     });
 
-    ui.overview.replaceChildren(el('p', null, post.overview || '（纪要没有概览）'));
+    if (noActionable) KIND_ORDER.forEach(kind => ui.boards[kind].append(el('li', 'empty', '本场未提取明确' + KIND[kind].name + '。')));
+    ui.overview.replaceChildren(el('p', null, post.overview || (noActionable ? '已完成整理，未提取明确待办、决定或未决问题。原话保留在左侧，可继续查看。' : '（纪要没有概览）')));
     if (post.topics && post.topics.length) {
       const t = el('div', 'topics');
       post.topics.forEach((x) => t.append(el('span', null, x)));
@@ -104,17 +170,23 @@
     schedule();
     speed = total > 45000 ? 2 : 1;
     ui.speed.value = String(speed);
-    ui.docMeta.textContent = '已读 0 / ' + rows.length;
+    ui.docMeta.textContent = noActionable ? '整理已完成 · 原话 ' + rows.length + ' 句' : '已读 0 / ' + rows.length;
+    if (noActionable) $('p0').textContent = '整理完成 · 未提取明确事项';
     started = false;
     if (reduceMotion) { at = total; runUntil(total); }
-    setPlaying(false);
-    emitAfterState('funnel:after-data');
+    if (publish) {
+      setPlaying(false);
+      emitAfterState('funnel:after-data');
+    }
   }
 
   function renderPipelineLabels() {
-    const configured = data?.pipeline?.minutes_configured_runs;
-    const pipeline = data?.pipeline || {};
-    $('asr-review-note').textContent = pipeline.asr_review_supported ? '纪要前可选步骤：部署源码支持等待录音上传与第二次 ASR 复核' + (pipeline.asr_review_wait_min ? '（配置等待上限 ' + pipeline.asr_review_wait_min + ' 分钟）' : '') + '。' + (pipeline.asr_review_configured === true ? '部署已配置启用；' : pipeline.asr_review_configured === false ? '部署未配置启用；' : '部署是否启用未知；') + '本场是否实际执行只以历史记录为准，页面不会运行 ASR。' : '纪要前的上传与 ASR 复核：此数据未提供部署配置或本场执行记录；页面不会启动复核。';
+    const pipeline = data?.deployed_pipeline || {};
+    const configured = pipeline.minutes_configured_runs;
+    const model = generationModel();
+    if ($('minutes-model')) $('minutes-model').textContent = model || (post ? '已存模型记录' : '未记录');
+    if ($('overview-model')) $('overview-model').textContent = model ? '已存生成模型：' + model : post ? '生成模型未记录' : '未记录';
+    $('asr-review-note').textContent = pipeline.asr_review_supported ? '纪要前可选步骤：部署源码支持等待录音上传与第二次 ASR 复核' + (pipeline.asr_review_wait_min ? '（配置等待上限 ' + pipeline.asr_review_wait_min + ' 分钟）' : '') + '。' + (pipeline.asr_review_configured === true ? '部署已配置启用；' : pipeline.asr_review_configured === false ? '部署未配置启用；' : '部署是否启用未知；') + '本场是否实际执行只以历史记录为准，页面不会运行 ASR。' : pipeline.scope === 'deployed_source' && pipeline.asr_review_supported === false ? '当前部署源码未包含第二次 ASR 复核；本场是否执行仍以历史记录为准。页面不会启动复核。' : '纪要前的上传与 ASR 复核：部署配置暂不可读取；本场执行情况以已存记录为准，页面不会启动复核。';
     $('minutes-generation').textContent = configured ? (pipeline.scope === 'deployed_source' ? '部署源码' : '本地源码') + '：' + configured + ' 次生成后投票；历史另核对' : '读取已存纪要；历史生成次数另核对';
   }
 
@@ -127,9 +199,10 @@
     });
     const restText = [...rest.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => k + ' ' + n).join(' · ');
     const generation = post.generation || {};
+    const latency = recordedLatency(post.latency_ms);
     const calls = Number.isInteger(generation.recorded_calls) ? generation.recorded_calls : null;
     const reused = generation.evidence === 'reused_history';
-    const a = el('div'); a.append(el('div', 'big l-model', reused ? '复用原纪要' : calls == null ? '次数未记录' : calls + ' 次'), el('p', null, (reused ? '本次没有调用 DeepSeek。以下是原纪要的已存生成记录：' : '该次历史生成调用') + (post.latency_ms ? '，记录耗时 ' + fmt(post.latency_ms) : '；耗时未记录') + '。' + (data.source?.kind === 'example' ? '示例内容不代表真实调用。' : '当前源码配置不补作历史调用证据。')));
+    const a = el('div'); a.append(el('div', 'big l-model', reused ? '复用原纪要' : calls == null ? '次数未记录' : calls + ' 次'), el('p', null, (reused ? '本次重新分析没有重新生成纪要。以下是原纪要的已存生成记录：' : generation.evidence === 'reanalysis' ? '本次重新分析的已存纪要生成调用' : '该次历史生成调用') + (latency != null ? '，记录耗时 ' + fmt(latency) : '；耗时未记录') + '。' + (data.source?.kind === 'example' ? '示例内容不代表真实调用。' : '当前源码配置不补作历史调用证据。')));
     if (Number.isInteger(generation.successful_runs)) a.append(el('p', null, '已存成功投票结果：' + generation.successful_runs + ' 份；不等于精确调用次数。'));
     const b = el('div'); b.append(el('div', 'big l-code', cited + ' / ' + rows.length), el('p', null, '句被纪要引用为依据。没被引用的：' + (restText || '—')));
     const c = el('p', 'verdict', '当前代码派生；规则通过也仍需人确认：' + items.length + ' 个事项，' + post.queue.length + ' 项待你核对。');
@@ -150,7 +223,7 @@
     const T0 = Math.min(3200, Math.max(1400, (post.latency_ms || 3000) * 0.5));
     ends[0] = t + T0; t = ends[0];
     events.push({ t: 0, fn: () => step(0, 'active') });
-    events.push({ t: ends[0], fn: () => { step(0, 'done'); $('p0').textContent = (post.latency_ms ? fmt(post.latency_ms) + ' · ' : '') + items.length + ' 条结果'; step(1, 'active'); } });
+    events.push({ t: ends[0], fn: () => { step(0, 'done'); $('p0').textContent = (recordedLatency(post.latency_ms) != null ? fmt(post.latency_ms) + ' · ' : '') + (post.substantive === false && !items.length ? '整理完成 · 未提取明确事项' : items.length + ' 条结果'); step(1, 'active'); } });
     const start1 = t;
     rows.forEach((r, i) => {
       const cited = r.items.length > 0;
@@ -215,7 +288,7 @@
     r.li.classList.add('cited', 'k-' + kinds[0]);
     kinds.forEach((k) => r.li.querySelector('.txt').append(el('span', 'tagged k-' + k, KIND[k].name)));
     r.items.forEach((it, n) => {
-      const from = r.segs[Math.min(r.segs.length - 1, n)];
+      const from = r.segs[Math.min(r.segs.length - 1, n)] || r.txt;
       if (!it.shown) {
         it.shown = true;
         flyers.push({ text: it.title, color: KIND[it.kind].color, from, to: ui.boards[it.kind].previousElementSibling, start: at + n * 180, dur: 1100, big: true, done: () => land(it, r.id) });
@@ -227,7 +300,6 @@
 
   function land(it, id) {
     it.card.classList.add('in');
-    ui.counts[it.kind].textContent = String(items.filter((x) => x.kind === it.kind && x.card.classList.contains('in')).length);
     addEvidence(it, id, false);
     ensureVisible(it.card);
   }
@@ -239,7 +311,7 @@
     chip.title = '定位到原话 ' + id;
     chip.addEventListener('click', () => ping(id));
     it.ev.append(chip);
-    if (pulse) { it.card.classList.add('pulse'); setTimeout(() => it.card.classList.remove('pulse'), 450); }
+    if (pulse && !restoring) { it.card.classList.add('pulse'); setTimeout(() => it.card.classList.remove('pulse'), 450); }
   }
 
   function checked(it) {
@@ -276,12 +348,14 @@
   }
 
   function follow(li, force) {
+    if (restoring) return;
     const box = ui.doc;
     const top = li.offsetTop - box.clientHeight * 0.42;
     if (force || Math.abs(box.scrollTop - top) > 30) box.scrollTo({ top: Math.max(0, top), behavior: reduceMotion ? 'auto' : 'smooth' });
   }
 
   function ensureVisible(card) {
+    if (restoring) return;
     const board = card.closest('.board');
     const b = board.getBoundingClientRect(), c = card.getBoundingClientRect();
     if (c.bottom > b.bottom || c.top < b.top) board.scrollTo({ top: board.scrollTop + (c.top - b.top) - 40, behavior: reduceMotion ? 'auto' : 'smooth' });
@@ -312,6 +386,7 @@
   // ---------------------------------------------------------------- playback
   function setPlaying(on) {
     playing = Boolean(on && post && at < total && !ui.after.hidden && !document.hidden);
+    if (playing) paintPending = true;
     ui.play.textContent = playing ? '❚❚ 暂停' : '▶ 播放';
     emitAfterState('funnel:after-play');
   }
@@ -321,7 +396,7 @@
       at < ends[2] ? 'quality' : at < ends[3] ? 'queue' : 'complete';
     return { data, post, rows, items, events, next, at, total, now: at, duration: total, here, phases, ends,
       playing, speed, started, available: Boolean(post), phase, timeline_kind: 'presentation',
-      mode: ui.after.hidden ? 'live' : 'after' };
+      mode: !ui.after.hidden ? 'after' : ui.content && !ui.content.hidden ? 'content' : 'live' };
   }
 
   function emitAfterState(name) {
@@ -333,10 +408,13 @@
     const raw = data, chosenSpeed = speed, target = Math.max(0, Math.min(total, Number(value)));
     build(raw);
     speed = chosenSpeed; ui.speed.value = String(speed);
-    runUntil(target);
+    restoring = true;
+    try { runUntil(target); }
+    finally { restoring = false; }
     started = target > 0;
     setPlaying(false);
     draw(lastFrame);
+    paintPending = false;
     emitAfterState('funnel:after-tick');
   }
 
@@ -351,10 +429,10 @@
   // ---------------------------------------------------------------- canvas
   function sizeCanvas() {
     const r = ui.stage.getBoundingClientRect();
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
     ui.canvas.width = Math.round(r.width * dpr); ui.canvas.height = Math.round(r.height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (post && !ui.after.hidden) draw(lastFrame);
+    if (post && !ui.after.hidden) { draw(lastFrame); paintPending = false; }
   }
 
   function rel(r, base) { return { x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height }; }
@@ -436,7 +514,6 @@
     if (neon) {
       // Legs grab the cited sentence pieces while an item is being pulled out of them.
       const grab = grabbing ? segRects.slice(0, 8).map((q, n) => ({ x: q.x + Math.min(q.w - 4, 10 + ((n * 37) % Math.max(8, q.w))), y: q.y + q.h / 2 })) : [];
-      if (grabbing && grabUntil !== lastGrab) { lastGrab = grabUntil; if (playing && !reduceMotion) neon.land(spider.x, spider.y + 6, PINK); }
       neon.draw(ctx, spider, realNow, { playing, reduce: reduceMotion, grab, tendrils: grab, headTone: grabbing ? PINK : '#3fd9a0' });
       return;
     }
@@ -471,29 +548,42 @@
   }
 
   function frame(realNow) {
-    const dt = Math.min(100, realNow - lastFrame);
+    // A malformed visual or an interrupted layout must not kill the RAF chain.
+    requestAnimationFrame(frame);
+    const dt = Math.max(0, Math.min(100, realNow - lastFrame));
     lastFrame = realNow;
-    if (post && !ui.after.hidden && !document.hidden) {
-      if (playing) {
+    try {
+      if (!post || ui.after.hidden || document.hidden) return;
+      const advanced = playing;
+      if (advanced) {
         at = Math.min(total, at + dt * speed);
         runUntil(at);
         if (at >= total) setPlaying(false);
+      }
+      if (advanced || paintPending) {
         draw(realNow);
-        if (realNow - lastPublished >= 33 || !playing) {
+        paintPending = false;
+        if (advanced && (realNow - lastPublished >= 33 || !playing)) {
           lastPublished = realNow;
           emitAfterState('funnel:after-tick');
         }
       }
+    } catch (_) {
+      setPlaying(false); paintPending = false;
+      ui.note.textContent = '回放显示暂时中断，进度已保留；可继续播放或重新开始。这里只读取已有结果。';
     }
-    requestAnimationFrame(frame);
   }
 
   // ---------------------------------------------------------------- tabs & controls
   function showMode(mode) {
+    if (!['content', 'live', 'after'].includes(mode)) return;
+    if (mode === 'content' && !ui.content) mode = 'live';
     const after = mode === 'after';
     ui.tabs.forEach((b) => { const on = b.dataset.mode === mode; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
-    ui.live.hidden = after; ui.after.hidden = !after;
+    ui.live.hidden = mode !== 'live'; ui.after.hidden = !after;
+    if (ui.content) ui.content.hidden = mode !== 'content';
     document.body.classList.toggle('mode-after', after);
+    document.body.classList.toggle('mode-content', mode === 'content');
     if (after) {
       if (window.oopsFunnel) window.oopsFunnel.pause();
       setPlaying(false);
@@ -502,14 +592,16 @@
       setPlaying(false);
       if (window.oopsFunnel) window.oopsFunnel.pause();
     }
-    try { history.replaceState(null, '', after ? '#after' : '#live'); } catch (e) { /* hash is optional */ }
+    try { history.replaceState(null, '', '#' + mode); } catch (e) { /* hash is optional */ }
     document.dispatchEvent(new CustomEvent('funnel:mode', { detail: { mode } }));
   }
   ui.tabs.forEach((b, n) => {
     b.addEventListener('click', () => showMode(b.dataset.mode));
     b.addEventListener('keydown', (ev) => {
       if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
-      const other = ui.tabs[(n + 1) % ui.tabs.length]; other.focus(); showMode(other.dataset.mode);
+      ev.preventDefault();
+      const offset = ev.key === 'ArrowLeft' ? -1 : 1;
+      const other = ui.tabs[(n + offset + ui.tabs.length) % ui.tabs.length]; other.focus(); showMode(other.dataset.mode);
     });
   });
   ui.play.addEventListener('click', () => { if (at >= total) { restart(); return; } if (!started) start(); else setPlaying(!playing); });
@@ -532,11 +624,22 @@
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPlaying(false); });
 
-  document.addEventListener('funnel:pipeline', (ev) => { if (data) { data.pipeline = ev.detail; renderPipelineLabels(); } });
+  document.addEventListener('funnel:pipeline', (ev) => { if (data) { data.deployed_pipeline = ev.detail; renderPipelineLabels(); } });
   document.addEventListener('funnel:data', (ev) => {
-    build(ev.detail);
+    update(ev.detail);
     if (location.hash === '#after' && ui.after.hidden) showMode('after');
   });
+  document.addEventListener('funnel:inspect-sentence', (ev) => {
+    const replay = window.OopsReplay?.state();
+    if (!replay || ev.detail?.data !== replay.data) return;
+    const index = replay.sentences.findIndex(row => row.id === ev.detail.id);
+    if (index < 0) return;
+    showMode('live');
+    window.OopsReplay.select(index);
+    const row = window.OopsReplay.state().sentences[index]?.row;
+    if (row) { row.scrollIntoView({ block: 'center' }); row.focus({ preventScroll: true }); }
+  });
+  showMode(['#live', '#after', '#content'].includes(location.hash) ? location.hash.slice(1) : 'live');
   new ResizeObserver(sizeCanvas).observe(ui.stage);
   requestAnimationFrame((t) => { lastFrame = t; frame(t); });
 })();

@@ -1,0 +1,53 @@
+--- a/local_backend.py
++++ b/local_backend.py
+@@ -2513 +2513 @@
+-    def tasks(self, assignee=None, status="all", now=None, personal=None, mine=False):
++    def tasks(self, assignee=None, status="all", now=None, personal=None, mine=False, include_meeting_items=True):
+@@ -2524,2 +2524,2 @@
+-            principal = mobile.accounts.principal(personal or '')
+-            current = mobile.accounts.status(personal)
++            principal = mobile.accounts.principal_readonly_snapshot(personal or '')
++            current = mobile.accounts.status_readonly_snapshot(personal)
+@@ -2575 +2575 @@
+-        meeting_items = [] if status == 'done' else [item for item in self.meeting_tasks()
++        meeting_items = [] if not include_meeting_items or status == 'done' else [item for item in self.meeting_tasks()
+@@ -2785,0 +2786,25 @@
++            if urlsplit(self.path).path.startswith('/v1/task-candidates'):
++                import app_task_reviews
++                path = urlsplit(self.path).path
++                try:
++                    personal = self.headers.get('X-Oops-User-Token', '')
++                    target = re.fullmatch(r'/v1/task-candidates/([0-9]{4})/(ai-[0-9a-f]{12})', path)
++                    if method == 'GET' and path == '/v1/task-candidates':
++                        value = app_task_reviews.candidates(self.backend, personal, TEAM)
++                    elif method == 'GET' and target:
++                        value = app_task_reviews.open_review(self.backend, personal, *target.groups())
++                    elif method == 'POST' and path == '/v1/task-candidates/review':
++                        size = int(self.headers.get('Content-Length') or 0)
++                        if not 0 < size <= 16384:
++                            raise ApiError(400, 'BAD_REQUEST', '核对请求为空或过大')
++                        body = json.loads(self.rfile.read(size))
++                        if not isinstance(body, dict):
++                            raise ApiError(400, 'BAD_REQUEST', '核对请求必须是对象')
++                        value = app_task_reviews.save_review(self.backend, personal, body)
++                    else:
++                        raise ApiError(404, 'NOT_FOUND', '没有这个核对接口')
++                except app_task_reviews.ReviewError as error:
++                    raise ApiError(error.status, error.code, str(error)) from None
++                self.reply(200, value)
++                log(f'{method} {path} 200 {int((time.monotonic() - started) * 1000)}ms task-candidates')
++                return
+@@ -2810 +2835 @@
+-                         "notices": True, "meetings": True, "recordings": True, "archive_policy_version": 1, "action_source_binding_version": 1,
++                         "notices": True, "meetings": True, "recordings": True, "archive_policy_version": 1, "task_candidates_version": 1, "task_review_version": 1, "action_source_binding_version": 1,
+@@ -2841,0 +2867 @@
++                include_candidates = query.get('include_candidates', ['1'])[0] != '0'
+@@ -2843,2 +2869,2 @@
+-                         personal=self.headers.get('X-Oops-User-Token', ''), mine=query.get('mine', ['0'])[0] in ('1', 'true')) if mobile else
+-                         self.backend.tasks(query.get("assignee", [None])[0], query.get("status", ["all"])[0]))
++                         personal=self.headers.get('X-Oops-User-Token', ''), mine=query.get('mine', ['0'])[0] in ('1', 'true'), include_meeting_items=include_candidates) if mobile else
++                         self.backend.tasks(query.get("assignee", [None])[0], query.get("status", ["all"])[0], include_meeting_items=include_candidates))
+@@ -2849 +2875,2 @@
+-                value.update(read_parsed_tasks(os.path.join(state_dir, 'label-app-tasks.json') if state_dir else None, TEAM))
++                if include_candidates:
++                    value.update(read_parsed_tasks(os.path.join(state_dir, 'label-app-tasks.json') if state_dir else None, TEAM))
