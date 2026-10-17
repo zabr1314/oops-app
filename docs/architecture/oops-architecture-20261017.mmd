@@ -1,0 +1,61 @@
+flowchart LR
+  subgraph Device["设备与 Android 主版"]
+    Bean["录音豆 · Soundcore SDK<br/>BLE → Opus → PCM"]
+    Mic["手机麦克风<br/>本人显式选择"]
+    App["com.oops.app<br/>Kotlin + WebView H5<br/>JSON Bridge / OopsEngine"]
+    Local["App 私有文件<br/>音频 / 原话 / 候选 / 个人档案"]
+    Bean --> App
+    Mic --> App
+    App <--> Local
+  end
+  ASR["火山流式 ASR<br/>定稿原话 / 词时间"]
+  App <-->|"PCM / 原话 · WSS 直连"| ASR
+  subgraph Cloud["可信云端 · Nginx + systemd"]
+    API["HTTPS 入口 → oops-backend<br/>Python ThreadingHTTPServer · 8787"]
+    Business["会议同步 / 高亮 / 召回 / 提醒<br/>正式纪要 / 来源与本人核对"]
+    Files[("私有文件<br/>会议 / 原音 / 保存合同 / 操作")]
+    History["History 只读服务 · 8797<br/>逐句回放 / 分类 / 检索"]
+    Live["独立 live-minutes worker<br/>会中增量草稿"]
+    Draft[("SQLite · 草稿 / 调用账本")]
+    Review["核对站 · 8798<br/>逐人答案 / 会议核对版本"]
+    RaftAPI["Raft API<br/>来源 / 身份 / 版本 / 派工许可"]
+    RaftDB[("独立 SQLite<br/>协作任务 / Outbox / 回复与注记")]
+    API --> Business
+    Business <--> Files
+    Files -->|"只读投影"| History
+    Files -->|"有效新增原话"| Live
+    Live --> Draft
+    Draft -->|"只读展示"| History
+    API <--> Review
+    API --> RaftAPI
+    RaftAPI <--> RaftDB
+  end
+  App <-->|"原话 / 结果 / 核对 / 分块上传 · HTTPS"| API
+  Sol["gpt-6.1-sol<br/>转写后理解整理 / 纪要 / 候选"]
+  Business <--> Sol
+  Live <--> Sol
+  Acoustic["独立声学链<br/>CAM++ / ONNX · 声纹<br/>MiMo · 会后第二识别参考"]
+  Business <--> Acoustic
+  Feishu["飞书<br/>本人身份 / 正式任务 / 纪要"]
+  Business <-->|"原确认规则"| Feishu
+  Worker["可信 Mac · Node SDK worker<br/>LaunchAgent / 领单 / 原线程核对"]
+  Raft["Raft 私人协作群<br/>专用 External Agent @Oops"]
+  Agent["a1234 执行 Agent"]
+  Worker <-->|"领单 / 回执 / 回复"| RaftAPI
+  Worker <-->|"一次发送 / 原线程读取"| Raft
+  Raft <-->|"任务 / 原线程回复"| Agent
+  History --> Web["浏览器 · History / 同屏演示"]
+  Apple["辅助接入 · Apple Watch → iPhone<br/>Swift / WatchConnectivity"] -.-> Gateway["独立移动网关 · 8799<br/>分段 ASR / 受限身份"]
+  Gateway -.-> ASR
+  Gateway -.-> API
+  Prototype["React / TypeScript / Vite<br/>网页原型与画板 · 独立界面实现"]
+  classDef client fill:#f1edff,stroke:#8170b9,color:#272339
+  classDef server fill:#eef5ff,stroke:#6b8cbb,color:#21344d
+  classDef data fill:#eef7f2,stroke:#76a18b,color:#254c3b
+  classDef external fill:#fff4e8,stroke:#caa471,color:#594020
+  classDef auxiliary fill:#f4f4f6,stroke:#9da2ae,color:#535a67,stroke-dasharray:5 4
+  class Bean,Mic,App,Local client
+  class API,Business,History,Live,Review,RaftAPI,Worker server
+  class Files,Draft,RaftDB data
+  class ASR,Sol,Acoustic,Feishu,Raft,Agent,Web external
+  class Apple,Gateway,Prototype auxiliary

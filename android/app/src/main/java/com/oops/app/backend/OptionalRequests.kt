@@ -41,7 +41,10 @@ class OptionalRequests(private val maxPending: Int = 8) {
         val endpoint = reservation.endpoint
         permits.computeIfAbsent(endpoint) { Semaphore(2) }.withPermit {
             if (endpoint in disabled) return@withPermit null
-            for (attempt in 0..2) {
+            // These requests can spend provider credits even when their response is lost.
+            // A failed receipt is not permission to create another model invocation.
+            val maxRetries = if (endpoint in MODEL_ENDPOINTS) 0 else 2
+            for (attempt in 0..maxRetries) {
                 if (endpoint in disabled) return@withPermit null
                 try {
                     val result = block()
@@ -49,11 +52,15 @@ class OptionalRequests(private val maxPending: Int = 8) {
                     return@withPermit result
                 } catch (error: IOException) {
                     val retryable = error !is HttpFailure || error.status == 429 || error.status >= 500
-                    if (!retryable || attempt == 2) throw error
+                    if (!retryable || attempt == maxRetries) throw error
                     delay(if (attempt == 0) 1000 else 3000)
                 }
             }
             null
         }
+    }
+
+    private companion object {
+        val MODEL_ENDPOINTS = setOf("tag", "owner-hint", "draft-suggestion", "notice", "recall", "ask", "draft")
     }
 }

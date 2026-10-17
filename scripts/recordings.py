@@ -123,6 +123,60 @@ class Recordings:
         """What the phone said about the recording (strings, as declared in the manifest)."""
         return self._manifest(sid).get("meta") or {}
 
+    def history_evidence(self, sid):
+        """Read-only list hint; never wait for a whole-file upload/hash lock.
+
+        Only a completed, matching zero-byte declaration proves an empty asset.
+        A missing archive may still be waiting on the phone and remains unknown.
+        """
+        folder = self.folder(sid)
+        manifest = self._manifest(sid)
+        files = manifest.get('files')
+        audio = files.get('audio.pcm') if isinstance(files, dict) else None
+        if not isinstance(audio, dict) or type(audio.get('size')) is not int:
+            return dict(status='unknown', reason='recording_unknown')
+        if audio['size'] > 0 or self._received(folder, 'audio.pcm') > 0:
+            return dict(status='retained', reason='has_recording')
+        if not os.path.isfile(os.path.join(folder, 'audio.pcm')):
+            return dict(status='unknown', reason='recording_unknown')
+        if audio['size'] != 0 or manifest.get('audio_expired_at') or expired(manifest.get('storage_policy'), 'audio'):
+            return dict(status='unknown', reason='recording_expired')
+        done = _read_json(os.path.join(folder, 'complete.json'))
+        if done.get('session_id') != sid or done.get('files') != files:
+            return dict(status='unknown', reason='recording_sync_pending')
+        finals = files.get('finals.jsonl') or {}
+        if not isinstance(finals, dict) or type(finals.get('size', 0)) is not int:
+            return dict(status='unknown', reason='recording_unknown')
+        if finals.get('size', 0) > 0 or self._received(folder, 'finals.jsonl') > 0:
+            return dict(status='retained', reason='has_recording_transcript')
+        raw = files.get('asr.jsonl') or {}
+        if not isinstance(raw, dict) or type(raw.get('size', 0)) is not int:
+            return dict(status='unknown', reason='recording_unknown')
+        raw_size = self._received(folder, 'asr.jsonl')
+        if raw_size != raw.get('size', 0) or raw_size > 65536:
+            return dict(status='unknown', reason='asr_log_unknown')
+        # Handshake/EOS packets are not speech. Inspect only a small completed
+        # diagnostic log, so text received but not yet synced is still protected.
+        def has_text(value):
+            if isinstance(value, dict):
+                return any((key in ('text', 'transcript') and isinstance(item, str) and item.strip()) or has_text(item)
+                           for key, item in value.items())
+            return isinstance(value, list) and any(has_text(item) for item in value)
+        if raw_size:
+            with open(os.path.join(folder, 'asr.jsonl'), encoding='utf-8') as source:
+                for line in source:
+                    packet = json.loads(line)
+                    if isinstance(packet, dict) and 'payload' in packet:
+                        packet = packet['payload']
+                        if isinstance(packet, str): packet = json.loads(packet)
+                    if not isinstance(packet, dict):
+                        return dict(status='unknown', reason='asr_log_unknown')
+                    if not any(key in packet for key in ('result', 'code', 'header')):
+                        return dict(status='unknown', reason='asr_log_unknown')
+                    if has_text(packet):
+                        return dict(status='retained', reason='asr_text_not_synced')
+        return dict(status='empty', reason='confirmed_empty_archive')
+
     def _received(self, folder, name):
         path = os.path.join(folder, name)
         return os.path.getsize(path) if os.path.isfile(path) else 0
@@ -216,6 +270,18 @@ class Recordings:
                 path = os.path.join(folder, name)
                 if self._received(folder, name) != declared["size"]:
                     raise RecordingError(409, f"{name} 尚未传完", received=self._received(folder, name))
+                if declared["size"] == 0:
+                    # Empty assets send no chunks. Materialize only a missing empty
+                    # file, including manifests accepted before this behavior existed.
+                    try:
+                        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    except FileExistsError:
+                        pass  # preserve existing files for the same whole-file check
+                    else:
+                        try:
+                            os.fsync(fd)
+                        finally:
+                            os.close(fd)
                 if _sha256(path) != declared["sha256"]:
                     os.unlink(path)  # corrupt: restart this file from zero
                     raise RecordingError(409, f"{name} 整体校验失败，需重传", received=0)

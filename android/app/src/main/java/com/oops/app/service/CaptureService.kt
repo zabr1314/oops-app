@@ -61,10 +61,18 @@ class CaptureService : Service() {
         }
         stopCheck?.let(handler::removeCallbacks)
         stopCheck = null
-        startInForeground()
+        val source = intent?.getStringExtra(EXTRA_SOURCE) ?: OopsEngine.settings.source
+        try {
+            startInForeground(source)
+        } catch (error: RuntimeException) {
+            Log.w("Oops", "capture foreground start rejected", error)
+            OopsEngine.captureStartRejected("系统未允许启动收音，请回到 Oops 后重试")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         acquireWakeLock()
         val policy = intent?.getStringExtra("recording_policy")?.let { com.oops.app.store.RecordingPolicy.fromBridge(org.json.JSONObject(it)) } ?: com.oops.app.store.RecordingPolicy()
-        OopsEngine.startCapture(intent?.getStringExtra(EXTRA_SOURCE) ?: OopsEngine.settings.source, policy)
+        OopsEngine.startCapture(source, policy)
         // Android 14+ forbids restarting a microphone service from the background anyway.
         return START_NOT_STICKY
     }
@@ -78,7 +86,7 @@ class CaptureService : Service() {
         super.onDestroy()
     }
 
-    private fun startInForeground() {
+    private fun startInForeground(source: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_capture), NotificationManager.IMPORTANCE_LOW),
@@ -93,6 +101,7 @@ class CaptureService : Service() {
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_oops)
+            .setColor(getColor(R.color.oops_brand))
             .setContentTitle(getString(R.string.notif_capture_title))
             .setContentText(getString(R.string.notif_capture_text))
             .setOngoing(true)
@@ -101,7 +110,11 @@ class CaptureService : Service() {
             .addAction(0, getString(R.string.notif_action_stop), stop)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
+        val type = when {
+            source == "bean" -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            else -> 0
+        }
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
     }
 

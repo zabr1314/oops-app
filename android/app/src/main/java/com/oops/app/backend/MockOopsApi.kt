@@ -32,7 +32,7 @@ class MockOopsApi(
         if (request.candidates.isEmpty()) return RecallResponse(emptyList(), name)
         if (request.trigger in setOf("ask", "voice") && !request.query.isNullOrBlank()) {
             return RecallResponse(request.candidates.map { Pick(it.id, com.oops.app.recall.overlap(request.query, it.text)) }
-                .filter { it.prob >= .15 }.sortedByDescending { it.prob }.take(3), name)
+                .filter { it.prob?.let { prob -> prob >= .15 } == true }.sortedByDescending { it.prob }.take(3), name)
         }
         val scored = request.candidates.map { it.id to score(it, request) }
         val best = scored.maxOf { it.second }

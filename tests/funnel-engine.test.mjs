@@ -46,7 +46,7 @@ class Element extends Target {
 }
 const flush = async () => { for (let i = 0; i < 128; i++) await Promise.resolve(); };
 
-async function browser({ privatePage = false, run = '', hash = '#live', routes = {}, after = true, reduceMotion = false } = {}) {
+async function browser({ privatePage = false, run = '', meeting = '', follow = false, hash = '#live', routes = {}, after = true, reduceMotion = false, useAbort = false, visibleCanvas = false, initialTime = 10000 } = {}) {
   const ids = new Map([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element()]));
   ids.get('mode-after').hidden = true;
   for (const id of ['tab-live', 'tab-after']) ids.get(id).dataset.mode = id.slice(4);
@@ -64,16 +64,30 @@ async function browser({ privatePage = false, run = '', hash = '#live', routes =
   document.querySelector = selector => cards.get(selector) || new Element();
   document.querySelectorAll = selector => selector === '.modes button' ? tabs : selector === '#pipeline li' ? pipeline : [];
   let paintCount = 0;
+  const paintCalls = new Map();
   const canvasContext = new Proxy({ measureText: text => ({ width: String(text).length * 7 }) }, {
-    get: (obj, key) => obj[key] || (() => { paintCount++; }), set: (obj, key, value) => { obj[key] = value; return true; },
+    get: (obj, key) => obj[key] || ((...args) => {
+      if (key === 'drawImage' && !(args[0].width > 0 && args[0].height > 0)) throw new Error('InvalidStateError: zero-sized canvas');
+      paintCount++; paintCalls.set(key, (paintCalls.get(key) || 0) + 1);
+    }), set: (obj, key, value) => { obj[key] = value; return true; },
   });
   for (const id of ['canvas', 'after-canvas']) ids.get(id).getContext = () => canvasContext;
+  if (visibleCanvas) {
+    const rect = (left, top, width, height) => ({ left, top, right: left + width, bottom: top + height, width, height });
+    ids.get('stage').getBoundingClientRect = () => rect(0, 0, 1000, 600);
+    ids.get('transcript').getBoundingClientRect = () => rect(0, 0, 400, 500);
+    ids.get('fan').getBoundingClientRect = () => rect(400, 0, 300, 500);
+    [...cards.values()].forEach((card, index) => { card.getBoundingClientRect = () => rect(750, index * 120, 200, 100); });
+    document.createElement = tag => { const element = new Element(tag); if (tag === 'canvas') element.getContext = () => canvasContext; return element; };
+  }
   const window = new Target(); window.matchMedia = () => ({ matches: reduceMotion }); window.devicePixelRatio = 1;
-  const location = { pathname: privatePage ? '/oops-meeting/history/' : '/funnel.html', hash, search: run ? '?run=' + run : '' };
-  const frames = [], requests = [], events = [], delays = [];
+  const query = new URLSearchParams(); if (run) query.set('run', run); if (meeting) query.set('meeting', meeting); if (follow) query.set('follow', '1');
+  const location = { pathname: privatePage ? '/oops-meeting/history/' : '/funnel.html', hash, search: query.size ? '?' + query : '' };
+  const frames = [], requests = [], events = [], delays = [], intervals = [], resizeObservers = new Map();
+  const timeouts = new Map(); let timeoutId = 100;
   const overrides = new Map(Object.entries(routes));
   for (const name of ['funnel:data', 'funnel:tick', 'funnel:selection', 'funnel:play', 'funnel:mode', 'funnel:after-data', 'funnel:after-tick', 'funnel:after-play']) document.addEventListener(name, event => events.push({ type: name, detail: event.detail }));
-  const response = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => structuredClone(body) });
+  const response = (body, status = 200, headers = {}) => ({ ok: status >= 200 && status < 300, status, headers: { get: name => headers[name] || null }, json: async () => structuredClone(body) });
   const reanalysis = { ...structuredClone(fixture), source: { kind: 'reanalysis', label: 'VM fixture', snapshot_hash: 'one' } };
   let authorized = true;
   const fetch = async (url, options = {}) => {
@@ -82,7 +96,7 @@ async function browser({ privatePage = false, run = '', hash = '#live', routes =
       const route = overrides.get(url);
       const value = typeof route === 'function' ? await route({ url, options }) : route;
       if (value instanceof Error) throw value;
-      if (value !== undefined) return response(value.body ?? {}, value.status ?? 200);
+      if (value !== undefined) return response(value.body ?? {}, value.status ?? 200, value.headers);
     }
     if (url === './funnel-sample.json') return response(fixture);
     if (String(url).endsWith('/pipeline')) return response({ pipeline: { scope: 'deployed_source' } });
@@ -93,25 +107,67 @@ async function browser({ privatePage = false, run = '', hash = '#live', routes =
     if (url === './api/session') return response({}, 204);
     throw Error('unexpected fetch: ' + url);
   };
+  let currentTime = initialTime;
   const context = vm.createContext({
-    window, document, location, fetch, URLSearchParams, console, performance: { now: () => 10000 },
+    window, document, location, fetch, URLSearchParams, console, ...(useAbort ? { AbortController } : {}), performance: { now: () => currentTime },
     history: { replaceState: (_, __, hash) => { if (hash.startsWith('#')) location.hash = hash; } },
     CustomEvent: class { constructor(type, { detail }) { this.type = type; this.detail = detail; } },
-    ResizeObserver: class { observe() {} }, getComputedStyle: () => ({ fontFamily: 'sans-serif' }),
-    requestAnimationFrame: fn => frames.push(fn), setInterval: () => 1, setTimeout: (fn, delay) => { delays.push(delay); fn(); return 1; }, clearTimeout() {},
+    ResizeObserver: class {
+      constructor(callback) { this.callback = callback; }
+      observe(element) { resizeObservers.set(element, this.callback); }
+    }, getComputedStyle: () => ({ fontFamily: 'sans-serif' }),
+    requestAnimationFrame: fn => frames.push(fn), setInterval: (fn, delay) => { intervals.push({ fn, delay }); return intervals.length; }, setTimeout: (fn, delay) => { if (delay === 15000) { timeouts.set(++timeoutId, fn); return timeoutId; } delays.push(delay); fn(); return 1; }, clearTimeout: id => timeouts.delete(id),
   });
   vm.runInContext(source, context, { filename: 'public/funnel.js' });
   if (after) vm.runInContext(afterSource, context, { filename: 'public/funnel-after.js' });
   await flush();
   return {
-    window, document, ids, requests, events, location, delays,
+    window, document, ids, requests, events, location, delays, paintCalls,
     get paints() { return paintCount; },
     revoke: () => { authorized = false; },
     setRoute: (url, route) => overrides.set(url, route),
     clearRoute: url => overrides.delete(url),
     replaceAfter: detail => document.dispatchEvent({ type: 'funnel:data', detail }),
+    setTime: time => { currentTime = time; },
     frame: time => { const pending = frames.splice(0); for (const fn of pending) fn(time); },
+    interval: delay => { intervals.filter(i => i.delay === delay).forEach(i => i.fn()); },
+    timeout: () => { [...timeouts.values()].forEach(fn => fn()); },
+    resizeStage: (width, height) => {
+      const stage = ids.get('stage');
+      stage.getBoundingClientRect = () => ({ left: 0, top: 0, right: width, bottom: height, width, height });
+      resizeObservers.get(stage)?.();
+    },
   };
+}
+
+function scrollingFixture({ step = 1000, spoken = 500 } = {}) {
+  return { version: 2, source: { kind: 'history', label: 'Scrolling fixture' }, sentences: Array.from({ length: 12 }, (_, index) => ({
+    id: 'scroll-' + index, text: '这一句应随播放进度保持可见。', speaker: '甲',
+    start_ms: index * step, end_ms: index * step + spoken, route: 'code',
+    forks: [{ layer: 'code', ms: 1, settled: true }],
+  })) };
+}
+
+function transcriptLayout(b, { top = 230, clientTop = 3, rowHeight = 80, bottomPadding = 36, ancestorOffset = 40 } = {}) {
+  const box = b.ids.get('transcript');
+  box.clientHeight = 200; box.clientTop = clientTop;
+  const rect = (y, height) => ({ left: 0, right: 400, top: y, bottom: y + height, width: 400, height });
+  box.getBoundingClientRect = () => rect(top, box.clientHeight + 2 * clientTop);
+  Object.defineProperty(box, 'scrollHeight', { get: () => Math.max(box.clientHeight, box.children.filter(row => !row.hidden).length * rowHeight + bottomPadding) });
+  box.scrollTo = ({ top: next }) => { box.scrollTop = Math.min(Math.max(0, next), box.scrollHeight - box.clientHeight); };
+  box.children.forEach((row, index) => {
+    // offsetTop belongs to a separate positioned ancestor; the viewport rect
+    // and scroll offset are the reliable coordinates for this scroller.
+    row.offsetTop = index * rowHeight + ancestorOffset;
+    row.getBoundingClientRect = () => rect(top + clientTop + box.children.slice(0, index).filter(item => !item.hidden).length * rowHeight - box.scrollTop, rowHeight);
+  });
+  return box;
+}
+
+function assertRowVisible(row, box) {
+  const rowBounds = row.getBoundingClientRect(), boxBounds = box.getBoundingClientRect();
+  assert.ok(rowBounds.top >= boxBounds.top + box.clientTop, 'the current sentence starts inside its own scroll viewport');
+  assert.ok(rowBounds.bottom <= boxBounds.top + box.clientTop + box.clientHeight, 'the current sentence ends inside its own scroll viewport');
 }
 
 test('the shipped engine boots paused and selection exposes all saved steps without starting playback', async () => {
@@ -271,7 +327,7 @@ test('after clock is explicitly presentation time and stored generation latency 
   assert.equal(state.timeline_kind, 'presentation');
   assert.notEqual(state.duration, data.post.latency_ms);
   assert.match(b.ids.get('after-cost').textContent, /复用原纪要/);
-  assert.match(b.ids.get('after-cost').textContent, /本次没有调用 DeepSeek/);
+  assert.match(b.ids.get('after-cost').textContent, /本次 Jev 重新分析没有重新生成纪要/);
   assert.match(b.ids.get('after-cost').textContent, /历史回执摘要/);
   assert.match(b.ids.get('after-cost').textContent, /不表示本页执行过发送/);
   assert.doesNotMatch(b.ids.get('after-cost').textContent, /本次已发送/);
@@ -459,4 +515,427 @@ test('the only readable meeting still opens automatically on the restored histor
   assert.equal(b.ids.get('history-meeting').value, 'only-replay');
   assert.equal(b.window.OopsReplay.state().playing, false);
   assert.equal(b.requests.filter(request => request.url === './api/meetings/only-replay').length, 1);
+});
+
+test('full-chain results keep deployed metadata separate and describe recorded DeepSeek generation', async () => {
+  const saved = structuredClone(fixture);
+  saved.source = { kind: 'reanalysis', label: 'Full chain', deepseek_run: 'ds-run', request_count: 20 };
+  saved.pipeline = { scope: 'workspace_source', minutes_configured_runs: 9 };
+  saved.post.generation = { evidence: 'reanalysis', recorded_calls: 3, successful_runs: 3 };
+  const b = await browser({ privatePage: true, routes: {
+    './api/pipeline': { body: { scope: 'deployed_source', minutes_configured_runs: 3, asr_review_supported: false } },
+    './api/meetings': { body: { meetings: [{ session_id: 'full', utterance_count: saved.sentences.length }] } },
+    './api/meetings/full': { body: saved },
+  } });
+  assert.match(b.ids.get('source-badge').textContent, /Jev \/ DeepSeek/);
+  assert.match(b.ids.get('pipeline-note').textContent, /已部署源码.*3 次/);
+  assert.match(b.ids.get('minutes-generation').textContent, /部署源码：3 次/);
+  assert.match(b.ids.get('asr-review-note').textContent, /当前部署源码未包含/);
+  assert.match(b.ids.get('after-note').textContent, /DeepSeek 新生成/);
+  assert.match(b.ids.get('after-cost').textContent, /本次重新分析的已存纪要生成调用/);
+  assert.equal(b.window.OopsReplay.state().data.pipeline.minutes_configured_runs, 9);
+  assert.ok(!b.requests.some(r => r.url === './funnel-sample.json'));
+});
+
+test('conditional revalidation preserves playback on 304 and still clears on permission loss', async () => {
+  const saved = { ...structuredClone(fixture), source: { kind: 'replay', label: 'Conditional', snapshot_hash: 'one' } };
+  const b = await browser({ privatePage: true, routes: {
+    './api/meetings': { body: { meetings: [{ session_id: 'conditional', utterance_count: saved.sentences.length }] } },
+    './api/meetings/conditional': { body: saved, headers: { ETag: '"saved-one"' } },
+  } });
+  b.window.OopsReplay.seek(1000);
+  const events = b.events.filter(e => e.type === 'funnel:data').length;
+  b.setRoute('./api/meetings/conditional', ({ options }) => {
+    assert.equal(options.headers['If-None-Match'], '"saved-one"');
+    return { status: 304 };
+  });
+  b.window.dispatchEvent({ type: 'focus' }); await flush();
+  assert.equal(b.window.OopsReplay.state().now, 1000);
+  assert.equal(b.events.filter(e => e.type === 'funnel:data').length, events);
+  b.setRoute('./api/meetings/conditional', { status: 403 });
+  b.window.dispatchEvent({ type: 'focus' }); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  assert.equal(b.window.OopsAfterReplay.state().items.length, 0);
+});
+
+test('live updates follow new saved sentences, pause on selection, preserve the selected sentence and clear on revoke', async () => {
+  const saved = structuredClone(fixture);
+  saved.source = { kind: 'history', session_id: 'ongoing', snapshot_hash: 'live-one', live: { active: true, last_sync_at: '2026-10-16T03:00:00Z' } };
+  const b = await browser({ privatePage: true, meeting: 'ongoing', routes: {
+    './api/meetings': { body: { meetings: [{ session_id: 'ongoing', is_live: true }, { session_id: 'other' }] } },
+    './api/meetings/ongoing': { body: saved },
+  } });
+  assert.equal(b.ids.get('live-follow').getAttribute('aria-pressed'), 'true');
+  assert.equal(b.window.OopsReplay.state().now, b.window.OopsReplay.state().duration);
+  const next = structuredClone(saved);
+  next.source.snapshot_hash = 'live-two';
+  next.sentences.push({ ...structuredClone(saved.sentences.at(-1)), id: 'new-one', start_ms: 200000, end_ms: 201000 });
+  b.setRoute('./api/meetings/ongoing', { body: next });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, next.sentences.length);
+  assert.equal(b.window.OopsReplay.state().now, b.window.OopsReplay.state().duration);
+  b.window.OopsReplay.select(3);
+  const position = b.window.OopsReplay.state().now;
+  assert.equal(b.ids.get('live-follow').getAttribute('aria-pressed'), 'false');
+  const ended = structuredClone(next); ended.source.snapshot_hash = 'ended'; ended.source.live.active = false; ended.source.live.ended_at = '2026-10-16T04:00:00Z';
+  b.setRoute('./api/meetings/ongoing', { body: ended });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().selected, 3);
+  assert.equal(b.window.OopsReplay.state().now, position);
+  assert.match(b.ids.get('live-status').textContent, /已结束/);
+  b.setRoute('./api/meetings/ongoing', { status: 403 });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  assert.equal(b.ids.get('live-follow').hidden, true);
+});
+
+test('a live meeting link never reads a meeting absent from the authorized list', async () => {
+  const b = await browser({ privatePage: true, meeting: 'unlisted', follow: true });
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  assert.ok(!b.requests.some(r => r.url === './api/meetings/unlisted'));
+  assert.match(b.ids.get('history-status').textContent, /指定会话当前不可读取/);
+});
+
+test('meeting links load independently of the reanalysis list and recover the intended meeting after detail failure', async () => {
+  const saved = { ...structuredClone(fixture), source: { kind: 'history', label: 'Chosen meeting' } };
+  const b = await browser({ privatePage: true, meeting: 'chosen', routes: {
+    './api/meetings': { body: { meetings: [{ session_id: 'chosen' }, { session_id: 'other' }] } },
+    './api/reanalyses': { status: 503 },
+    './api/meetings/chosen': { status: 503 },
+  } });
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  b.setRoute('./api/meetings/chosen', { body: saved });
+  b.ids.get('history-refresh').click(); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'Chosen meeting');
+  assert.match(b.ids.get('history-status').textContent, /当前会话仍可读取/);
+});
+
+test('a hung live read times out, clears private content and can be restored by refresh', async () => {
+  const saved = { ...structuredClone(fixture), source: { kind: 'history', label: 'Live timeout', live: { active: true }, snapshot_hash: 'timeout-one' } };
+  const b = await browser({ privatePage: true, meeting: 'live-timeout', useAbort: true, routes: {
+    './api/meetings': { body: { meetings: [{ session_id: 'live-timeout' }, { session_id: 'other' }] } },
+    './api/meetings/live-timeout': { body: saved },
+  } });
+  b.setRoute('./api/meetings/live-timeout', ({ options }) => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))));
+  b.interval(5000); await flush();
+  b.timeout(); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  assert.match(b.ids.get('history-status').textContent, /超时/);
+  b.setRoute('./api/meetings/live-timeout', { body: saved });
+  b.ids.get('history-refresh').click(); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'Live timeout');
+});
+
+test('automatic mode discovers the next server meeting and switches without a refresh or fixed ID', async () => {
+  const row = (id, time) => ({ session_id: id, started_at: time, is_live: true });
+  const saved = id => ({ ...structuredClone(fixture), source: { kind: 'history', label: id, session_id: id, live: { active: true }, snapshot_hash: id } });
+  const list = meetings => ({ body: { auto_connect: { enabled: true }, meetings } });
+  const b = await browser({ privatePage: true, routes: {
+    './api/meetings': list([row('first', '2026-10-16T05:00:00Z')]),
+    './api/meetings/first': { body: saved('first') },
+    './api/meetings/next': { body: saved('next') },
+  } });
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'first');
+  assert.equal(b.ids.get('history-auto').getAttribute('aria-pressed'), 'true');
+  b.setRoute('./api/meetings', list([row('next', '2026-10-16T05:10:00Z'), row('first', '2026-10-16T05:00:00Z')]));
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'next');
+  assert.equal(b.window.OopsReplay.state().now, b.window.OopsReplay.state().duration);
+  b.window.OopsReplay.select(0);
+  b.setRoute('./api/meetings/newer', { body: saved('newer') });
+  b.setRoute('./api/meetings', list([row('newer', '2026-10-16T05:20:00Z'), row('next', '2026-10-16T05:10:00Z')]));
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'next');
+  assert.equal(b.window.OopsReplay.state().selected, 0);
+  assert.ok(b.ids.get('history-meeting').options.some(o => o.value === 'newer'));
+  b.ids.get('history-auto').click(); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'newer');
+});
+
+test('automatic mode waits for the first recording and ignores delayed discovery after choosing the example', async () => {
+  const saved = { ...structuredClone(fixture), source: { kind: 'history', label: 'First arrival', live: { active: true } } };
+  const b = await browser({ privatePage: true, routes: {
+    './api/meetings': { body: { auto_connect: { enabled: true }, meetings: [] } },
+    './api/meetings/arrival': { body: saved },
+  } });
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  let resolveList;
+  b.setRoute('./api/meetings', () => new Promise(resolve => { resolveList = resolve; }));
+  b.interval(5000); await flush();
+  b.ids.get('history-example').click(); await flush();
+  resolveList({ body: { auto_connect: { enabled: true }, meetings: [{ session_id: 'arrival', started_at: '2026-10-16T05:10:00Z' }] } }); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.kind, 'example');
+  assert.ok(!b.requests.some(r => r.url === './api/meetings/arrival'));
+  b.setRoute('./api/meetings', { status: 503 });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.kind, 'example');
+});
+
+test('automatic detail failures retry from a fresh authorized list and scope removal clears current content', async () => {
+  const entry = { session_id: 'retry-live', started_at: '2026-10-16T05:10:00Z' };
+  const saved = { ...structuredClone(fixture), source: { kind: 'history', label: 'Recovered auto', live: { active: true } } };
+  const b = await browser({ privatePage: true, routes: {
+    './api/meetings': { body: { auto_connect: { enabled: true }, meetings: [entry] } },
+    './api/meetings/retry-live': { status: 503 },
+  } });
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  b.setRoute('./api/meetings/retry-live', { body: saved });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'Recovered auto');
+  b.setRoute('./api/meetings', { body: { auto_connect: { enabled: true }, meetings: [] } });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+});
+
+test('transient detail failures automatically reread authorization and restore replay position, speed and play', async () => {
+  for (const failure of [new TypeError('synthetic offline'), { status: 429 }, { status: 503 }]) {
+    const b = await browser({ privatePage: true, run: 'vm-run' });
+    const engine = b.window.OopsReplay;
+    engine.seek(23000); engine.setSpeed(30); engine.play(true);
+    b.setRoute('./api/reanalyses/vm-run', failure);
+    b.window.dispatchEvent({ type: 'focus' }); await flush();
+    assert.equal(engine.state().sentences.length, 0);
+    assert.equal(engine.state().playing, false);
+    assert.equal(b.window.OopsAfterReplay.state().items.length, 0);
+    b.clearRoute('./api/reanalyses/vm-run');
+    b.interval(5000); await flush();
+    assert.equal(engine.state().data.source.kind, 'reanalysis');
+    assert.equal(engine.state().now, 23000);
+    assert.equal(engine.state().speed, 30);
+    assert.equal(engine.state().playing, true);
+    b.frame(100); b.frame(200);
+    assert.ok(engine.state().now > 23000);
+  }
+});
+
+test('a hung detail read clears private content, then reconnects automatically without losing the replay position', async () => {
+  const b = await browser({ privatePage: true, run: 'vm-run', useAbort: true });
+  const engine = b.window.OopsReplay;
+  engine.seek(18000); engine.setSpeed(10); engine.play(true);
+  b.setRoute('./api/reanalyses/vm-run', ({ options }) => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))));
+  b.window.dispatchEvent({ type: 'focus' }); await flush();
+  b.timeout(); await flush();
+  assert.equal(engine.state().sentences.length, 0);
+  assert.match(b.ids.get('history-status').textContent, /超时/);
+  b.clearRoute('./api/reanalyses/vm-run');
+  b.interval(5000); await flush();
+  assert.equal(engine.state().now, 18000);
+  assert.equal(engine.state().speed, 10);
+  assert.equal(engine.state().playing, true);
+});
+
+test('authorization loss or source removal clears content and cancels automatic replay recovery', async () => {
+  for (const status of [401, 403, 404, 410]) {
+    const b = await browser({ privatePage: true, run: 'vm-run' });
+    b.window.OopsReplay.seek(18000); b.window.OopsReplay.play(true);
+    b.setRoute('./api/reanalyses/vm-run', { status });
+    b.window.dispatchEvent({ type: 'focus' }); await flush();
+    assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+    assert.equal(b.window.OopsAfterReplay.state().items.length, 0);
+    const count = b.requests.filter(r => r.url === './api/reanalyses/vm-run').length;
+    b.clearRoute('./api/reanalyses/vm-run');
+    b.interval(5000); await flush();
+    b.window.dispatchEvent({ type: 'focus' }); await flush();
+    assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+    assert.equal(b.requests.filter(r => r.url === './api/reanalyses/vm-run').length, count);
+  }
+});
+
+test('leaving an interrupted source cancels recovery and ignores its delayed successful response', async () => {
+  const b = await browser({ privatePage: true, run: 'vm-run' });
+  b.setRoute('./api/reanalyses/vm-run', { status: 503 });
+  b.window.dispatchEvent({ type: 'focus' }); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  let resolveRecovery;
+  b.setRoute('./api/reanalyses/vm-run', () => new Promise(resolve => { resolveRecovery = resolve; }));
+  b.interval(5000); await flush();
+  assert.equal(typeof resolveRecovery, 'function');
+  b.ids.get('history-example').click(); await flush();
+  resolveRecovery({ body: { ...structuredClone(fixture), source: { kind: 'reanalysis', label: 'Old interrupted source' } } }); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.kind, 'example');
+  const count = b.requests.filter(r => r.url === './api/reanalyses/vm-run').length;
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.kind, 'example');
+  assert.equal(b.requests.filter(r => r.url === './api/reanalyses/vm-run').length, count);
+});
+
+test('temporary discovery failure verifies the current detail without interrupting an authorized replay', async () => {
+  const saved = { ...structuredClone(fixture), source: { kind: 'history', session_id: 'verified', label: 'Verified source', snapshot_hash: 'verified-one' } };
+  const b = await browser({ privatePage: true, routes: {
+    './api/meetings': { body: { auto_connect: { enabled: true }, meetings: [{ session_id: 'verified', started_at: '2026-10-16T05:10:00Z' }] } },
+    './api/meetings/verified': { body: saved },
+  } });
+  b.window.OopsReplay.seek(27000); b.window.OopsReplay.setSpeed(5); b.window.OopsReplay.play(true);
+  const dataEvents = b.events.filter(e => e.type === 'funnel:data').length;
+  const reads = b.requests.filter(r => r.url === './api/meetings/verified').length;
+  b.setRoute('./api/meetings', { status: 503 });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.label, 'Verified source');
+  assert.equal(b.window.OopsReplay.state().now, 27000);
+  assert.equal(b.window.OopsReplay.state().speed, 5);
+  assert.equal(b.window.OopsReplay.state().playing, true);
+  assert.equal(b.events.filter(e => e.type === 'funnel:data').length, dataEvents);
+  assert.ok(b.requests.filter(r => r.url === './api/meetings/verified').length > reads);
+});
+
+test('discovery and detail interruption clears the snapshot and recovers the same manually selected position', async () => {
+  const saved = { ...structuredClone(fixture), source: { kind: 'history', session_id: 'both-fail', snapshot_hash: 'both-one' } };
+  const list = { body: { auto_connect: { enabled: true }, meetings: [{ session_id: 'both-fail', started_at: '2026-10-16T05:10:00Z' }] } };
+  const b = await browser({ privatePage: true, routes: {
+    './api/meetings': list,
+    './api/meetings/both-fail': { body: saved },
+  } });
+  // A manual play operation pauses automatic source switching while keeping discovery active.
+  b.ids.get('play').click(); b.window.OopsReplay.seek(19000); b.window.OopsReplay.setSpeed(10); b.window.OopsReplay.play(true);
+  b.setRoute('./api/meetings', { status: 503 });
+  b.setRoute('./api/meetings/both-fail', { status: 503 });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  b.setRoute('./api/meetings', list); b.setRoute('./api/meetings/both-fail', { body: saved });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().data.source.session_id, 'both-fail');
+  assert.equal(b.window.OopsReplay.state().now, 19000);
+  assert.equal(b.window.OopsReplay.state().speed, 10);
+  assert.equal(b.window.OopsReplay.state().playing, true);
+});
+
+test('same-source after updates preserve time, speed and play while a different source resets them', async () => {
+  const b = await browser();
+  const saved = { ...structuredClone(fixture), source: { kind: 'history', session_id: 'after-same', snapshot_hash: 'after-one' } };
+  b.replaceAfter(saved); b.ids.get('tab-after').click();
+  const engine = b.window.OopsAfterReplay;
+  engine.seek(7000); engine.setSpeed(4); engine.play(true);
+  const next = structuredClone(saved);
+  next.source.snapshot_hash = 'after-two';
+  next.post.overview = 'A newer stored overview for the same source.';
+  b.replaceAfter(next);
+  assert.equal(engine.state().now, 7000);
+  assert.equal(engine.state().speed, 4);
+  assert.equal(engine.state().playing, true);
+  assert.match(b.ids.get('overview').textContent, /newer stored overview/);
+  b.frame(100); b.frame(200);
+  assert.ok(engine.state().now > 7000);
+  next.source.session_id = 'after-different';
+  b.replaceAfter(next);
+  assert.equal(engine.state().now, 0);
+  assert.equal(engine.state().playing, false);
+});
+
+test('run list reconnect keeps an independently authorized replay playing at its current position', async () => {
+  const b = await browser({ privatePage: true, run: 'vm-run' });
+  const engine = b.window.OopsReplay;
+  engine.seek(26000); engine.setSpeed(5); engine.play(true);
+  const reads = b.requests.filter(request => request.url === './api/reanalyses/vm-run').length;
+  const loads = b.events.filter(event => event.type === 'funnel:data').length;
+  b.setRoute('./api/meetings', { status: 503 });
+  b.ids.get('history-refresh').click(); await flush();
+  assert.equal(engine.state().now, 26000);
+  assert.equal(engine.state().playing, true);
+  assert.ok(b.requests.filter(request => request.url === './api/reanalyses/vm-run').length > reads);
+  b.clearRoute('./api/meetings');
+  b.interval(5000); await flush();
+  assert.equal(engine.state().now, 26000);
+  assert.equal(engine.state().speed, 5);
+  assert.equal(engine.state().playing, true);
+  assert.equal(b.events.filter(event => event.type === 'funnel:data').length, loads);
+});
+
+test('malformed recovery data clears private content and explicitly stops reconnecting', async () => {
+  const b = await browser({ privatePage: true, run: 'vm-run' });
+  b.setRoute('./api/reanalyses/vm-run', { status: 503 });
+  b.window.dispatchEvent({ type: 'focus' }); await flush();
+  b.setRoute('./api/reanalyses/vm-run', { body: { version: 99, sentences: [] } });
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  assert.equal(b.window.OopsAfterReplay.state().items.length, 0);
+  assert.match(b.ids.get('history-status').textContent, /格式异常.*已停止恢复/);
+  assert.doesNotMatch(b.ids.get('history-status').textContent, /正在自动重连/);
+  const reads = b.requests.filter(request => request.url === './api/reanalyses/vm-run').length;
+  b.clearRoute('./api/reanalyses/vm-run');
+  b.interval(5000); await flush();
+  assert.equal(b.window.OopsReplay.state().sentences.length, 0);
+  assert.equal(b.requests.filter(request => request.url === './api/reanalyses/vm-run').length, reads);
+});
+
+test('nonzero canvas handles empty text and malformed probability while paused frames reuse stable strands', async () => {
+  const saved = structuredClone(fixture);
+  saved.sentences[0].text = '';
+  saved.sentences[0].forks[0].p = 'unrecorded';
+  const b = await browser({ visibleCanvas: true, after: false, routes: { './funnel-sample.json': { body: saved } } });
+  const engine = b.window.OopsReplay;
+  engine.seek(engine.state().duration);
+  assert.equal(engine.state().sentences[0].forks[0].p, null);
+  assert.doesNotMatch(b.ids.get('source-note').textContent, /回放显示暂时中断/);
+  const strands = b.paintCalls.get('quadraticCurveTo') || 0;
+  assert.ok(strands > 0);
+  const pausedPaints = b.paints;
+  b.frame(100); b.frame(200);
+  assert.equal(b.paints, pausedPaints);
+  b.ids.get('transcript').dispatchEvent({ type: 'scroll' }); b.frame(300);
+  assert.ok(b.paints > pausedPaints);
+  assert.equal(b.paintCalls.get('quadraticCurveTo'), strands);
+  assert.equal(engine.state().playing, false);
+});
+
+test('hidden-panel resizing preserves the live canvas until its visible layout returns', async () => {
+  const b = await browser({ visibleCanvas: true });
+  const engine = b.window.OopsReplay, canvas = b.ids.get('canvas');
+  engine.seek(20000);
+  const visibleBounds = b.ids.get('stage').getBoundingClientRect();
+  assert.ok(b.paintCalls.get('drawImage') > 0);
+  b.ids.get('tab-after').click();
+  b.resizeStage(0, 0);
+  assert.equal(canvas.width, 1000);
+  assert.equal(canvas.height, 600);
+  // The panel is visible before ResizeObserver delivers its next layout notification.
+  b.ids.get('stage').getBoundingClientRect = () => visibleBounds;
+  b.ids.get('tab-live').click(); engine.play(true);
+  const before = engine.state().now;
+  b.frame(100); b.frame(200);
+  assert.ok(engine.state().now > before);
+  assert.equal(engine.state().playing, true);
+  assert.doesNotMatch(b.ids.get('source-note').textContent, /回放显示暂时中断/);
+  b.resizeStage(1000, 600); b.frame(300);
+  assert.equal(engine.state().playing, true);
+});
+
+test('60x playback follows the latest transcript row when brief thinking states and the final frame are skipped', async () => {
+  const b = await browser({ after: false, routes: { './funnel-sample.json': { body: scrollingFixture() } } });
+  const engine = b.window.OopsReplay, box = transcriptLayout(b);
+  b.frame(0);
+  engine.setSpeed(60); engine.play(true);
+  b.frame(250);
+  const state = engine.state();
+  assert.equal(state.now, state.duration);
+  assert.equal(state.playing, false);
+  assert.ok(state.sentences.every(sentence => sentence.state === 'done'));
+  assert.ok(box.scrollTop > 0, 'finishing playback must still bring the last original sentence into view');
+  assertRowVisible(state.sentences.at(-1).row, box);
+});
+
+test('the initial seek follows history.readonly inside its own scroller before four seconds have elapsed', async () => {
+  const b = await browser({ after: false, initialTime: 500, routes: { './funnel-sample.json': { body: scrollingFixture() } } });
+  const engine = b.window.OopsReplay;
+  const box = transcriptLayout(b, { top: 530, clientTop: 7, bottomPadding: 600, ancestorOffset: 600 });
+  engine.seek(engine.state().duration);
+  assert.equal(b.ids.get('pane-title').textContent, 'history.readonly');
+  assert.ok(box.scrollTop > 0, 'first navigation must not be mistaken for a recent manual scroll');
+  assertRowVisible(engine.state().sentences.at(-1).row, box);
+  assert.ok(box.scrollTop <= box.scrollHeight - box.clientHeight);
+});
+
+test('manual transcript scrolling pauses following for four seconds and resumes within the same partial sentence', async () => {
+  const b = await browser({ after: false, routes: { './funnel-sample.json': { body: scrollingFixture({ step: 10000, spoken: 8000 }) } } });
+  const engine = b.window.OopsReplay, box = transcriptLayout(b);
+  const last = engine.state().sentences.at(-1);
+  engine.seek(last.start_ms + 500); engine.setSpeed(1); engine.play(true);
+  assertRowVisible(last.row, box);
+  box.scrollTop = 0; box.dispatchEvent({ type: 'wheel' });
+  b.setTime(11000); b.frame(100);
+  assert.equal(box.scrollTop, 0, 'the reader can inspect earlier sentences during the manual-scroll cooldown');
+  assert.equal(last.state, 'partial');
+  b.setTime(14001); b.frame(200);
+  assert.equal(last.state, 'partial', 'resuming must not depend on entering a new sentence state');
+  assert.equal(engine.state().playing, true);
+  assertRowVisible(last.row, box);
 });

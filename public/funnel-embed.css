@@ -1,0 +1,23 @@
+/* Compact meeting chrome only inside the same-origin presentation iframe. */
+body.presentation-embedded .top,
+body.presentation-embedded #pipeline-note,
+body.presentation-embedded #history-entry,
+body.presentation-embedded .history-controls label[for="reanalysis-run"],
+body.presentation-embedded #reanalysis-run,
+body.presentation-embedded #history-example,
+body.presentation-embedded #presentation-entry { display: none; }
+body.presentation-embedded .app { max-width: none; padding: 10px 12px 8px; }
+body.presentation-embedded .history-panel { margin-top: 0; padding: 9px 10px; }
+body.presentation-embedded .history-controls { gap: 6px 8px; }
+body.presentation-embedded .history-controls label[for="history-meeting"] { font-size: 11px; }
+body.presentation-embedded #history-meeting { flex: 1 1 210px; width: 100%; min-width: 150px; max-width: none; font-size: 11px; padding: 4px 6px; }
+body.presentation-embedded .history-controls .btn { padding: 4px 7px; font-size: 11px; }
+body.presentation-embedded .history-panel .source-note { margin-top: 5px; font-size: 10px; line-height: 1.5; }
+body.presentation-embedded .modes { margin-top: 10px; }
+body.presentation-embedded .modes button { padding: 7px 10px; font-size: 12px; }
+body.presentation-embedded #live-minutes-panel { margin-top: 10px; }
+@media (max-width: 480px) {
+  body.presentation-embedded .app { padding-inline: 8px; }
+  body.presentation-embedded .history-controls label[for="history-meeting"] { display: none; }
+  body.presentation-embedded #history-meeting { flex-basis: 100%; }
+}

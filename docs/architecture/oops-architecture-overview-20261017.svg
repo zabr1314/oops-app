@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="1760" viewBox="0 0 1840 1760" role="img" aria-labelledby="title description">
+<title id="title">Oops 技术架构总览 · 2026-10-17</title>
+<desc id="description">分区架构总览：录音设备与手机端采集现场声音，手机直连流式语音识别；原话经加密连接进入Python后端。早期由Jev进行实时分类与判断，当前由Sol统一理解与整理。后端保存会议文件和独立协作任务，网页承接回看、增量草稿和人工核对；主后端的Raft API将协作任务、发送队列和回复保存到三个独立SQLite库；可信电脑上的派工程序通过认证接口主动轮询领单、核对发送许可，再经Raft SDK以Oops服务账号发到协作群，由用户电脑上的AI助手执行并在原线程回复；派工程序读取确切线程并写回后端，手机通过原接口读取对应任务结果。</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9 Z" fill="#7c8496"/></marker>
+  <marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9 Z" fill="#7860bb"/></marker>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #24283b; }
+    .title { font-size: 44px; font-weight: 650; letter-spacing: -1px; }
+    .subtitle { font-size: 21px; fill: #697184; }
+    .section { font-size: 26px; font-weight: 600; }
+    .name { font-size: 24px; font-weight: 600; }
+    .body { font-size: 20px; fill: #4e576c; }
+    .small { font-size: 18px; fill: #657086; }
+    .edge { fill: none; stroke: #7c8496; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .link { font-size: 18px; fill: #687286; paint-order: stroke; stroke: #f8f9fc; stroke-width: 8; stroke-linejoin: round; }
+    .mono { font-family: 'SFMono-Regular', Menlo, monospace; font-size: 17px; fill: #657086; }
+  </style>
+</defs>
+<rect width="1840" height="1760" fill="#f8f9fc"/>
+
+<text x="60" y="82" class="title">Oops 技术架构</text>
+<text x="60" y="121" class="subtitle">手机端采集 · 云端处理 · AI 理解 · 任务执行与结果回流</text>
+<rect x="1460" y="49" width="320" height="51" rx="25" fill="#ede8fb" stroke="#ede8fb" stroke-width="1.5"/>
+<text x="1620" y="82" class="small" style="fill:#6c54a5" text-anchor="middle">技术总览 · 2026.10.17</text>
+<rect x="60" y="243" width="450" height="625" rx="22" fill="#f0ecfa" stroke="#dfd8ee" stroke-width="1.5"/>
+<rect x="650" y="243" width="540" height="625" rx="22" fill="#edf3fc" stroke="#d9e3f4" stroke-width="1.5"/>
+<rect x="1330" y="243" width="450" height="625" rx="22" fill="#fcf4e9" stroke="#eedfc9" stroke-width="1.5"/>
+<text x="86" y="284" class="section" style="fill:#69549e">01  录音设备与手机端</text>
+<text x="676" y="284" class="section" style="fill:#4e6d9c">02  云端后端</text>
+<text x="1356" y="284" class="section" style="fill:#9c743e">03  AI 识别与理解</text>
+<path d="M482 515 H557 V192 H1555 V311" class="edge" marker-end="url(#purple)" marker-start="url(#purple)" style="stroke:#7860bb"/>
+<text x="1030" y="179" class="link" style="fill:#7860bb" text-anchor="middle">音频实时传输 ↔ 识别文字返回</text>
+<path d="M482 574 H580 V520 H680" class="edge" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="582" y="615" class="link" text-anchor="middle">加密接口</text>
+<text x="582" y="643" class="link" text-anchor="middle">交办与回读</text>
+<path d="M1158 521 H1232 V523 H1358" class="edge" marker-end="url(#purple)" marker-start="url(#purple)" style="stroke:#7860bb"/>
+<text x="1251" y="501" class="link" style="fill:#7860bb" text-anchor="middle">理解请求</text>
+<path d="M180 426 V462 H285 V491" class="edge" marker-end="url(#arrow)"/>
+<path d="M387 426 V462 H285" class="edge"/>
+<path d="M285 635 V686" class="edge" marker-end="url(#arrow)"/>
+<path d="M920 395 V443" class="edge" marker-end="url(#arrow)"/>
+<path d="M920 593 V692" class="edge" marker-end="url(#arrow)"/>
+<text x="938" y="642" class="small">内容、结果与记录</text>
+<path d="M1158 566 H1262 V752 H1358" class="edge" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="1257" y="726" class="link" text-anchor="middle">辅助复核</text>
+<rect x="88" y="316" width="184" height="110" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="111" y="352" class="name">录音豆</text>
+<text x="111" y="385" class="body">蓝牙连接</text>
+<text x="111" y="413" class="body">采集现场声音</text>
+<rect x="290" y="316" width="192" height="110" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="313" y="352" class="name">手机麦克风</text>
+<text x="313" y="385" class="body">另一种收音方式</text>
+<text x="313" y="413" class="body">由用户选择</text>
+<rect x="88" y="492" width="394" height="143" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="111" y="528" class="name">Oops 手机 App</text>
+<text x="111" y="561" class="body">连接录音设备，展示实时文字</text>
+<text x="111" y="589" class="body">后台收音，支持重点回看</text>
+<text x="111" y="617" class="body">选择保存内容与要交办的事项</text>
+<rect x="88" y="687" width="394" height="142" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="111" y="723" class="name">本机短时记忆与个人档案</text>
+<text x="111" y="756" class="body">临时模式：保留最近 5 分钟</text>
+<text x="111" y="784" class="body">确认后的个人档案保存在手机</text>
+<text x="111" y="812" class="body">正式会议另按本场设置保存</text>
+<text x="88" y="846" class="small" style="fill:#76618f">录音豆目前用于确认云保存的正式会议</text>
+<rect x="680" y="316" width="480" height="79" rx="15" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="703" y="352" class="name">加密连接 · 接收手机请求</text>
+<rect x="680" y="444" width="480" height="149" rx="15" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="703" y="480" class="name">Python 后端 · 业务调度</text>
+<text x="703" y="513" class="body">接收原话、调用 AI、返回结果</text>
+<text x="703" y="541" class="body">处理会议同步、提醒和正式纪要</text>
+<text x="703" y="569" class="body">Raft API：任务派工、回执与回复</text>
+<rect x="680" y="693" width="480" height="122" rx="15" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="703" y="729" class="name">会议原文与音频文件</text>
+<text x="703" y="762" class="body">按授权保存会议、原音和整理结果</text>
+<text x="703" y="790" class="body">协作数据另存独立数据库（见下方）</text>
+<text x="680" y="846" class="small" style="fill:#5b7697">保存期限、使用权限与任务状态分开管理</text>
+<rect x="1358" y="312" width="394" height="114" rx="15" fill="#fff" stroke="#e8d9c4" stroke-width="1.5"/>
+<text x="1381" y="348" class="name">流式语音识别</text>
+<text x="1381" y="381" class="body">边说边转成文字，保留发言时间</text>
+<text x="1381" y="409" class="body">由手机直接连接识别服务</text>
+<rect x="1358" y="476" width="394" height="141" rx="15" fill="#fff" stroke="#e8d9c4" stroke-width="1.5"/>
+<text x="1381" y="512" class="name">实时理解 · Jev / Sol</text>
+<text x="1381" y="545" class="body">Jev：早期实时分类与判断</text>
+<text x="1381" y="573" class="body">Sol：当前统一理解与整理</text>
+<text x="1381" y="601" class="body">提取重点、提醒、待办和纪要</text>
+<rect x="1358" y="690" width="394" height="139" rx="15" fill="#fff" stroke="#e8d9c4" stroke-width="1.5"/>
+<text x="1381" y="726" class="name">说话人区分与转写复核</text>
+<text x="1381" y="759" class="body">声纹辅助判断谁在说话</text>
+<text x="1381" y="787" class="body">会后增加一次语音识别参考</text>
+<text x="1381" y="815" class="body">身份、负责人仍由人核对</text>
+<rect x="60" y="905" width="1720" height="181" rx="20" fill="#f0f4f5" stroke="#e0e6e9" stroke-width="1.5"/>
+<text x="86" y="944" class="section" style="fill:#516b72">04  实时展示、会议回看与人工核对</text>
+<rect x="88" y="964" width="506" height="93" rx="15" fill="#fff" stroke="#dce5e7" stroke-width="1.5"/>
+<text x="111" y="1000" class="name">会议回看与检索</text>
+<text x="111" y="1033" class="body">按原话回放过程，查看分类和已有结果</text>
+<rect x="620" y="964" width="540" height="93" rx="15" fill="#fff" stroke="#dce5e7" stroke-width="1.5"/>
+<text x="643" y="1000" class="name">会中增量整理 · 独立后台程序</text>
+<text x="643" y="1033" class="body">新原话 → AI 更新草稿 → 网页展示</text>
+<rect x="1186" y="964" width="566" height="93" rx="15" fill="#fff" stroke="#dce5e7" stroke-width="1.5"/>
+<text x="1209" y="1000" class="name">本人核对与飞书连接</text>
+<text x="1209" y="1033" class="body">核对事项、负责人，再确认创建任务或日程</text>
+<path d="M810 815 V889 H341 V963" class="edge" marker-end="url(#arrow)"/>
+<text x="540" y="891" class="link" text-anchor="middle">读取已有会议</text>
+<path d="M1014 815 V889 H899 V963" class="edge" marker-end="url(#arrow)"/>
+<rect x="60" y="1152" width="1720" height="390" rx="20" fill="#f4effc" stroke="#e1d8ef" stroke-width="1.5"/>
+<text x="86" y="1190" class="section" style="fill:#69549e">05  与主后端相连的 Raft 协作链路</text>
+<path d="M1128 593 V650 H1174 V1121 H38 V1295 H108" class="edge" marker-end="url(#arrow)" marker-start="url(#arrow)" style="stroke:#6b8cbb"/>
+<text x="790" y="1110" class="link" text-anchor="middle" style="fill:#5b7697">① 本人确认后，主后端登记协作任务；结果经同一后端回读</text>
+<rect x="88" y="1210" width="351" height="260" rx="18" fill="#edf3fc" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="108" y="1230" class="small" style="fill:#5b7697;font-size:17px">云端主后端内的协作模块</text>
+<rect x="108" y="1240" width="311" height="105" rx="13" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="128" y="1269" class="name" style="font-size:23px">Raft API · 后端接口</text>
+<text x="128" y="1302" class="body" style="font-size:19px">核对身份、来源与派工授权</text>
+<text x="128" y="1330" class="body" style="font-size:19px">登记任务，返回进展与回复</text>
+<rect x="108" y="1388" width="311" height="64" rx="13" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="128" y="1414" class="name" style="font-size:21px">3 个独立 SQLite 库</text>
+<text x="128" y="1438" class="small" style="font-size:17px">任务 / 交接注记 / Outbox 与回复</text>
+<path d="M264 1346 V1387" class="edge" marker-end="url(#arrow)" marker-start="url(#arrow)" style="stroke:#6b8cbb"/>
+<text x="282" y="1372" class="small" style="font-size:17px">持久保存</text>
+<rect x="483" y="1240" width="372" height="148" rx="15" fill="#fff" stroke="#dfd6ec" stroke-width="1.5"/>
+<text x="506" y="1269" class="name" style="font-size:23px">可信电脑 · 派工程序</text>
+<text x="506" y="1302" class="body">主动轮询后端，领取任务</text>
+<text x="506" y="1330" class="body">通过 Raft SDK 单次发送</text>
+<text x="506" y="1358" class="body">读取原线程，写回回执与回复</text>
+<text x="670" y="1222" class="small" text-anchor="middle" style="fill:#73628c;font-size:18px">② 认证接口领单 / 核对 / 回写</text>
+<path d="M420 1295 H482" class="edge" marker-end="url(#purple)" marker-start="url(#purple)"/>
+<rect x="899" y="1240" width="373" height="148" rx="15" fill="#fff" stroke="#dfd6ec" stroke-width="1.5"/>
+<text x="922" y="1269" class="name" style="font-size:23px">Raft · 协作消息通道</text>
+<text x="922" y="1302" class="body">发送身份：Oops 服务账号</text>
+<text x="922" y="1330" class="body">任务消息与回复绑定原线程</text>
+<text x="1084" y="1222" class="small" text-anchor="middle" style="fill:#73628c;font-size:18px">③ SDK 发送 / 精确读取原线程</text>
+<path d="M856 1295 H898" class="edge" marker-end="url(#purple)" marker-start="url(#purple)"/>
+<rect x="1316" y="1240" width="436" height="148" rx="15" fill="#fff" stroke="#dfd6ec" stroke-width="1.5"/>
+<text x="1339" y="1269" class="name" style="font-size:23px">用户电脑上的 AI 助手</text>
+<text x="1339" y="1302" class="body">按任务处理，在同一线程回复</text>
+<text x="1339" y="1330" class="body">业务完成仍由本人验收</text>
+<text x="1534" y="1222" class="small" text-anchor="middle" style="fill:#73628c;font-size:18px">④ Agent 执行 / 原线程回复</text>
+<path d="M1273 1295 H1315" class="edge" marker-end="url(#purple)" marker-start="url(#purple)"/>
+<text x="1123" y="1430" class="small" text-anchor="middle" style="fill:#73628c;font-size:18px">手机交办 → 后端 / Raft API → 派工程序 → Raft → 用户电脑</text>
+<text x="1123" y="1463" class="small" text-anchor="middle" style="fill:#73628c;font-size:18px">用户电脑回复 → 原线程 → 派工程序 → 后端回复库 → 手机原任务</text>
+<text x="920" y="1510" class="small" text-anchor="middle" style="fill:#73628c">手机读取任务与回复；派工程序主动领单并回写。未知送达只核实原请求，业务完成由本人决定。</text>
+<rect x="60" y="1576" width="835" height="93" rx="16" fill="#f8f9fc" stroke="#cfd5e1" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text x="82" y="1608" class="body">辅助接入 · Apple Watch → iPhone → 后端网关</text>
+<text x="82" y="1640" class="small">已接通片段识别；整场录音、后台运行与漏话问题仍待验收</text>
+<rect x="923" y="1576" width="857" height="93" rx="16" fill="#f8f9fc" stroke="#cfd5e1" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text x="946" y="1608" class="body">网页原型 · 设计与交互预览</text>
+<text x="946" y="1640" class="small">用于展示产品流程，与手机安装版分别维护</text>
+<text x="60" y="1705" class="small" style="fill:#5b6376">共同规则：由人决定保存与交办 · 内容有来源、使用有权限 · 保存期限与任务完成分别管理</text>
+<text x="60" y="1736" class="small" style="fill:#70788a">当前验证：简单任务已完成派工、电脑回复与手机回流；具体会议业务执行仍待验收。</text>
+</svg>

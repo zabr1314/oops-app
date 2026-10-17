@@ -52,3 +52,14 @@
 .home-scope-return span{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;color:var(--muted)}
 .home-scope-return small{font-size:11px;color:var(--brand);font-weight:600}
 .content-scope-screen .card>h2{margin-top:9px}
+
+/* Memory keeps meeting results and personal context in two clear paths. */
+.ms-memory-overview{align-items:stretch}
+.ms-memory-overview>.meta{font-size:12px;line-height:1.65;margin:0}
+.ms-meeting-card{overflow-wrap:anywhere}
+.ms-meeting-card h3{font-size:17px;line-height:1.5}
+.ms-meeting-card .meta{line-height:1.65}
+.ms-meeting-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.ms-meeting-actions .button{flex:1;min-width:0;padding:9px 10px;min-height:40px;font-size:12px}
+.ms-personal-tools .section-title{margin:0 0 5px}
+.ms-personal-tools .list-row{padding:11px 0}

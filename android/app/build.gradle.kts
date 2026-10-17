@@ -14,6 +14,9 @@ fun configValue(name: String, default: String = ""): String =
     (localProps.getProperty(name) ?: System.getenv(name) ?: default)
         .replace("\\", "\\\\").replace("\"", "\\\"")
 
+// An explicitly selected SDK check build installs beside the user's existing app.
+val beanSdkCheck = providers.gradleProperty("beanSdkCheck").orNull == "true"
+
 android {
     namespace = "com.oops.app"
     // Current androidx.core / OkHttp require compiling against 37; runtime behaviour stays at targetSdk 36.
@@ -24,7 +27,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.oops.app"
+        applicationId = if (beanSdkCheck) "com.oops.app.sdkcheck" else "com.oops.app"
+        manifestPlaceholders["oopsAppLabel"] = if (beanSdkCheck) "Oops 录音豆测试" else "@string/app_name"
         minSdk = 26
         // Deliberate Android 16 device baseline from the implementation plan.
         //noinspection OldTargetApi
@@ -67,7 +71,8 @@ android {
 // source then offers only the simulator.
 val soundcoreAar = file("libs/soundcore").listFiles { f -> f.name.endsWith(".aar") }?.maxOrNull()
 if (soundcoreAar != null) {
-    android.sourceSets.getByName("main").java.srcDir("src/soundcore/java")
+    // AGP 9's built-in Kotlin compiler needs this registered as a Kotlin source root.
+    android.sourceSets.getByName("main").kotlin.srcDir("src/soundcore/java")
 }
 
 dependencies {

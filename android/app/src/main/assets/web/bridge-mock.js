@@ -10,6 +10,37 @@
   let feishuStatus = flow === 'feishu-unconfigured' ? 'unconfigured' : flow === 'feishu-expired' ? 'expired' : 'disconnected';
   let feishuAccount = null;
   const deliveryDrafts = new Map(), deliveryOperations = new Map();
+  // Personal profiles have a separate, page-memory-only namespace. No browser persistence or real service.
+  const personalMemoryMock = { items: new Map(), receipts: new Map(), kinds: new Set(['身份','偏好','目标','经历','日常']) };
+  function personalMemoryReply(action, p) {
+    const reply = {requestId:p.requestId,action,mock:true};
+    try {
+      if (typeof p.requestId !== 'string' || !p.requestId.trim() || p.requestId.length > 160) throw new Error('个人记忆请求编号无效');
+      if (action === 'list') return emit('personal.result',{...reply,ok:true,items:[...personalMemoryMock.items.values()].sort((a,b)=>b.updatedAt-a.updatedAt)});
+      const previousReply = personalMemoryMock.receipts.get(p.requestId);
+      if (previousReply) return emit('personal.result',previousReply);
+      if (typeof p.id !== 'string' || !/^(?:personal-)?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(p.id)) throw new Error('个人记忆编号无效');
+      const previous = personalMemoryMock.items.get(p.id);
+      let item;
+      if (action === 'save') {
+        if (typeof p.title !== 'string' || !p.title.trim() || p.title.trim().length > 100 || typeof p.body !== 'string' || !p.body.trim() || p.body.trim().length > 5000 || !personalMemoryMock.kinds.has(p.kind)) throw new Error('请填写标题、内容并选择个人记忆分类');
+        const content = {id:p.id,title:p.title.trim(),body:p.body.trim(),kind:p.kind};
+        if (p.create === true && previous) {
+          if (['title','body','kind'].some(key=>previous[key]!==content[key])) throw new Error('该记忆编号已有其他内容，请重新读取核对');
+          item=previous;
+        } else {
+          if (p.create !== true && !previous) throw new Error('这条个人记忆已不存在，请重新读取');
+          if (!previous && personalMemoryMock.items.size >= 1000) throw new Error('个人记忆已达1000条，请先整理');
+          const now=Date.now(); item={...content,createdAt:previous?.createdAt || now,updatedAt:Math.max(now,(previous?.updatedAt || 0)+1)};
+          personalMemoryMock.items.set(p.id,item);
+        }
+      } else if (action === 'delete') {
+        if (!previous) throw new Error('这条个人记忆已不存在，请重新读取');
+        item=previous; personalMemoryMock.items.delete(p.id);
+      } else throw new Error('不支持的个人记忆操作');
+      const result={...reply,ok:true,item}; personalMemoryMock.receipts.set(p.requestId,result); emit('personal.result',result);
+    } catch (error) { emit('personal.result',{...reply,ok:false,error:error.message || '个人记忆操作失败，请重新读取'}); }
+  }
   const feishuPeople = [{open_id:'mock-jason',name:'Jason',department:'示例产品团队'}, {open_id:'mock-lip',name:'黄丽萍',department:'示例设计团队'}, {open_id:'mock-yue',name:'江古月',department:'示例开发团队'}];
   const emitFeishuStatus = requestId => emit('feishu.status', {requestId, status:feishuStatus, account:feishuAccount,
     capabilities:{recipients:feishuStatus==='connected',documents_write:feishuStatus==='connected',sharing:feishuStatus==='connected',messages_send:feishuStatus==='connected'},mock:true});
@@ -45,6 +76,53 @@
     sources: rows.map(row => ({id: row.id, kind: daily ? 'daily_excerpt' : 'transcript', text_hash: '0'.repeat(64), source_revision: 'mock-v1', quote: row.text.slice(0, 280), speaker: row.speaker || null, review: {}})) });
   let startedAt = 0, timer = null, transcript = [], cards = new Map(), drafts = new Map();
   let sessionTranscript = [], dailyCandidates = [];
+  // End receipts contain counts and cleanup metadata only, never the temporary transcript.
+  const dailyReceipts = new Map();
+  let latestDailySession = null;
+  const dailyScope = value => typeof value === 'string' && value.trim() ? value.trim() : null;
+  const scopedCandidates = session => dailyCandidates.filter(x => !session || x.session_id === session);
+  const dailySessionIds = () => new Set([...dailyReceipts.keys(), ...dailyCandidates.map(x => x.session_id),
+    ...saved.filter(x => x.recording_mode === 'daily' || String(x.id || '').startsWith('daily-')).map(x => x.session_id)].filter(Boolean));
+  const scopedDailySaved = session => {const ids=dailySessionIds();return saved.filter(x => ids.has(x.session_id) && (!session || x.session_id === session));};
+  function dailySessions() {
+    const ids = dailySessionIds();
+    return [...ids].filter(Boolean).map(session => {
+      const candidates = scopedCandidates(session), items = scopedDailySaved(session), receipt = dailyReceipts.get(session);
+      const dates = [...candidates.map(x => x.updated_at), ...items.map(x => x.saved_at)]
+        .filter(x => typeof x === 'string' && !Number.isNaN(Date.parse(x))).sort((a,b) => Date.parse(b)-Date.parse(a));
+      return {session_id:session, ended_at:receipt?.ended_at || null, updated_at:dates[0] || null,
+        candidate_count:candidates.length, saved_count:items.length};
+    }).sort((a,b) => (Date.parse(b.ended_at || b.updated_at) || 0)-(Date.parse(a.ended_at || a.updated_at) || 0)
+      || a.session_id.localeCompare(b.session_id));
+  }
+  function dailyResults(p = {}, autoOpen = false) {
+    const requested = dailyScope(p.sessionId);
+    const sessions = dailySessions();
+    const session = requested || latestDailySession || sessions[0]?.session_id || null;
+    const receipt = dailyReceipts.get(session) || null;
+    const candidates = scopedCandidates(session), savedItems = scopedDailySaved(session);
+    return {version:1, session_id:session, ended_at:receipt?.ended_at || null, requestId:p.requestId || '', requested_session_id:requested,
+      receipt, candidate_count:candidates.length, saved_count:savedItems.length, candidates, saved_items:savedItems,
+      cleanup:receipt?.cleanup || null, time_unknown:!receipt,
+      storage:{receipt:receipt ? 'saved' : 'missing', candidates:'ok', saved:'ok'}, errors:[], auto_open:autoOpen,
+      sessions, latest_session_id:latestDailySession || sessions[0]?.session_id || null, total_candidate_count:dailyCandidates.length};
+  }
+  function dailyCandidateReply(p = {}) {
+    const session = dailyScope(p.sessionId);
+    const items=scopedCandidates(session);
+    emit('daily.candidates', {items, candidate_count:items.length, session_id:session, requestId:p.requestId || '',
+      storage:{candidates:'ok'}, errors:[]});
+  }
+  function dailyEnd(reason) {
+    const session = state.sessionId;
+    if (!session || state.recordingMode !== 'daily') return null;
+    const receipt = {session_id:session, ended_at:new Date().toISOString(), reason,
+      candidate_count_at_end:scopedCandidates(session).length, saved_count_at_end:scopedDailySaved(session).length,
+      pending_analysis_at_stop:state.analysisPending || 0,
+      cleanup:{status:'cleared',temporary_audio_cleared:true,temporary_transcript_cleared:true,source_stopped:true}};
+    dailyReceipts.set(session, receipt); latestDailySession = session;
+    return session;
+  }
   const emitted = new Set();
   let actions = new Map(), draftOps = new Map(), recallCount = 0, playingKey = null;
   const audio = preview ? null : new Audio('../test/dialog.wav');
@@ -82,7 +160,9 @@
         final.tag = ['constraint', 'idea', 'decision', 'commitment', 'uncertain'][i];
         final.tagEngine = 'rules-mock';
         if (state.recordingMode === 'daily' && ['constraint','idea','decision','commitment'].includes(final.tag)) {
-          dailyCandidates = [...dailyCandidates, {id:final.id,session_id:state.sessionId,quote:final.text.slice(0,280),start_ms:final.startMs,end_ms:final.endMs,tag:final.tag,visibility:'private',confirmed:false,original_available:false,updated_at:new Date().toISOString()}].slice(-50);
+          const current = scopedCandidates(state.sessionId).slice(-49);
+          dailyCandidates = [...dailyCandidates.filter(x => x.session_id !== state.sessionId), ...current,
+            {id:final.id,session_id:state.sessionId,quote:final.text.slice(0,280),start_ms:final.startMs,end_ms:final.endMs,tag:final.tag,visibility:'private',confirmed:false,status:'candidate',original_available:false,updated_at:new Date().toISOString()}];
         }
         emit('asr.tag', { ...final });
         state.commitmentCount = sessionTranscript.filter((u) => u.tag === 'commitment').length;
@@ -182,6 +262,11 @@
     actions.set(opId, r); if (d.sourceItemId) mockItemTasks.add(d.sourceItemId); emit('action.result', r);
   }
   let mockMeetings = [{session_id: 'demo', started_at: '2026-10-06T09:00:00+08:00', ended_at: '2026-10-06T10:00:00+08:00', project: 'Oops 首版', goal: '上线方案评审（模拟）', utterance_count: 3}];
+  if (flow === 'history-filter') mockMeetings.push(
+    {session_id:'demo-short',goal:'两分钟试录（模拟）',started_at:'2026-10-06T10:10:00+08:00',ended_at:'2026-10-06T10:12:00+08:00',utterance_count:3,effective_utterance_count:3,review_pending:{},history_visibility:{hidden_by_default:true,reason:'short_meeting',status:'hidden'}},
+    {session_id:'demo-empty',goal:'未收到内容的尝试（模拟）',started_at:'2026-10-06T11:00:00+08:00',ended_at:'2026-10-06T11:00:02+08:00',utterance_count:0,effective_utterance_count:0,asr_closure:'acknowledged',review_pending:{},history_visibility:{hidden_by_default:true,reason:'no_transcript',status:'hidden'}},
+    {session_id:'demo-expired',goal:'保留了确认摘要（模拟）',started_at:'2026-10-05T09:00:00+08:00',ended_at:'2026-10-05T09:20:00+08:00',utterance_count:0,transcript_status:'expired',retained_summaries:[{text:'示例摘要：下次评审前核对预算。',confirmed:true,source_status:'expired'}],review_pending:{},history_visibility:{hidden_by_default:true,reason:'no_transcript',status:'hidden'}},
+    {session_id:'demo-incomplete',goal:'等待检查转写的记录（模拟）',started_at:'2026-10-06T12:00:00+08:00',ended_at:'2026-10-06T12:00:10+08:00',utterance_count:0,asr_closure:'incomplete',review_pending:{},history_visibility:{hidden_by_default:true,reason:'no_transcript',status:'hidden'}});
   const historicalRows = [{id: 'u1', text: '预算不能超过10万。', start_ms: 0, end_ms: 4482, tag: 'constraint', speaker: null},
     {id: 'u2', text: '那我周五前把新方案发你。', start_ms: 17162, end_ms: 20181, tag: 'commitment', speaker: null, owner_hint: null, when_raw: '周五前'},
     {id: 'u3', text: '这个想法不错，不过方案A要时上线，大概要13万。', start_ms: 11442, end_ms: 16841, tag: 'decision', speaker: '林春源'}]
@@ -213,6 +298,8 @@
       return;
     }
     switch (type) {
+      case 'personal.list': case 'personal.save': case 'personal.delete':
+        setTimeout(()=>personalMemoryReply(type.slice('personal.'.length),p),160);break;
       case 'feishu.status': emitFeishuStatus(p.requestId); break;
       case 'feishu.connect':
         if (feishuStatus === 'unconfigured') { emitFeishuStatus(p.requestId); break; }
@@ -250,12 +337,19 @@
         if (op.status === 'pending') {op.status='sent';op.receipt={message:'模拟回执：文档已按本次所选收件人与权限交付，未向真实飞书发送。'};}
         deliveryReply(p,op.status,{op_id:p.opId,receipt:op.receipt});break;
       }
-      case 'hello': queueMicrotask(() => emit('snapshot', { state, transcript, summary: summary(), team, insets: { top: 0, bottom: 0 } }));break;
+      case 'hello': queueMicrotask(() => {
+        emit('snapshot', { state, transcript, summary: summary(), team, insets: { top: 0, bottom: 0 } });
+        emit('daily.results', dailyResults());
+      });break;
       case 'capture.meeting':
         if (!state.capturing || state.recordingMode !== 'daily') throw new Error('请先开始日常聆听，再切换正式会议');
         if (p.recordingMode !== 'meeting' || p.cloudSaveConfirmed !== true) throw new Error('须明确选择本次云端保存');
+        if (![7,30,90].includes(p.audioRetentionDays ?? 30) || ![7,30,90].includes(p.transcriptRetentionDays ?? 30)) throw new Error('保存期限无效');
         // A separate session begins now, with no implicit import of the previous buffer.
+        dailyEnd('meeting_switch');
         clearInterval(timer); state.capturing = false;
+        stopClip();transcript=[];sessionTranscript=[];cards.clear();drafts.clear();
+        emit('daily.results', dailyResults({}, false));
         // fall through
       case 'capture.start':
         if (state.capturing) break;
@@ -267,14 +361,18 @@
         state.notices = []; state.digestCounts = {};
         Object.assign(state, { capturing: true, sourceReady: true, sessionMs: 0, bufferedMs: 0, asr: 'simulated', commitmentCount: 0, analysisPending: 0, analysisFailed: 0, tagsSupported: null });
         startedAt = performance.now();emit('state', { ...state });clearInterval(timer);timer = setInterval(tick, 100);break;
-      case 'capture.stop':
+      case 'capture.stop': {
+        if (!state.capturing) break;
+        const endedSession = dailyEnd('stopped');
         state.capturing = false;state.sourceReady = false;state.asr = 'off';state.level = 0;clearInterval(timer);stopClip();
         if (state.recordingMode === 'daily') {
           const ids=transcript.map(u=>u.id); transcript=[];sessionTranscript=[];cards.clear();drafts.clear();
           Object.assign(state,{sessionId:'',sessionMs:0,bufferedMs:0,notices:[],digestCounts:{},commitmentCount:0});
-          emit('transcript.pruned',{ids});emit('capture.cleared',{mode:'daily'});emit('session.summary',summary());
+          emit('transcript.pruned',{ids});emit('capture.cleared',{mode:'daily',session_id:endedSession});emit('session.summary',summary());
+          emit('daily.ended', dailyResults({sessionId:endedSession}, true));
         }
         emit('state', { ...state });break;
+      }
       case 'ask.session': void recall({...p, ask: true}); break;
       case 'agenda.set':
         state.agenda = {goal: p.goal, items: p.items.map((i,n) => ({id: 'a'+(n+1), title: i.title, plannedMs: i.minutes ? i.minutes * 60000 : null, coveredMs: 0})), plannedMs: p.minutes ? p.minutes * 60000 : null, tracking: 'supported'}; emit('state', {...state}); break;
@@ -298,7 +396,11 @@
         retainedSummaries=[...retainedSummaries.filter(x=>!summaryIds.includes(x.id)),...(p.summaries || []).map(x=>({...x,confirmed:true,source_status:'available'}))];
         emit('meeting.retained',{sessionId:p.sessionId,session_id:p.sessionId,requestId:p.requestId,retained_evidence:retainedEvidence,retained_summaries:retainedSummaries});break;
       }
-      case 'history.list': emit('history.list', {requestId: p.requestId || '', count: mockMeetings.length, items: mockMeetings.map((m) => ({...m, title: m.manualTitle || m.goal, review_pending: {all: itemQueue(mockItems()).length}}))}); break;
+      case 'history.list': {
+        const hidden = mockMeetings.filter(m => m.history_visibility?.hidden_by_default).length;
+        const items = mockMeetings.filter(m => p.includeEmpty === true || !m.history_visibility?.hidden_by_default);
+        emit('history.list', {requestId:p.requestId || '',count:items.length,total_count:mockMeetings.length,hidden_empty_count:hidden,include_empty:p.includeEmpty === true,items:items.map(m => ({...m,title:m.manualTitle || m.goal,review_pending:m.review_pending || {all:itemQueue(mockItems()).length}}))}); break;
+      }
       case 'history.open': {
         if (p.sessionId === state.sessionId) {
           const rows = sessionTranscript.map((u) => ({id: u.id, text: u.text, start_ms: u.startMs, end_ms: u.endMs, tag: u.tag, speaker: u.speaker || null}));
@@ -306,11 +408,17 @@
             digest: {constraint: [], commitment: [], decision: [], idea: []}, notices: []});
         }
         const meeting = mockMeetings.find(i => i.session_id === p.sessionId); if (!meeting) return emit('error', {scope: 'history', operation: 'history.open', sessionId: p.sessionId, requestId: p.requestId || '', message: '会议已删除'});
+        if (meeting.utterance_count === 0) {
+          emit('history.open',{...meeting,sessionId:p.sessionId,requestId:p.requestId || '',display_title:meeting.goal,utterances:[],items:[],review_queue:[],digest:{constraint:[],commitment:[],decision:[],idea:[]},notices:[]}); break;
+        }
         emit('history.open', {...meeting, sessionId: p.sessionId, requestId: p.requestId || '', project: meeting.project || null, display_title: meeting.manualTitle || meeting.goal, title_source: meeting.manualTitle ? 'manual' : 'generated', utterances: historicalRows, items: mockItems(), review_queue: itemQueue(mockItems()),
           digest: {constraint: historicalRows.filter(u => u.tag === 'constraint'), commitment: historicalRows.filter(u => u.tag === 'commitment' && u.review?.verdict !== 'rejected'),
             decision: historicalRows.filter(u => u.tag === 'decision' && u.review?.verdict !== 'rejected'), idea: []}, notices: [],retained_evidence:retainedEvidence,retained_summaries:retainedSummaries}); break;
       }
       case 'history.minutes': {
+        if (mockMeetings.find(m => m.session_id === p.sessionId)?.utterance_count === 0) {
+          emit('history.minutes',{session_id:p.sessionId,requestId:p.requestId || '',status:'unavailable',reason:'insufficient_content'}); break;
+        }
         const changed = minutesChanged || flow === 'minutes-source-changed';
         const payload = {session_id: p.sessionId, requestId: p.requestId || ''};
         if (flow === 'minutes-pending') Object.assign(payload, {status: 'pending', reason: 'writing'});
@@ -427,18 +535,28 @@
         saved = saved.filter((x) => x.id !== c.id);saved.unshift(item);if (!preview) localStorage.setItem(key, JSON.stringify(saved));
         state.savedCount = saved.length;emit('recall.saved', { cardId: c.id, savedCount: saved.length });break;
       }
-      case 'daily.candidate.discard': dailyCandidates=dailyCandidates.filter(x=>x.id!==p.id || x.session_id!==p.sessionId);emit('daily.candidates',{items:dailyCandidates});break;
-      case 'daily.candidates': emit('daily.candidates',{items:dailyCandidates});break;
+      case 'daily.results': emit('daily.results',dailyResults(p));break;
+      case 'daily.candidate.discard': {
+        const scope = Object.hasOwn(p,'scopeSessionId') ? p.scopeSessionId : p.sessionId;
+        dailyCandidates=dailyCandidates.filter(x=>x.id!==p.id || x.session_id!==p.sessionId);
+        dailyCandidateReply({sessionId:scope,requestId:p.requestId});
+        emit('daily.results',dailyResults({sessionId:scope,requestId:p.requestId}));break;
+      }
+      case 'daily.candidates': dailyCandidateReply(p);break;
       case 'daily.candidate.confirm': {
-        if (p.confirmed !== true || !p.quote?.trim() || p.quote.length > 280) throw new Error('请先核对1–280字短依据');
+        const scope = Object.hasOwn(p,'scopeSessionId') ? p.scopeSessionId : p.sessionId;
+        const fail = message => emit('error',{scope:'daily.results',requestId:p.requestId || '',session_id:dailyScope(scope),message});
+        if (p.confirmed !== true || typeof p.quote !== 'string' || !p.quote.trim() || p.quote.length > 280) {fail('请先核对1–280字短依据');break;}
         const candidate=dailyCandidates.find(x=>x.id===p.id && x.session_id===p.sessionId);
-        if (!candidate) throw new Error('候选已失效');
+        if (!candidate) {fail('候选已失效');break;}
         const savedId=`daily-${p.sessionId}-${p.id}`;
         saved=saved.filter(x=>x.id!==savedId);
         saved.push({id:savedId,session_id:p.sessionId,saved_at:new Date().toISOString(),visibility:'private',confirmed:true,audio_expired:true,original_available:false,utterances:[{id:p.id,text:p.quote,start_ms:candidate.start_ms,end_ms:candidate.end_ms}]});
         dailyCandidates=dailyCandidates.filter(x=>x!==candidate);state.savedCount=saved.length;
         if (!preview) localStorage.setItem(key,JSON.stringify(saved));
-        emit('recall.saved',{cardId:savedId,savedCount:saved.length});break;
+        emit('recall.saved',{cardId:savedId,savedCount:saved.length});
+        dailyCandidateReply({sessionId:scope,requestId:p.requestId});
+        emit('daily.results',dailyResults({sessionId:scope,requestId:p.requestId}));break;
       }
       case 'saved.list': emit('saved.items', { items: saved });break;
       case 'items.task.draft': void itemTaskDraft(p).catch(e => emit('error', {...p, scope:'items.task',message:e.message}));break;

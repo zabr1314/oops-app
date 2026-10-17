@@ -193,8 +193,9 @@ class RemoteBackendSmoke : Instrumentation() {
                 check(requireNotNull(api.historyList()).getJSONArray("items").let { list ->
                     (0 until list.length()).any { list.getJSONObject(it).getString("session_id") == session } })
                 check(requireNotNull(api.historySearch("预算上限是多少")).getJSONArray("items").length() > 0)
-                val picks = api.recall(RecallRequest(session, "ask", "预算上限是多少", 8000, rows)).picks
-                check(picks.any { it.id == "u1" && it.prob >= .65 })
+                val recalled = api.recall(RecallRequest(session, "ask", "预算上限是多少", 8000, rows))
+                check(recalled.picks.any { it.id == "u1" && (if (recalled.engine == "gpt-6.1-sol") it.prob == null
+                    else it.prob?.let { prob -> prob >= .65 } == true) })
                 val topic = requireNotNull(api.notice(JSONObject().put("kind", "topic").put("session_id", session)
                     .put("agenda", agenda).put("utterances", org.json.JSONArray().put(ApiJson.candidate(rows[0])))))
                 check(topic.getString("topic") == "a1")

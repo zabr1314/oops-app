@@ -26,6 +26,10 @@ class NoticeTracker(@Volatile var agenda: Agenda = Agenda()) {
         private set
     @Volatile var tracking: String = "waiting"
     private val notices = mutableListOf<Notice>()
+    // Kept across transient read failures so reconnecting cannot vibrate the same alert again.
+    private val agentSeen = mutableSetOf<String>()
+    private val agentPreferences = mutableMapOf<String, Pair<Boolean, Boolean?>>()
+    private var agentAttempt = -1L
     @Synchronized fun list() = notices.toList()
     /** Daily content, including quoted conflict notices, has the same five-minute lifetime. */
     @Synchronized fun prune(beforeMs: Long, availableIds: Set<String>): Boolean = notices.removeAll {
@@ -50,6 +54,28 @@ class NoticeTracker(@Volatile var agenda: Agenda = Agenda()) {
         notices.add(notice)
         return notice
     }
+    @Synchronized fun clearAgentNotices(): Boolean {
+        notices.filter { it.id.startsWith("agent-") }.forEach {
+            agentPreferences[it.id] = it.dismissed to it.useful
+        }
+        return notices.removeAll { it.id.startsWith("agent-") }
+    }
+    @Synchronized fun acceptsAgentAttempt(attempt: Long) = attempt >= agentAttempt
+    /** Replace only live Agent candidates; resolved/withdrawn entries disappear without an alert. */
+    @Synchronized fun replaceAgentNotices(values: List<Notice>, attempt: Long, alert: Boolean): List<Notice> {
+        if (attempt < agentAttempt) return emptyList()
+        agentAttempt = attempt
+        clearAgentNotices()
+        val fresh = mutableListOf<Notice>()
+        for (value in values) {
+            agentPreferences[value.id]?.let { (dismissed, useful) ->
+                value.dismissed = dismissed; value.useful = useful
+            }
+            notices.add(value)
+            if (agentSeen.add(value.id) && alert && !value.dismissed) fresh.add(value)
+        }
+        return fresh
+    }
     private fun once(key: String, now: Long, title: String, detail: String = "", kind: String = "time"): Notice? =
         if (fired.add(key)) add(Notice(kind = kind, title = title, detail = detail, atMs = now)) else null
     @Synchronized fun onTick(now: Long): List<Notice> {
@@ -70,9 +96,9 @@ class NoticeTracker(@Volatile var agenda: Agenda = Agenda()) {
         }
         return out
     }
-    @Synchronized fun onTopic(topic: String, prob: Double?, now: Long): Pair<List<Notice>, String?> {
+    @Synchronized fun onTopic(topic: String, prob: Double?, now: Long, semanticCandidate: Boolean = false): Pair<List<Notice>, String?> {
         advance(now); tracking = "supported"
-        if (topic == "off_topic" && prob != null && prob >= .6) {
+        if (topic == "off_topic" && (semanticCandidate || prob != null && prob >= .6)) {
             currentItemId = null
             offCount++
             if (offCount >= 2 && now - offLast >= 300_000) {
@@ -91,7 +117,13 @@ class NoticeTracker(@Volatile var agenda: Agenda = Agenda()) {
         advance(now)
         return agenda.items.filter { (coverage[it.id] ?: 0) > 0 && resolved[it.id] != true }.map { it.id }
     }
-    @Synchronized fun onResolution(itemId: String, value: Boolean?, prob: Double?, now: Long): Notice? {
+    @Synchronized fun onResolution(itemId: String, value: Boolean?, prob: Double?, now: Long, semanticCandidate: Boolean = false): Notice? {
+        if (semanticCandidate) {
+            val item = agenda.items.firstOrNull { it.id == itemId } ?: return null
+            // A semantic suggestion may prompt review, never mark the agenda as resolved.
+            return if (value == false) once("resolution:$itemId:${item.title}", now,
+                "「${item.title}」可能尚未形成结论", "请结合当前原话核对", "resolution") else null
+        }
         if (value == null || prob == null || prob < .6) return null
         resolved[itemId] = value
         val item = agenda.items.firstOrNull { it.id == itemId } ?: return null

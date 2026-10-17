@@ -89,7 +89,10 @@
         dot(ctx, f.x, f.y, (f.start >= 0 ? 2 : 3) * Math.max(0.8, scale), JOINT, 10);
       });
       for (const b of bursts) {
-        const k = (now - b.start) / 700, e = 1 - Math.pow(1 - k, 3);
+        // RAF timestamps precede the work in that frame. A land() triggered
+        // during rendering uses performance.now() and can be slightly newer;
+        // clamp the animation age before computing radii and opacity.
+        const k = Math.max(0, Math.min(1, (now - b.start) / 700)), e = 1 - Math.pow(1 - k, 3);
         ctx.globalAlpha = 1 - k;
         ctx.strokeStyle = b.color; ctx.lineWidth = 1.8; ctx.shadowColor = b.color; ctx.shadowBlur = 14;
         ctx.beginPath(); ctx.arc(b.x, b.y, 4 + e * 34 * scale * 1.4, 0, Math.PI * 2); ctx.stroke();

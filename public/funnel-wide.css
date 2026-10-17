@@ -1,0 +1,134 @@
+/* A presentation of the existing replay, with its original DOM and clock. */
+.wide-controls { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.wide-controls .btn { font-size: 12px; }
+.wide-only, .wide-panel-head, .wide-source-summary, .wide-message:empty { display: none; }
+.wide-message { color: var(--you); font-size: 12px; margin: 6px 0; }
+body.presentation-embedded .wide-controls { display: none; }
+
+@media (min-width: 960px) and (min-height: 480px) {
+  body.wide-replay {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: #050608;
+  }
+  body.wide-replay .app {
+    /* Fit the full 16:9 frame without stretching type or canvas coordinates. */
+    position: relative;
+    container-type: inline-size;
+    width: min(100vw, calc(100dvh * 16 / 9));
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-width: none;
+    margin: 0;
+    padding: .8%;
+    display: grid;
+    grid-template-rows: 2.5cqw minmax(0, 1fr) 1.6cqw;
+    gap: .35cqw;
+    overflow: hidden;
+    background: var(--bg);
+    font-size: .98cqw;
+  }
+  body.wide-replay .top { min-width: 0; align-items: center; gap: 0; }
+  body.wide-replay .title { width: 100%; min-width: 0; display: flex; align-items: center; gap: 1cqw; }
+  body.wide-replay .top h1 { order: -1; margin: 0; min-width: 0; font-size: 1.43cqw; white-space: nowrap; }
+  body.wide-replay .title > .back,
+  body.wide-replay .sub,
+  body.wide-replay .counters { display: none; }
+  body.wide-replay .wide-controls { margin-left: auto; gap: .5cqw; flex-shrink: 0; }
+  body.wide-replay .wide-only { display: inline-block; }
+  body.wide-replay .btn,
+  body.wide-replay select { padding: .25cqw .6cqw; font-size: .88cqw; line-height: 1.5; }
+  body.wide-replay #wide-toggle { color: var(--sol); border-color: #544368; }
+  body.wide-replay #mode-live {
+    display: grid;
+    min-height: 0;
+    grid-template-rows: 2.5cqw 2cqw minmax(0, 1fr);
+    gap: .35cqw;
+  }
+  body.wide-replay #mode-live[hidden] { display: none; }
+  body.wide-replay #source-note { display: none; }
+  body.wide-replay .wide-source-summary { display: block; }
+  body.wide-replay .toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .8cqw;
+    margin: 0;
+    min-width: 0;
+  }
+  body.wide-replay .badge { padding: .1cqw .5cqw; font-size: .8cqw; white-space: nowrap; }
+  body.wide-replay #source-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .88cqw; }
+  body.wide-replay .toolbar .controls { margin: 0; gap: .5cqw; flex-wrap: nowrap; width: auto; }
+  body.wide-replay #play { min-width: 5.2cqw; }
+  body.wide-replay #scrub { width: 8cqw; flex: none; order: initial; }
+  body.wide-replay .clock { min-width: 8cqw; font-size: .84cqw; }
+  body.wide-replay .speed { font-size: .85cqw; }
+  body.wide-replay .routing-toolbar { margin: 0; gap: 1cqw; flex-wrap: nowrap; font-size: .8cqw; min-width: 0; }
+  body.wide-replay .routing-switch { padding: .12cqw; gap: .12cqw; flex-shrink: 0; }
+  body.wide-replay .routing-switch button { padding: .22cqw .7cqw; font-size: .8cqw; }
+  body.wide-replay #routing-progress { flex-shrink: 0; }
+  body.wide-replay #routing-explanation { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.wide-replay #stage {
+    min-height: 0;
+    height: 100%;
+    grid-template-columns: minmax(0, 32fr) minmax(0, 46fr) minmax(0, 22fr);
+    grid-template-rows: minmax(0, 1fr);
+    column-gap: 1cqw;
+  }
+  body.wide-replay .pane-head { font-size: .85cqw; padding: .6cqw .8cqw; }
+  body.wide-replay .pane-head .dots { gap: .3cqw; margin-right: .4cqw; }
+  body.wide-replay .pane-head .dots i { width: .6cqw; height: .6cqw; }
+  body.wide-replay .transcript { padding: .5cqw 0 2cqw; }
+  body.wide-replay .transcript li { grid-template-columns: 3cqw 3.6cqw minmax(0, 1fr); gap: 0 .5cqw; padding: .24cqw .7cqw .24cqw .3cqw; line-height: 1.65; }
+  body.wide-replay .transcript .spk { grid-column: auto; grid-row: auto; }
+  body.wide-replay .transcript .box { padding: 0 .2cqw; }
+  body.wide-replay #content-routes { gap: .45cqw; }
+  body.wide-replay .content-playback-heading { font-size: .84cqw; padding: .15cqw .65cqw; }
+  body.wide-replay .content-playback-phase { font-size: .67cqw; }
+  body.wide-replay .content-playback-value { padding: .1cqw .65cqw .2cqw; column-gap: .65cqw; }
+  body.wide-replay .content-playback-value > strong { font-size: 2cqw; }
+  body.wide-replay .content-playback-total { font-size: .75cqw; }
+  /* Keep all nine lanes legible; full meanings remain in each card's aria-label. */
+  body.wide-replay .content-playback-note { display: none; }
+  body.wide-replay .routes { gap: .7cqw; }
+  body.wide-replay .route header { padding: .2cqw .7cqw; font-size: .8cqw; }
+  body.wide-replay .route strong { font-size: 2.6cqw; padding: .2cqw .8cqw 0; }
+  body.wide-replay .route p,
+  body.wide-replay .route small,
+  body.wide-replay .tops { margin-inline: .8cqw; font-size: .8cqw; }
+  body.wide-replay .status { margin: 0; padding: .25cqw .1cqw 0; gap: 1cqw; flex-wrap: nowrap; font-size: .75cqw; min-width: 0; }
+  body.wide-replay .status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.wide-replay #workspace-settings,
+  body.wide-replay #playback-records { display: none; }
+  body.wide-replay.wide-options-open #workspace-settings,
+  body.wide-replay.wide-records-open #playback-records {
+    display: block;
+    position: absolute;
+    z-index: 8;
+    top: 4cqw;
+    left: 1cqw;
+    right: 1cqw;
+    max-height: calc(100% - 6cqw);
+    padding: 1cqw;
+    overflow: auto;
+    background: #111316;
+    border: 1px solid #544368;
+    border-radius: .6cqw;
+    box-shadow: 0 1cqw 5cqw #000c;
+  }
+  body.wide-replay .wide-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 1cqw; color: var(--sol); }
+  body.wide-replay .history-panel { margin-top: .8cqw; }
+  body.wide-replay .history-controls { gap: .6cqw; }
+  body.wide-replay #workspace-settings .source-note { font-size: .85cqw; line-height: 1.6; }
+  body.wide-replay #workspace-settings .modes { margin-top: .8cqw; }
+  body.wide-replay #playback-records .row2 { margin-top: .8cqw; }
+  /* Source warnings own a row; they must never cover playback controls. */
+  body.wide-replay.wide-has-message .app { grid-template-rows: 2.5cqw auto minmax(0, 1fr) 1.6cqw; }
+  body.wide-replay.wide-has-message .top { grid-row: 1; }
+  body.wide-replay.wide-has-message #wide-message { grid-row: 2; }
+  body.wide-replay.wide-has-message #mode-live { grid-row: 3; }
+  body.wide-replay.wide-has-message .status { grid-row: 4; }
+  body.wide-replay .wide-message:not(:empty) { position: static; margin: 0; max-width: none; max-height: 4cqw; overflow-y: auto; overflow-wrap: anywhere; padding: .3cqw .65cqw; border: 1px solid var(--you); background: var(--panel); font-size: .8cqw; line-height: 1.5; }
+}

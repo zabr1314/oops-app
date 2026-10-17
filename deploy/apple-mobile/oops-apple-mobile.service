@@ -1,0 +1,22 @@
+[Unit]
+Description=Oops Apple mobile scoped meeting gateway
+After=network-online.target oops-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oops
+Group=oops
+WorkingDirectory=/opt/oops/apple-mobile
+ExecStart=/usr/bin/python3 -B -u /opt/oops/apple-mobile/apple_mobile_gateway.py --db /var/lib/oops-apple-mobile/gateway.sqlite serve --port 8799 --url-prefix /oops-meeting/apple-mobile --upstream-url http://127.0.0.1:8787 --upstream-token-file /var/lib/oops-apple-mobile/backend-token
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/oops-apple-mobile
+
+[Install]
+WantedBy=multi-user.target

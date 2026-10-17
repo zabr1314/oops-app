@@ -3,6 +3,16 @@
 桥只对打包页面的来源 `https://appassets.androidplatform.net` 主框架开放。
 H5 用 `window.OopsNative.postMessage(JSON.stringify({type,payload}))` 发送；通过 `OopsNative.onmessage` 接收同形 JSON。桥在 hello 后绑定，页面重载会重新绑定。
 
+## Raft 手机协作（2026-10-17）
+
+`raft.request` 请求为 `{requestId,operation,payload}`，`raft.result` 回包为 `{requestId,operation,data?,error?:{code,message},backendUrl,serviceEpoch}`。页面须同时核对请求编号、操作、原服务和代次，离页/切服务不应用旧回包。凭据只在原生层使用，HTTP仅HTTPS或本机回环，写入不重试、不跟随重定向，不接受任意URL或路由。
+
+操作白名单：`collaboration.read/submit/find/continue/review/cancel`、`task.create/list/get` 和只读 `source.read/source.links`。find/list精确查询携带`request_id`，cancel携带`{handoff_id,confirm:true}`，get携带`{id}`；source操作携带 `{source_ref:{kind,session_id?|source_meeting_id?,item_id,fingerprint}}`，固定两类来源，个人会话非空前置。带来源任务创建还要求`source_contract`及`source_confirm:true`。其余正文沿用 [API合同](api.md)。每次写入必须`confirm:true`，任务创建、派工和人工核对有各自幂等编号。原生释放单条请求闸门后才发送回包，防止串行的两阶段派工误报BUSY。
+
+独立手写协作先保存生产任务，再关联真实task_id派工。未知结果只查询原编号，不换任务或发送编号；公开/浏览器/Mock不连接。回复原文与人工进展/成果注记分别保留，不自动完成业务任务。
+
+会议待办从真实原任务进入同一桥：重新读取本人来源合同后逐次确认，结果仅映射回该来源对象和确切协作线程。前台已绑定线程约每9秒只读`source.links`，输入/核对/隐藏/离页暂停；切服务或账号撤下旧正文，迟到回包不应用，不自动重新派工。`source.links` 的每项 `collaborations` 是完整线程，不把 `handoffs` 定位映射当正文。
+
 ## H5 → 原生
 
 | type | payload | 行为 |
@@ -25,6 +35,9 @@ H5 用 `window.OopsNative.postMessage(JSON.stringify({type,payload}))` 发送；
 | recall.dismiss | {cardId} | 丢弃卡片 |
 | commitment.open | {utteranceId} | 从本场索引打开承诺，进入现有卡片流程 |
 | saved.list | {} | 返回长期保存列表 |
+| personal.list | {requestId} | 读取独立的本机私人手动档案，不读会议或模型 |
+| personal.save | {requestId,id?,create,title,body,kind} | 明确新建或编辑；分类为身份/偏好/目标/经历/日常，标题≤100、正文≤5000字 |
+| personal.delete | {requestId,id} | 删除本人选定的本机手动档案，不删除日常依据或会议 |
 | action.draft | {cardId,utteranceIds} | 请求行动草稿，不写入飞书 |
 | action.confirm | {draftId,who,what,whenIso,whenRaw,constraint} | 冻结草稿、持久化 op_id、提交确认 |
 | action.status | {draftId} | 查询原操作，不重新提交 |
@@ -62,6 +75,7 @@ H5 用 `window.OopsNative.postMessage(JSON.stringify({type,payload}))` 发送；
 | action.draft | {draftId,cardId,who,what,whenIso,whenRaw,constraint,assigneeCandidates,evidence} |
 | action.result | {draftId,opId,status,taskGuid,taskUrl,message,readBackConfirmed,polling,mock} |
 | saved.items | {items} 元数据采用存储的 snake_case |
+| personal.result | {requestId,action,ok,items?,item?,error?}；action 为 list/save/delete；条目含 id/title/body/kind/createdAt/updatedAt |
 | latency | {recentMs,medianMs} |
 | toast | {message} |
 | error | {scope,message} |

@@ -163,3 +163,22 @@ select.chip { max-width: 100%; font: inherit; }
 .meeting-work-entry { margin: 12px 0 18px; padding: 4px 10px; border: 1px solid #e8e0f8; border-radius: 18px; background: #faf7ff; }
 .parsed-source-heading { margin: 12px 0 0; color: var(--brand); font-size: 14px; }
 .parsed-decision-quote { padding: 9px 11px; border-radius: 10px; background: #faf8ff; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+
+/* Typed personal candidates: suggested understanding, explicit self-attribution, then local confirmation. */
+.oops-root .personal-auto-panel { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--primary-soft, #f3edfc); border-radius: 18px; }
+.oops-root .personal-auto-panel > .meta { margin: 0; }
+.oops-root .personal-auto-panel .memory-list-heading { align-items: flex-start; }
+.oops-root .personal-auto-panel .memory-list-heading h3 { line-height: 1.6; }
+.oops-root .personal-auto-panel .memory-list-heading .text-action { flex-shrink: 0; margin-top: 3px; }
+.oops-root .personal-auto-card { width: 100%; text-align: left; overflow-wrap: anywhere; }
+.oops-root .personal-auto-card .ms-card-heading { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.oops-root .personal-auto-card > p { font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
+.oops-root .personal-auto-card .meta { font-size: 11px; }
+.oops-root .personal-auto-card .text-action { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.oops-root .personal-auto-evidence { padding: 14px 0; }
+.oops-root .personal-auto-evidence > strong { color: var(--ink-2, #595366); font-size: 12px; }
+.oops-root .personal-auto-evidence blockquote { margin: 10px 0; padding: 10px 12px; border-left: 2px solid var(--brand-mist, #d6c6f1); background: var(--canvas, #faf8ff); border-radius: 0 10px 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.75; }
+.oops-root .personal-auto-evidence small { display: block; margin-top: 7px; color: var(--ink-3, #80778e); font-size: 11px; line-height: 1.6; }
+.oops-root .personal-auto-auxiliary { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line, #ede8f3); }
+.oops-root .personal-auto-auxiliary > summary { padding: 8px 0; color: var(--ink-2, #595366); font-weight: 700; font-size: 13px; }
+.oops-root .personal-auto-auxiliary > .meta { margin: 6px 0 12px; }

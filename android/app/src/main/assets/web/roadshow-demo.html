@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Oops</title>
+  <!-- proto.css is the design prototype's own stylesheet, used unchanged; app.css only adds what the prototype lacks.
+       oops-design.css is the Oops design language layer (tokens, components, motion); it restyles, never changes behaviour. -->
+  <meta name="theme-color" content="#f2efff">
+  <link rel="preload" href="fonts/nunito-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="proto.css">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="oops-design.css">
+<style>
+html,body{overflow:hidden!important;background:#f2efff!important}#root{position:fixed!important;top:0!important;bottom:0!important;height:100dvh!important;--mobile-status-bar-height:24px!important;--mobile-safe-area-height:20px!important}.rs-banner{display:none!important}.rs-banner{position:fixed;left:0;right:0;top:0;height:66px;padding:23px 12px 5px;background:#e5dcff;z-index:100;font:10px/1.25 -apple-system,sans-serif;color:#6245ac;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #d7c9f8}.rs-banner strong{font-size:11px;display:block}.rs-banner button{border:1px solid #c8b7ed;background:#fff9;color:#5c419d;border-radius:16px;padding:6px 10px;font-size:10px;white-space:nowrap}.rs-catalog{position:fixed;inset:66px 0 0;background:#f2efff;z-index:101;padding:22px;overflow:auto;color:#231f4a;font:14px/1.7 -apple-system,sans-serif}.rs-catalog h2{font-size:23px;margin:8px 0}.rs-catalog p{font-size:12px;color:#77658c}.rs-catalog nav{display:grid;grid-template-columns:1fr 1fr;gap:10px}.rs-catalog button{border:1px solid #dfd4f3;border-radius:15px;padding:15px;background:#fff;text-align:left;color:#32204f;font-size:13px}.rs-catalog .rs-meetings{display:flex;flex-direction:column;gap:10px}.rs-catalog [hidden]{display:none!important}.rs-catalog .rs-close-catalog{border:0;background:#dfd2fc;margin-bottom:12px;padding:8px 15px}.rs-banner span{display:block;font-size:8px;color:#846ba8}
+</style></head>
+<body>
+<div class="rs-banner" hidden><button type="button" id="rs-catalog-button">目录</button><button type="button" id="rs-exit-button">返回</button></div>
+<section class="rs-catalog" id="rs-catalog" hidden><button type="button" class="rs-close-catalog" id="rs-catalog-close">收起目录</button><h2>完整内容导览</h2><p>查看会议、项目、任务、个人记忆与协作成果。</p><nav id="rs-destinations"></nav><h3>会议与材料</h3><div class="rs-meetings" id="rs-meetings"></div></section>
+  <div class="oops-root" id="root" data-route="home">
+    <header class="app-header" id="hdr"></header>
+    <div class="session-fixed-tabs" id="tabs" hidden></div>
+    <section class="mobile-page oops-scroll" id="scroll">
+      <main class="screen-content" id="screen"></main>
+    </section>
+    <nav class="app-nav" id="nav" aria-label="主导航"></nav>
+    <aside class="recording-controls" id="rc" aria-label="当前记录控制" hidden></aside>
+    <div id="notices" aria-live="polite"></div>
+    <div class="sheet-overlay" id="backdrop" hidden></div>
+    <div class="bottom-sheet" id="sheet" role="dialog" hidden></div>
+    <div class="app-toast" id="toast" hidden></div>
+  </div>
+  <!-- The live transcript is appended to one sentence at a time; it lives here and is moved into the page that shows it. -->
+  <div id="holder" hidden>
+    <div id="lines"></div>
+    <p class="meta live-partial" id="partial"></p>
+  </div>
+
+  <script src="roadshow-demo-data.js"></script>
+  <script src="roadshow-demo-bridge.js"></script>
+  <script src="draft-state.js"></script>
+  <script src="device-listening-demo.js"></script>
+  <script src="pupu.js"></script>
+  <script src="minutes-sync.js"></script>
+  <script src="roadshow-demo-raft.js"></script>
+  <script src="app.js"></script>
+  <script>
+  (()=>{'use strict';
+    const pairs=[
+      ['演示档案 · 非本人已确认事实','个人资料'],
+      ['浏览器内存示例 · 刷新后清空','个人资料 · 按分类整理'],
+      ['仅保存在当前浏览器内存示例，刷新清空。',''],
+      ['已保存在当前示例，刷新清空','内容已保存'],
+      ['已删除当前示例记忆','内容已删除'],
+      ['汇集项目的改编讨论、候选与演示任务','汇集项目讨论、待办与处理结果'],
+      ['讨论要点候选（示例）仅来自改编内容，不代表原会议已确认决定。','讨论要点保留来源，可回到对应会议查看。'],
+      ['讨论要点候选（示例）','讨论要点'],['条件／限制（示例）','条件／限制'],
+      ['讨论要点（示例）','讨论要点'],['待办候选（示例）','待办候选'],
+      ['暂无讨论要点示例','暂无讨论要点'],['可回到改编讨论查看内容。','可回到对应会议查看内容。'],
+      ['此项目暂无演示任务','此项目暂无任务'],['演示任务','任务'],
+      ['隔离发送模拟','纪要发送'],['隔离模拟，不会访问真实飞书或发送消息。','核对账号与本次纪要内容后继续。'],
+      ['模拟任务已生成','任务草稿已生成'],['在飞书里查看','查看任务与处理结果'],['在飞书里推进','继续推进任务']
+    ];
+    const root=document.getElementById('root');
+    const polish=()=>{const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){if(node.parentElement?.closest('script,style'))continue;let value=node.nodeValue;for(const [before,after]of pairs)value=value.split(before).join(after);if(value==='已完成')value='已整理';if(value!==node.nodeValue)node.nodeValue=value;}};
+    polish();new MutationObserver(polish).observe(root,{childList:true,subtree:true,characterData:true});
+  })();
+  </script>
+  <script>
+  (()=>{'use strict';const catalog=document.getElementById('rs-catalog');
+  document.getElementById('rs-exit-button').onclick=()=>parent.postMessage({type:'oops-roadshow-exit'},location.origin);
+  document.getElementById('rs-catalog-button').onclick=()=>{catalog.hidden=!catalog.hidden};
+  document.getElementById('rs-catalog-close').onclick=()=>{catalog.hidden=true};
+  const go=(page,id)=>{catalog.hidden=true;window.OopsDemoNavigate?.(page,id)};
+  for(const [page,title] of [['home','首页与当前重点'],['sessions','会议记录与原文'],['tasks','待办与任务状态'],['personal','个人记忆与核对'],['projects','项目与历次决定'],['raft','Agent 协作与成果']]){const button=document.createElement('button');button.type='button';button.textContent=title;button.onclick=()=>go(page);document.getElementById('rs-destinations').append(button)}
+  for(const meeting of window.OopsRoadshowDemoData?.meetings||[]){const button=document.createElement('button');button.type='button';button.textContent=meeting.display_title||meeting.title||meeting.goal;button.onclick=()=>go('meeting',meeting.session_id);document.getElementById('rs-meetings').append(button)}
+  })();
+  </script>
+</body>
+</html>

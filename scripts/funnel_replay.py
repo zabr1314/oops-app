@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A replayed meeting as a funnel: every sentence asks a few typed questions, and each question is settled by
-code, Jev, DeepSeek or a person. The result drives public/funnel.html.
+code, Jev, Sol, DeepSeek or a person. The result drives public/funnel.html.
 
     funnel_replay.py build/replay-0238.json                    # → build/funnel-0238.json (gitignored, real meeting)
     funnel_replay.py --example                                 # → public/funnel-sample.json (labelled example)
@@ -30,6 +30,7 @@ from item_quality import assess_item, bounded_context  # noqa: E402
 EXAMPLE = os.path.join(HERE, "funnel_example_replay.json")
 SAMPLE_OUT = os.path.join(ROOT, "public", "funnel-sample.json")
 TAG_FLOOR = 0.5  # below this the backend reports "uncertain" (local_backend.jev_tag)
+SOL_MODEL = "gpt-6.1-sol"
 RETAINED = {"commitment", "decision", "constraint"}  # SessionIndex.RETAINED_TAGS: checked for conflicts
 CLAUSE_TAGS = {"idea", "uncertain", "chitchat", "decision"}  # local_backend.tag: these get a per-clause task check
 TAG_NAMES = {"commitment": "待办", "decision": "决定", "idea": "想法", "constraint": "约束",
@@ -48,13 +49,30 @@ def offline_rules():
 
 
 def fork(layer, question, answer, p=None, ms=None, settled=False, provenance=None, **detail):
-    assert layer in ("code", "jev", "model", "you", "unknown")
+    assert layer in ("code", "jev", "sol", "model", "you", "unknown")
+    if layer == "sol":
+        # Sol makes semantic choices, not calibrated probability predictions.
+        p = None
+        detail["confidence_kind"] = "uncalibrated"
     p = p if type(p) in (int, float) and math.isfinite(p) and 0 <= p <= 1 else None
     ms = ms if type(ms) in (int, float) and math.isfinite(ms) and ms >= 0 else None
     return dict(layer=layer, q=question, a=answer, p=None if p is None else round(float(p), 3),
                 ms=None if ms is None else int(ms), settled=settled,
                 provenance=provenance or ("recomputed" if layer == "code" else "required" if layer == "you" else "recorded"),
                 **detail)
+
+
+def text_layer(engine, stage_layer=None):
+    """Use saved processing identity; an unrelated or absent model stays unknown."""
+    if stage_layer in ("code", "jev", "sol"):
+        return stage_layer
+    if engine == SOL_MODEL:
+        return "sol"
+    if engine == "rules":
+        return "code"
+    if isinstance(engine, str) and engine.lower().startswith("jev"):
+        return "jev"
+    return "unknown"
 
 
 def current_pipeline():
@@ -111,7 +129,7 @@ def sentence_forks(u, events):
         tag, prob = tag_event.get("tag"), tag_event.get("prob")
         engine = tag_event.get("engine") or ""
         # Do not invent the first answer or a negative clause check from the final upgraded tag.
-        layer = "code" if engine == "rules" else "jev" if engine.lower().startswith("jev") else "unknown"
+        layer = text_layer(engine)
         answer = TAG_NAMES.get(tag, tag) or "未记录分类"
         if tag_event.get("task_clause"):
             answer += f" · 待办小句：「{tag_event['task_clause'].strip()}」"
@@ -124,7 +142,9 @@ def sentence_forks(u, events):
                               "有出处、待人核对" if quality["status"] == "accepted"
                               else f"当前规则提示：{VETO.get(quality['reason'], quality['reason'])}"))
     elif tag_event:
-        forks.append(fork("jev", "分类调用记录", "调用失败；没有可用分类结果", provenance="recorded"))
+        engine = tag_event.get("engine") or ""
+        forks.append(fork(text_layer(engine), "分类调用记录", "调用失败；没有可用分类结果",
+                          provenance="recorded", engine=engine))
 
     q_event = events.get(("question", u["id"]))
     if q_event and not q_event.get("error"):
@@ -140,7 +160,7 @@ def sentence_forks(u, events):
         result = c_event.get("result") or {}
         other = (result.get("with") or {}).get("id", "之前")
         engine = result.get("engine") or ""
-        forks.append(fork("code" if engine == "rules" else "jev" if engine.lower().startswith("jev") else "unknown", "矛盾检测记录",
+        forks.append(fork(text_layer(engine), "矛盾检测记录",
                           f"可能和 {other} 矛盾" if result.get("conflict") else "未发现矛盾",
                           p=result.get("prob"), ms=c_event.get("latency_ms"), provenance="recorded",
                           engine=engine, with_id=other if result.get("conflict") else None))
@@ -150,7 +170,7 @@ def sentence_forks(u, events):
     return forks, tag
 
 
-ORDER = {"unknown": -1, "code": 0, "jev": 1, "model": 2, "you": 3}
+ORDER = {"unknown": -1, "code": 0, "jev": 1, "sol": 2, "model": 3, "you": 4}
 KEPT = {"idea": "想法，记下", "chitchat": "寒暄，不处理", "uncertain": "说不准，先记下", "decision": "决定，记下",
         "constraint": "约束，记下", "commitment": "待办，记下"}
 ASKS = {"这件事要你点头吗？": "待办，等你确认", "要提醒你吗？": "可能矛盾，提醒你", "要把答案给你看吗？": "查到答案，推给你"}
@@ -273,7 +293,9 @@ def post_from_minutes(minutes, utterances, generation=None, row=None, latency_ms
     review_summary.update(pending=len(queue), stale=sum(bool(item.get("stale_review")) for item in presented))
     query_count = (historical_records or {}).get("query_records")
     query_count = query_count if type(query_count) is int and query_count >= 0 else None
+    latency_ms = latency_ms if type(latency_ms) in (int, float) and math.isfinite(latency_ms) and latency_ms >= 0 else None
     post = dict(latency_ms=latency_ms, overview=minutes.get("overview") or "",
+                substantive=minutes.get("substantive") if type(minutes.get("substantive")) is bool else None,
                 topics=[t.get("topic") for t in minutes.get("topics") or [] if t.get("topic")],
                 generation=generation or dict(recorded_calls=None, configured_runs=minutes_vote.RUNS,
                                               mode="majority_vote", evidence="stored"),
@@ -350,7 +372,7 @@ def stored_trace_forks(trace):
         kind = stage.get("kind")
         value = stage.get("result") or {}
         engine = value.get("engine") or ""
-        layer = stage.get("layer") if stage.get("layer") in ("code", "jev") else "unknown"
+        layer = text_layer(engine, stage.get("layer"))
         question = {"whole_tag": "整句分类记录", "rules_fallback": "规则回退记录", "rules_tag": "规则分类记录",
                     "task_clauses": "待办小句核对记录", "task_quality": "待办规则复核记录"}.get(kind)
         if not question:
@@ -363,7 +385,7 @@ def stored_trace_forks(trace):
             match = next((c for c in stage.get("clauses") or [] if c.get("text") == selected), None)
             probability = match.get("yes_prob") if match else None
             answer = "选中：「" + selected + "」" if selected else "没有选中待办小句"
-            if type(stage.get("threshold")) in (float, int):
+            if layer != "sol" and type(stage.get("threshold")) in (float, int):
                 answer += " · 该步记录门槛 " + str(stage["threshold"])
         elif kind == "task_quality":
             probability = None
@@ -381,10 +403,10 @@ def stored_trace_forks(trace):
     if out:
         return out
     engine = result.get("engine") or ""
-    layer = "code" if engine == "rules" else "jev" if engine.lower().startswith("jev") else "unknown"
+    layer = text_layer(engine)
     timing = result.get("timing_ms") or {}
     out.append(fork(layer, "这句话的分类记录", TAG_NAMES.get(result.get("tag"), result.get("tag")) or "未记录分类",
-                    p=result.get("prob"), ms=timing.get("jev_ms"), provenance="recorded", engine=engine,
+                    p=result.get("prob"), ms=timing.get("sol_ms" if layer == "sol" else "jev_ms"), provenance="recorded", engine=engine,
                     task_clause=result.get("task_clause"), recorded_at=trace.get("recorded_at"),
                     context=trace.get("validated_context") or []))
     if result.get("task_quality"):
@@ -395,7 +417,7 @@ def stored_trace_forks(trace):
 
 
 def build_stored(row, minutes_view, traces=()):
-    """Read historical stored data only. Missing Jev probability/engine stays missing."""
+    """Read historical stored data only. Missing probability/engine stays missing."""
     utterances = row.get("utterances") or []
     by_trace = {t["id"]: t for t in traces if t.get("kind") == "tag" and t.get("id")}
     sentences = []
@@ -419,11 +441,12 @@ def build_stored(row, minutes_view, traces=()):
                             or (minutes_view.get("minutes") or {}).get("theme")
                             or (row.get("agenda") or {}).get("goal") or "历史会议",
                             session_id=row.get("session_id"), sentences=len(sentences), duration_ms=last,
-                            note="只读历史库：仅展示已保存判断；缺少 Jev 概率、模型或中间步骤时留空，不补算历史。读取不触发模型或外部操作。",
+                            note="只读历史库：仅展示已保存判断；Sol 语义选择不提供概率，缺少模型或中间步骤时留空，不补算历史。读取不触发模型或外部操作。",
                             trace_count=sum(bool(s["forks"]) for s in sentences),
                             stored_tag_count=sum(s["tag_provenance"] == "stored" for s in sentences)),
                 sentences=sentences, session=[], lens=None,
                 post=post_from_minutes(minutes_view["minutes"], utterances, generation=minutes_view.get("generation"),
+                                       latency_ms=(minutes_view.get("generation") or {}).get("latency_ms"),
                                        row=row, delivery_record=minutes_view.get("delivery_record"),
                                        historical_records=minutes_view.get("historical_records")) if ready else None,
                 post_status=dict(status=minutes_view.get("status", "unavailable"), reason=minutes_view.get("reason"),

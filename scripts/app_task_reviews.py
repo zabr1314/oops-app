@@ -23,18 +23,22 @@ import label_app_tasks as source
 _meeting_reader = threading.BoundedSemaphore(1)
 
 
-def _meeting_candidates(backend, mobile, token):
+def _meeting_candidates_result(backend, mobile, token):
     if not _meeting_reader.acquire(blocking=False):
-        return None
+        return None, 'meeting_read_busy'
     result = queue.Queue(maxsize=1)
 
     def read():
         try:
             rows = (backend.meeting_tasks(allowed_sessions=mobile.session_scope(token), personal=token)
                     if hasattr(mobile, 'session_scope') else backend.meeting_tasks())
-            result.put(rows)
+            if not isinstance(rows, list):
+                raise ValueError('invalid_meeting_candidate_result')
+            result.put((rows, None))
         except Exception:
-            result.put(None)
+            # Fixed reason codes only: no exception messages, source text, or
+            # account data are propagated through this display endpoint.
+            result.put((None, 'meeting_read_failed'))
         finally:
             _meeting_reader.release()
 
@@ -42,7 +46,12 @@ def _meeting_candidates(backend, mobile, token):
     try:
         return result.get(timeout=2.0)
     except queue.Empty:
-        return None
+        return None, 'meeting_read_timeout'
+
+
+def _meeting_candidates(backend, mobile, token):
+    # Preserve the original three-argument/list-or-None contract for callers.
+    return _meeting_candidates_result(backend, mobile, token)[0]
 
 
 class ReviewError(Exception):
@@ -231,13 +240,13 @@ def candidates(backend, token, people):
         item['read_only'] = actor is None
         item['review_contract_version'] = 1
     source_done = time.monotonic()
-    meetings = _meeting_candidates(backend, mobile, token)
+    meetings, meeting_reason = _meeting_candidates_result(backend, mobile, token)
     if meetings is None:
         status = value['parsed_status']
         if value.get('parsed_items'):
             status['state'] = 'partial'
         status.setdefault('meetings', []).append(dict(id='app-meetings',
-            title='App 会后已确认待办', status='unavailable', reason_code='meeting_read_busy'))
+            title='App 会后已确认待办', status='unavailable', reason_code=meeting_reason))
     if _identity(backend, token)[3] != binding:
         raise ReviewError(409, 'TASK_BINDING_CHANGED', '账号已变化，请重新读取')
     return dict(value, meeting_items=meetings or [],

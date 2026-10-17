@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="1540" viewBox="0 0 1840 1540" role="img" aria-labelledby="title description">
+<title id="title">Oops 技术架构 · 2026-10-17</title>
+<desc id="description">Android 主版通过手机直连火山实时 ASR，原话经可信 Python 后端交由 Sol 理解；私有文件与 SQLite 保存会议、草稿和协作。独立 History 只读展示，可信 Mac worker 将明确交办的任务发送至 Raft 并回收 a1234 原线程回复。辅助 Apple 接入和 React 原型单独标注。</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9 Z" fill="#7c8496"/></marker>
+  <marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9 Z" fill="#7860bb"/></marker>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #24283b; }
+    .title { font-size: 44px; font-weight: 650; letter-spacing: -1px; }
+    .subtitle { font-size: 21px; fill: #697184; }
+    .section { font-size: 26px; font-weight: 600; }
+    .name { font-size: 24px; font-weight: 600; }
+    .body { font-size: 20px; fill: #4e576c; }
+    .small { font-size: 18px; fill: #657086; }
+    .edge { fill: none; stroke: #7c8496; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .link { font-size: 18px; fill: #687286; paint-order: stroke; stroke: #f8f9fc; stroke-width: 8; stroke-linejoin: round; }
+    .mono { font-family: 'SFMono-Regular', Menlo, monospace; font-size: 17px; fill: #657086; }
+  </style>
+</defs>
+<rect width="1840" height="1540" fill="#f8f9fc"/>
+
+<text x="60" y="82" class="title">Oops 技术架构</text>
+<text x="60" y="121" class="subtitle">工程现状 · Android 主版 / 可信云端 / AI 处理 / 协作回流</text>
+<rect x="1460" y="49" width="320" height="51" rx="25" fill="#ede8fb" stroke="#ede8fb" stroke-width="1.5"/>
+<text x="1620" y="82" class="small" style="fill:#6c54a5" text-anchor="middle">源码与交付记录 · 2026.10.17</text>
+<rect x="60" y="243" width="450" height="625" rx="22" fill="#f0ecfa" stroke="#dfd8ee" stroke-width="1.5"/>
+<rect x="650" y="243" width="540" height="625" rx="22" fill="#edf3fc" stroke="#d9e3f4" stroke-width="1.5"/>
+<rect x="1330" y="243" width="450" height="625" rx="22" fill="#fcf4e9" stroke="#eedfc9" stroke-width="1.5"/>
+<text x="86" y="284" class="section" style="fill:#69549e">01  采集与 Android 主版</text>
+<text x="676" y="284" class="section" style="fill:#4e6d9c">02  可信云端</text>
+<text x="1356" y="284" class="section" style="fill:#9c743e">03  AI 与独立分析</text>
+<path d="M482 515 H557 V192 H1555 V311" class="edge" marker-end="url(#purple)" marker-start="url(#purple)" style="stroke:#7860bb"/>
+<text x="1030" y="179" class="link" style="fill:#7860bb" text-anchor="middle">PCM / 定稿原话 · WSS 手机直连</text>
+<path d="M482 574 H580 V520 H680" class="edge" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="582" y="615" class="link" text-anchor="middle">HTTPS</text>
+<text x="582" y="643" class="link" text-anchor="middle">业务同步</text>
+<path d="M1158 521 H1232 V523 H1358" class="edge" marker-end="url(#purple)" marker-start="url(#purple)" style="stroke:#7860bb"/>
+<text x="1251" y="501" class="link" style="fill:#7860bb" text-anchor="middle">文字理解</text>
+<path d="M180 426 V462 H285 V491" class="edge" marker-end="url(#arrow)"/>
+<path d="M387 426 V462 H285" class="edge"/>
+<path d="M285 635 V686" class="edge" marker-end="url(#arrow)"/>
+<path d="M920 395 V443" class="edge" marker-end="url(#arrow)"/>
+<path d="M920 593 V692" class="edge" marker-end="url(#arrow)"/>
+<text x="938" y="642" class="small">原话 / 原音 / 结果</text>
+<path d="M1158 566 H1262 V752 H1358" class="edge" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="1257" y="726" class="link" text-anchor="middle">独立能力</text>
+<rect x="88" y="316" width="184" height="110" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="111" y="352" class="name">录音豆</text>
+<text x="111" y="385" class="body">Soundcore SDK</text>
+<text x="111" y="413" class="body">BLE → Opus → PCM</text>
+<rect x="290" y="316" width="192" height="110" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="313" y="352" class="name">手机麦克风</text>
+<text x="313" y="385" class="body">AudioRecord</text>
+<text x="313" y="413" class="body">本人显式选择</text>
+<rect x="88" y="492" width="394" height="143" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="111" y="528" class="name">Kotlin + WebView H5</text>
+<text x="111" y="561" class="body">JSON Bridge ↔ OopsEngine</text>
+<text x="111" y="589" class="body">CaptureService · 前台持续收音</text>
+<text x="111" y="617" class="body">16 kHz / 单声道 / s16le PCM</text>
+<rect x="88" y="687" width="394" height="142" rx="15" fill="#fff" stroke="#ded6ee" stroke-width="1.5"/>
+<text x="111" y="723" class="name">本机私有存储与缓冲</text>
+<text x="111" y="756" class="body">5 分钟音频 / 原话缓冲</text>
+<text x="111" y="784" class="body">原音 · 候选 · 本人核对的个人档案</text>
+<text x="111" y="812" class="body">个人档案仅本机保存</text>
+<text x="88" y="846" class="small" style="fill:#76618f">com.oops.app  ·  会议云保存逐场确认</text>
+<rect x="680" y="316" width="480" height="79" rx="15" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="703" y="352" class="name">HTTPS / Nginx → 回环服务</text>
+<rect x="680" y="444" width="480" height="149" rx="15" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="703" y="480" class="name">oops-backend · Python · 8787</text>
+<text x="703" y="513" class="body">ThreadingHTTPServer · 模块化业务</text>
+<text x="703" y="541" class="body">会议同步 / 高亮 / 召回 / 提醒</text>
+<text x="703" y="569" class="body">正式纪要 / 本人核对 / Raft API</text>
+<rect x="680" y="693" width="480" height="122" rx="15" fill="#fff" stroke="#d5e0ef" stroke-width="1.5"/>
+<text x="703" y="729" class="name">私有文件 + 独立 SQLite</text>
+<text x="703" y="762" class="body">会议 / 原音 / 保存合同 / 操作</text>
+<text x="703" y="790" class="body">Raft 任务 · Outbox · 回复 / 成果注记</text>
+<text x="680" y="846" class="small" style="fill:#5b7697">Linux + systemd  ·  来源 / 身份 / 期限校验</text>
+<rect x="1358" y="312" width="394" height="114" rx="15" fill="#fff" stroke="#e8d9c4" stroke-width="1.5"/>
+<text x="1381" y="348" class="name">火山流式 ASR</text>
+<text x="1381" y="381" class="body">实时语音 → 定稿原话 / 词时间</text>
+<text x="1381" y="409" class="body">Android 手机直连 WebSocket</text>
+<rect x="1358" y="476" width="394" height="141" rx="15" fill="#fff" stroke="#e8d9c4" stroke-width="1.5"/>
+<text x="1381" y="512" class="name">gpt-6.1-sol</text>
+<text x="1381" y="545" class="body">转写后统一理解整理</text>
+<text x="1381" y="573" class="body">高亮 / 召回 / 任务 / 记忆候选</text>
+<text x="1381" y="601" class="body">正式纪要 + 会中增量草稿</text>
+<rect x="1358" y="690" width="394" height="139" rx="15" fill="#fff" stroke="#e8d9c4" stroke-width="1.5"/>
+<text x="1381" y="726" class="name">独立声学与复核能力</text>
+<text x="1381" y="759" class="body">CAM++ / ONNX · 声纹</text>
+<text x="1381" y="787" class="body">MiMo · 会后第二识别参考</text>
+<text x="1381" y="815" class="body">身份与负责人仍须独立核对</text>
+<rect x="60" y="905" width="1720" height="181" rx="20" fill="#f0f4f5" stroke="#e0e6e9" stroke-width="1.5"/>
+<text x="86" y="944" class="section" style="fill:#516b72">04  展示、增量草稿与人工核对</text>
+<rect x="88" y="964" width="506" height="93" rx="15" fill="#fff" stroke="#dce5e7" stroke-width="1.5"/>
+<text x="111" y="1000" class="name">History · 独立只读服务 · 8797</text>
+<text x="111" y="1033" class="body">逐句回放 / 分类 / 检索 / 原会后结果</text>
+<rect x="620" y="964" width="540" height="93" rx="15" fill="#fff" stroke="#dce5e7" stroke-width="1.5"/>
+<text x="643" y="1000" class="name">live-minutes · 独立 worker</text>
+<text x="643" y="1033" class="body">新原话 → Sol → SQLite 草稿 → History</text>
+<rect x="1186" y="964" width="566" height="93" rx="15" fill="#fff" stroke="#dce5e7" stroke-width="1.5"/>
+<text x="1209" y="1000" class="name">核对站 · 8798 / 飞书业务适配</text>
+<text x="1209" y="1033" class="body">逐人答案 / 本人身份 / 原确认规则下的任务</text>
+<path d="M810 815 V889 H341 V963" class="edge" marker-end="url(#arrow)"/>
+<text x="540" y="891" class="link" text-anchor="middle">原会议只读投影</text>
+<path d="M1014 815 V889 H899 V963" class="edge" marker-end="url(#arrow)"/>
+<rect x="60" y="1122" width="1720" height="203" rx="20" fill="#f4effc" stroke="#e1d8ef" stroke-width="1.5"/>
+<text x="86" y="1163" class="section" style="fill:#69549e">05  Raft 任务执行与结果回流</text>
+<rect x="88" y="1186" width="351" height="87" rx="15" fill="#fff" stroke="#dfd6ec" stroke-width="1.5"/>
+<text x="111" y="1222" class="name">后端 Raft API / SQLite</text>
+<text x="111" y="1255" class="body">本人交办 · 来源与版本绑定</text>
+<rect x="483" y="1186" width="372" height="87" rx="15" fill="#fff" stroke="#dfd6ec" stroke-width="1.5"/>
+<text x="506" y="1222" class="name">可信 Mac · Node worker</text>
+<text x="506" y="1255" class="body">LaunchAgent · 领单 / 回收</text>
+<rect x="899" y="1186" width="373" height="87" rx="15" fill="#fff" stroke="#dfd6ec" stroke-width="1.5"/>
+<text x="922" y="1222" class="name">Raft 私人 Oops 协作群</text>
+<text x="922" y="1255" class="body">专用 External Agent @Oops</text>
+<rect x="1316" y="1186" width="436" height="87" rx="15" fill="#fff" stroke="#dfd6ec" stroke-width="1.5"/>
+<text x="1339" y="1222" class="name">a1234 执行 Agent</text>
+<text x="1339" y="1255" class="body">独立任务线程执行 / 原线程回复</text>
+<path d="M440 1227 H482" class="edge" marker-end="url(#purple)" marker-start="url(#purple)" style="stroke:#7860bb"/>
+<path d="M856 1227 H898" class="edge" marker-end="url(#purple)" marker-start="url(#purple)" style="stroke:#7860bb"/>
+<path d="M1273 1227 H1315" class="edge" marker-end="url(#purple)" marker-start="url(#purple)" style="stroke:#7860bb"/>
+<text x="920" y="1306" class="small" style="fill:#73628c" text-anchor="middle">回复沿原链路回到手机对应任务；核对真实 sender / channel / thread 后保存成果注记，由本人验收。</text>
+<rect x="60" y="1356" width="835" height="93" rx="16" fill="#f8f9fc" stroke="#cfd5e1" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text x="82" y="1388" class="body">辅助接入 · Apple Watch → iPhone → 独立 8799 网关</text>
+<text x="82" y="1420" class="small">已部署、片段 ASR 已通；独立既有处理链，整场与漏话问题待验收</text>
+<rect x="923" y="1356" width="857" height="93" rx="16" fill="#f8f9fc" stroke="#cfd5e1" stroke-width="1.5" stroke-dasharray="7 5"/>
+<text x="946" y="1388" class="body">网页原型 · React / TypeScript / Vite</text>
+<text x="946" y="1420" class="small">设计与体验入口；独立于 Android 内置 H5，公开体验使用演示数据</text>
+<text x="60" y="1485" class="small" style="fill:#5b6376">贯穿全链路：来源与权限有效 · 原音 / 全文独立保留期 · 未知结果只核实原请求 · 候选、送达、回复与业务完成分别记录</text>
+<text x="60" y="1516" class="small" style="fill:#70788a">交付边界：Raft 手写简单任务已真实回流；会议候选派工入口已接入，真实业务执行待验收。在线状态以实际服务为准。</text>
+</svg>

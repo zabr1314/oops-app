@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+<title id="title">Oops 如何把对话变成行动</title>
+<desc id="desc">六步流程：用户启动录音豆收音，手机承接文字转写与片段回看，云端人工智能整理重点和待办，由人确认要保留和交办的内容，执行电脑按交办处理，结果回到手机原任务并由人验收。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#9a8cbd" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<style>
+text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #29253a; }
+.heading { font-size: 58px; font-weight: 650; letter-spacing: -1px; }
+.sub { font-size: 29px; fill: #716a80; }
+.name { font-size: 34px; font-weight: 600; }
+.body { font-size: 26px; fill: #665e78; }
+.label { font-size: 25px; font-weight: 500; fill: #786497; }
+.number { font-size: 23px; fill: #a499b6; }
+.caption { font-size: 29px; font-weight: 500; fill: #645371; }
+.note { font-size: 22px; fill: #89818f; }
+.icon { fill: none; stroke: #8060ba; stroke-width: 3.8; stroke-linejoin: round; stroke-linecap: round; }
+</style>
+<rect width="1920" height="1080" fill="#faf9fc"/>
+
+<text x="60" y="106" class="heading">Oops 如何把对话变成行动</text>
+<text x="60" y="165" class="sub">你专注交流，Oops 在后台整理；需要留下或交办时，由你决定。</text>
+<path d="M60 258 L942 258" fill="none" stroke="#ded6ea" stroke-width="2" stroke-linecap="round"/>
+<text x="501" y="244" class="label" text-anchor="middle">听见现场  ·  理解对话</text>
+<path d="M978 258 L1860 258" fill="none" stroke="#ded6ea" stroke-width="2" stroke-linecap="round"/>
+<text x="1419" y="244" class="label" text-anchor="middle">你来决定  ·  电脑接着做</text>
+<rect x="60" y="314" width="270" height="342" rx="24" fill="#fff" stroke="#e6e0ee" stroke-width="1.5"/>
+<text x="302" y="347" class="number" text-anchor="end">01</text>
+<circle cx="195" cy="399" r="53" fill="#f3eef9"/>
+<g class="icon" transform="translate(163,367)">
+<rect x="18" y="2" width="28" height="48" rx="14"/><path d="M10 32 v5 a22 22 0 0 0 44 0 v-5 M32 59 v-8 M22 62 h20"/>
+</g>
+<text x="195" y="508" class="name" text-anchor="middle">录音豆</text>
+<text x="195" y="564" class="body" text-anchor="middle">听见现场对话</text>
+<text x="195" y="607" class="body" text-anchor="middle">由你启动收音</text>
+<path d="M339 489 L355 489" fill="none" stroke="#9a8cbd" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="366" y="314" width="270" height="342" rx="24" fill="#fff" stroke="#e6e0ee" stroke-width="1.5"/>
+<text x="608" y="347" class="number" text-anchor="end">02</text>
+<circle cx="501" cy="399" r="53" fill="#f3eef9"/>
+<g class="icon" transform="translate(469,367)">
+<rect x="12" y="0" width="40" height="64" rx="9"/><path d="M26 7 h12 M28 55 h8 M21 24 h22 M21 33 h16 M21 42 h20"/>
+</g>
+<text x="501" y="508" class="name" text-anchor="middle">手机</text>
+<text x="501" y="564" class="body" text-anchor="middle">把对话转成文字</text>
+<text x="501" y="607" class="body" text-anchor="middle">支持回看刚才片段</text>
+<path d="M645 489 L661 489" fill="none" stroke="#9a8cbd" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="672" y="314" width="270" height="342" rx="24" fill="#fff" stroke="#e6e0ee" stroke-width="1.5"/>
+<text x="914" y="347" class="number" text-anchor="end">03</text>
+<circle cx="807" cy="399" r="53" fill="#f3eef9"/>
+<g class="icon" transform="translate(775,367)">
+<path d="M18 47 H48 a14 14 0 0 0 0-28 a20 20 0 0 0-38-3 a16 16 0 0 0 8 31 Z"/><path d="m23 30 7 7 14-15"/>
+</g>
+<text x="807" y="508" class="name" text-anchor="middle">云端 AI</text>
+<text x="807" y="564" class="body" text-anchor="middle">边讨论，边整理</text>
+<text x="807" y="607" class="body" text-anchor="middle">提取重点和待办</text>
+<path d="M951 489 L967 489" fill="none" stroke="#9a8cbd" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="978" y="314" width="270" height="342" rx="24" fill="#f0e9fa" stroke="#b69bd9" stroke-width="2.5"/>
+<text x="1220" y="347" class="number" text-anchor="end">04</text>
+<circle cx="1113" cy="399" r="53" fill="#e4d7f4"/>
+<g class="icon" transform="translate(1081,367)">
+<circle cx="28" cy="15" r="11"/><path d="M7 58 v-9 a21 21 0 0 1 31-18 M41 47 l7 7 14-16"/>
+</g>
+<text x="1113" y="508" class="name" text-anchor="middle">你来确认</text>
+<text x="1113" y="564" class="body" text-anchor="middle">重要的留下来</text>
+<text x="1113" y="607" class="body" text-anchor="middle">要做的再交办</text>
+<path d="M1257 489 L1273 489" fill="none" stroke="#9a8cbd" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="1284" y="314" width="270" height="342" rx="24" fill="#fff" stroke="#e6e0ee" stroke-width="1.5"/>
+<text x="1526" y="347" class="number" text-anchor="end">05</text>
+<circle cx="1419" cy="399" r="53" fill="#f3eef9"/>
+<g class="icon" transform="translate(1387,367)">
+<rect x="2" y="5" width="60" height="40" rx="5"/><path d="M32 46 v13 M20 61 h24 M21 21 l-6 5 6 5 M43 21 l6 5-6 5"/>
+</g>
+<text x="1419" y="508" class="name" text-anchor="middle">电脑执行</text>
+<text x="1419" y="564" class="body" text-anchor="middle">按交办内容处理</text>
+<text x="1419" y="607" class="body" text-anchor="middle">提交进展和成果</text>
+<path d="M1563 489 L1579 489" fill="none" stroke="#9a8cbd" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="1590" y="314" width="270" height="342" rx="24" fill="#fff" stroke="#e6e0ee" stroke-width="1.5"/>
+<text x="1832" y="347" class="number" text-anchor="end">06</text>
+<circle cx="1725" cy="399" r="53" fill="#f3eef9"/>
+<g class="icon" transform="translate(1693,367)">
+<rect x="11" y="1" width="42" height="62" rx="8"/><path d="m22 25 7 7 14-15 M21 43 h23 M21 51 h17"/>
+</g>
+<text x="1725" y="508" class="name" text-anchor="middle">回到手机</text>
+<text x="1725" y="564" class="body" text-anchor="middle">结果回到原任务</text>
+<text x="1725" y="607" class="body" text-anchor="middle">由你决定是否完成</text>
+<text x="960" y="759" class="caption" text-anchor="middle">听见 → 整理 → 人确认 → 电脑处理 → 结果回来</text>
+<rect x="205" y="811" width="1510" height="112" rx="24" fill="#f0ecf7"/>
+<text x="960" y="856" class="body" text-anchor="middle">后台负责把内容接住、把任务安排好；执行电脑负责接单和处理。</text>
+<text x="960" y="895" class="body" text-anchor="middle">关键提醒和行动建议，都留给你核对和决定。</text>
+<text x="60" y="1004" class="note">当前已用简单任务跑通派发与结果回流；具体会议任务仍待验收。</text>
+<text x="1860" y="1004" class="note" text-anchor="end">路演简图 · 2026.10.17</text>
+</svg>

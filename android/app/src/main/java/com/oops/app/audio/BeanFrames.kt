@@ -75,6 +75,8 @@ class FrameBatcher(private val frameBytes: Int) {
 
     /** Drops the unfinished frame, e.g. before a gap so the timeline stays aligned. */
     fun clear() = pending.reset()
+    /** Deliver the final 20–80 ms before a pause boundary instead of dropping it. */
+    fun drain(): ByteArray = pending.toByteArray().also { pending.reset() }
 }
 
 /**

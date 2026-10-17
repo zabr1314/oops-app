@@ -1,5 +1,56 @@
 # Oops App ↔ 后端接口契约
 
+## 会议确认任务派工与回链（2026-10-17）
+
+原生使用已有服务访问凭据，并通过 `X-Oops-User-Token` 提供个人会话；客户端称呼、reviewer 或 principal 声明不作身份。`GET /v1/raft/source` 与 `/v1/raft/source/links` 只接受 `kind=meeting_item&session_id=...&item_id=mi-...&fingerprint=<64hex>`，或 `kind=label_review&source_meeting_id=0235|0236|0238&item_id=ai-...&fingerprint=<64hex>`。
+
+`source` 返回当前 `source_ref/item/evidence/self_review/source_status/review_revision`、`dispatch_allowed/source_confirm_required` 和 5 分钟有效的签名 `source_contract`。`source/links` 返回同本人原来源的 `items`（协作任务，每项 `handoffs` 为定位映射、`collaborations` 为完整群线程 DTO）、来源状态与派工许可。来源不可用时保留编号及真实送达事实，撤下正文、回复、成果注记。
+
+带来源 `POST /v1/raft/tasks` 除原 `request_id/title/text/confirm:true` 外要求 `task_ref`、原签名 `source_contract`、`source_confirm:true`，独立保存本次本人派工确认，不改写原会议核对。随后原群交接携带真实 `task_id`。同本人同来源版本已有协作任务返回 `SOURCE_TASK_EXISTS`，同任务已有根线程返回 `TASK_HANDOFF_EXISTS`；只查询原来源/线程并显式补充，不把这两种拒绝当成未知送达或重复新建。
+
+任务和来源交接的 list/find/get/continue/review/cancel 均核对个人归属；worker 在领取和真实发出前按冻结本人绑定与来源重新核对。核对站首版冻结本人会议核对版本，版本变化报 `TASK_PERSONAL_REVIEW_REVISION_CHANGED`。临时服务失败遮正文并停止发送；明确撤回不会被迟到读回复活。业务完成、原负责人及飞书状态保持独立。具体手机入口与交付见 [实施记录](raft-meeting-tasks-20261017.md)。
+
+## Oops → Raft 通信（2026-10-16）
+
+此通道与既有 Mac 工作助手、会议/录音库并列，不替换旧队列。默认关闭；可信后端设置 `OOPS_RAFT_ENABLED=1`、`OOPS_RAFT_TARGETS`（逗号分隔的实际 handle，例如 `dm:@名称`）、`OOPS_RAFT_WORKER_TOKEN` 后启用。必须同时配置既有 `OOPS_API_TOKEN`；声纹邀请不能使用此通道。Raft 独立 External Agent 凭据只放可信桥接端。
+
+- `GET /v1/raft/status`：数据库配置、获准目标、消息计数及最近40秒桥接领取心跳。`enabled` 仅表示允许登记消息，`bridge_online` 不表示接收 Agent 已完成工作。
+- `POST /v1/raft/messages`：`{request_id,kind:"message"|"instruction",target,text,confirm:true}`。首版只接受本人手写文本（最多12000字符），拒收会议、来源、附件、任务或凭据字段。返回本条数据库记录；queued 不等于已发送。
+- `GET /v1/raft/messages?limit=30`、`GET /v1/raft/messages?request_id=...`：列表或请求编号精确查询。`GET /v1/raft/messages/<32hex-id>`：原消息与关联回复。
+- `POST /v1/raft/messages/<id>/cancel {confirm:true}`：只取消尚未领取的 queued，不能冒称撤回 Raft 消息。
+
+工作端只接受专用 worker token：`GET /v1/raft/worker/status`、`POST /v1/raft/worker/poll {worker}`、`POST /v1/raft/worker/jobs/<id>/settle {lease,status,raft_message_id?,response?,error?}`、`GET /v1/raft/worker/messages?status=sent&limit=30`、`POST /v1/raft/worker/replies {source_message_id,reply_id,text,sender?,created_at?}`。
+
+SQLite 位于后端 state-dir/raft 下。request_id 冻结正文、类型与收件人；同编号不同内容409。发送前领取并保存单次尝试，120秒缺回执转 unknown，不自动重发。同租约明确回执可迟到回收；sent 必须有真实 Raft message_id。回复按实际发送消息的独立线程及回复ID绑定，不将收到的文本执行为反向指令，也不当作业务完成。当前只收最近30条已发送消息的线程、每线程最多50条回复，超出范围不宣称完整同步。
+
+本机尝试另用 `scripts/oops_raft.py` 在127.0.0.1:8798启动同一API，运行数据在仓库外的私人目录；它不读取生产会议或录音。`GET /v1/raft/local-session`仅此本机主机提供，必须来自配置的本机 Oops 预览 Origin，返回令牌仅访问本机消息库，不含生产访问凭据或 Raft 凭据。原生 App、生产服务器、公开原型不会自动获得此本机连接。实施记录见 `docs/raft-connection-20261016.md`。
+
+### 共用 Oops 协作群（2026-10-17，本机接入）
+
+用户选择先共用一个私人群，每份明确填写的任务简报建立一个根消息，后续沟通进入同一线程。群身份绑定真实 server/channel UUID；群名仅在身份核对后转换为 SDK 的目标写法。可信服务配置 `OOPS_RAFT_GROUP_SERVER_ID`、`OOPS_RAFT_GROUP_CHANNEL_ID`，本机配置使用 `collaborationGroup`；不会自动启用生产或原生 App。
+
+- `GET /v1/raft/collaboration`：当前真实群、成员、版本、桥接在线状态及最多50份交接。群不可读或90秒过期时撤下群正文、旧线程、回复与核对记录，数据库历史保留。
+- `POST /v1/raft/collaboration/handoffs`：`{request_id,title,text,confirm:true,group_channel_id,group_version,member_ids,local_task_ref?}`。所选成员只能是当前已核对的非桥接 Agent；标题、正文均为本人明确填写。可选 `local_task_ref:{kind:"prototype",id,version,space_key}` 仅作原型内返回和筛选，不能作真实来源证明，也不会发往 Raft。
+- `GET /v1/raft/collaboration/handoffs?request_id=...`：精确查询创建、续发或核对的原请求；不存在返回空列表，存在返回父线程和对应 operation。`GET /v1/raft/collaboration/handoffs/<id>`：读取原交接。
+- `POST /v1/raft/collaboration/continue`：`{request_id,handoff_id,text,confirm:true,group_version,member_ids}`。须有实际根消息回执，按完整根 UUID 续发，不另建根任务。
+- `POST /v1/raft/collaboration/reviews`：`{request_id,handoff_id,reply_id,kind:"progress"|"artifact",note?,confirm:true}`。绑定当前可读原回复及其哈希，保存人工核对注记；不修改 Oops 业务任务状态，不表示验收或交付。
+- `POST /v1/raft/collaboration/handoffs/<id>/cancel {confirm:true}`：仅取消未领取的根交接；旧 DM 接口不能读取、发送或取消内部群目标。
+
+worker 新增 `POST /v1/raft/worker/group {group}` 或 `{error_code}` 上报当前群状态；`POST /v1/raft/worker/jobs/<id>/validate {lease}` 在外部发送前核对当前租约、冻结正文、群版本及成员。内部 outbox 目标为 `channel:<群UUID>` / `thread:<群UUID>:<根消息UUID>`，普通消息入口不可直接提交。实际发送后再读取 provider 消息，核对发送人、群/线程 UUID 才记录 sent。回复允许 `sender_id`、`sender_type:"human"|"agent"`，只读实际发出根消息的对应线程，不执行反向指令。
+
+协作交接和核对映射另存 `collaboration.sqlite3`，沿用原 outbox 单次尝试和未知结果停止重发。原型 TaskRef 不能作为真实来源证明。首轮本机交付见 `docs/raft-collaboration-20261017.md`，后续手机与生产接入见下节。
+
+### 手机与生产协作任务库（2026-10-17）
+
+现有生产后端增加独立 `state-dir/raft/collaboration-tasks.sqlite3`，不替换会议、录音、飞书操作或 Mac 队列。手机使用原生已保存的同服务访问凭据；H5 通过 `raft.request` 调用白名单操作，不持有 API、worker 或 Raft 凭据。
+
+- `POST /v1/raft/tasks {request_id,title,text,confirm:true,task_ref?}`：登记真实服务端协作任务，返回 `id:raft-task:<32hex>`、`request_id`、`kind`、`status`、`permitted`、`handoffs` 和 `reply_reviews`。无来源引用的本人手写任务为 `manual_collaboration`，不是飞书正式任务；同请求编号不同正文拒绝。
+- `GET /v1/raft/tasks`、`GET /v1/raft/tasks?request_id=...`、`GET /v1/raft/tasks/<task_id>`：列表、创建请求精确核对或原任务读取。任务创建未知时按原编号核对，不自动换编号。
+- 群交接 `POST /v1/raft/collaboration/handoffs` 可带 `task_id`，服务端核对实际保存正文与派工正文相同，再持久映射 handoff/outbox。续发继承原任务，回复核对注记映射到任务库；业务完成单独确认。
+- 可选真实引用合同为 `task_ref:{kind:feishu_operation,op_id}` 或 `{kind:meeting_item,session_id,item_id,fingerprint}`。后端自行读取原操作/人工确认事项，复用当前 HMAC 来源合同，仅保存对象定位与哈希；来源变化持久撤回派工授权。合同不匹配即拒绝。手机本轮只开放独立手写协作，未用历史会议或飞书任务做此项验收。
+
+生产群接口已窄合入原后端，原配置和无关模块保持。主版 Android 已用原签名合并 Raft 与用户另行授权的记忆改动覆盖安装。实际发送、执行回复和结果回流见 `docs/raft-mobile-production-20261017.md`。
+
 后端负责人：洪玉麟。Android 已实现 HTTP 客户端；未填写地址时使用 App 内 Mock。
 所有业务接口使用 JSON，字段名 snake_case；Android 整次 HTTP 请求超时 10 秒。时间窗口、原声起止、`now_ms` 都是**当前会话音频时间轴的毫秒**，不是 Unix 时间戳。
 
@@ -14,6 +65,17 @@
 Android 设置按规范化 base URL 保存访问凭据；恢复旧操作时使用该操作原地址的凭据。客户端仅通过 HTTPS 或本机回环发送凭据；H5 状态只暴露 `hasBackendToken`，不返回凭据。`GET /healthz` 返回 `status/jev/voiceprint/feishu/segments_validated/strict_a_enabled/self_owner_enabled/named_owner_enabled`，不返回飞书授权或密钥。四个归属门禁首发全部关闭。
 
 服务器 `--state-dir /var/lib/oops/backend` 持久化映射与确认操作。新 Oops 组织的四人名单为黄丽萍、江古月、洪玉麟、林春源，Lydia 是黄丽萍的别名。`OOPS_STRICT_PEOPLE=1` 时未配置负责人会明确报错。
+
+## 转写后统一 Sol 的响应扩展（2026-10-16，生产已部署）
+
+现有生产的文字分类、高亮、召回、提醒和任务整理已统一使用私人配置的 `gpt-6.1-sol`，Redmi K70E 主版 APK 已配套更新。ASR、声纹和人工核对保持现有接口。Sol 召回的空概率语义契约须由新客户端承接；其他未配置 Sol 的旧服务环境仍按原概率契约处理。
+
+- `/healthz` 新增 `text_processing_provider: sol|legacy`、`text_processing_model` 和 `text_highlight_version: 1|0`。缺少 Sol 配置的旧环境明确返回 legacy；配置无效不能静默切其他模型。
+- tag 回包可增加 `highlight`：`{version:1,status:candidate|defer|suppressed,text,evidence,source_fingerprint,completeness,reason}`。`evidence` 为 `[{id,quote,start_ms,end_ms,text_hash}]`，摘要与原话分离。最多五条、引用总计最多280个 Unicode 字符，必须包含当前句；来源绑定完整原句 SHA-256。可选 `semantic_duplicate_of:{id,text_hash}` 仅供待核对分组，不能据此删候选、确认记忆或合并不同说话人的承诺。
+- Sol 的 tag/recall/notice 使用 `prob:null`，recall/notice 带 `confidence_kind:uncalibrated`；客户端按确切 engine 进入语义候选路径，不能将 null 当0/1，或用缺少校准概率触发重复调用。召回仍只能返回请求里的原句 ID，原音与时间有效性继续由 App 核对。
+- Sol 失败返回明确错误，不用其他模型或规则冒充成功。tag/任务临时缓存以模型和完整来源区分；后台同源结果未知停止自动重发。旧成功结果不代表当前修订来源仍有效。
+
+手机保存日常记忆时 `confirmed_text` 是本人编辑后的内容，`evidence` / `utterances.text` 保留不可变短原话，不能互相覆盖。候选仍为私人未确认；任务创建、负责人核对、外发、保存合同和历史来源保护不因语义结果扩权。完整状态见 `docs/sol-text-unified-20261016.md`。
 
 ## 1. POST /v1/recall
 
@@ -459,6 +521,7 @@ Android：H5 发 `items.review`（`sessionId,itemId,fingerprint,action,…`）�
 任务板 `tasks` 只含通过来源检查的待办及已完成/作废历史；`review_queue` 保存待核对候选，状态为 `needs_review`，含 `quality: {status, reason, ids, issues?}`。待核对内容不计入可执行待办。草稿数字含混时 `what` 留空并通过 `task_context.missing` 请求核对，不能直接预填确定任务。
 
 会后纪要与已有缓存共用质量检查：被拒动作保留在派生 `quality_rejected` 审计，含混动作转入 `undecided`；不修改原缓存、不触发模型重生成、不确认负责人。引用或来源变化继续遵循原有失效与人工核对规则。
+
 
 ## App 内会议候选核对（2026-10-16）
 
